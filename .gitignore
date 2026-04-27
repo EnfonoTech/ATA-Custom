@@ -1,0 +1,17 @@
+.DS_Store
+*.pyc
+*.egg-info
+*.swp
+tags
+node_modules
+package-lock.json
+npm-debug.log*
+__pycache__
+dist/
+frontend/node_modules/
+frontend/package-lock.json
+frontend/pnpm-lock.yaml
+frontend/dist/
+portal_app/public/frontend/
+portal_app/frontend/assets/
+.vscode/

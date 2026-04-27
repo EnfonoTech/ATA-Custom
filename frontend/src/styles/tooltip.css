@@ -1,0 +1,14 @@
+.tooltip-fade-enter-active,
+.tooltip-fade-leave-active {
+	transition: opacity 0.15s ease;
+}
+.tooltip-fade-enter-from,
+.tooltip-fade-leave-to {
+	opacity: 0;
+}
+
+.tooltip-html-clamp {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}

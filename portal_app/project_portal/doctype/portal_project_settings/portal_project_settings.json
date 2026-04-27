@@ -1,0 +1,179 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-04-13 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "portal_access_section",
+  "allow_any_portal_user_to_create_project",
+  "allow_portal_demo_seed",
+  "folder_structure_section",
+  "folder_template",
+  "storage_section",
+  "use_frappe_drive",
+  "frappe_drive_site_url",
+  "frappe_drive_upload_webhook",
+  "column_break_storage",
+  "file_access_note",
+  "integrations_section",
+  "google_drive_enabled",
+  "google_drive_notes",
+  "google_drive_upload_webhook",
+  "bim_360_enabled",
+  "bim_360_notes",
+  "bim_360_upload_webhook",
+  "client_portal_section",
+  "client_portal_intro"
+ ],
+ "fields": [
+  {
+   "collapsible": 1,
+   "fieldname": "portal_access_section",
+   "fieldtype": "Section Break",
+   "label": "Portal access"
+  },
+  {
+   "default": "1",
+   "description": "When off, only System Manager, Projects Manager, or users with Project create permission can add projects from the portal.",
+   "fieldname": "allow_any_portal_user_to_create_project",
+   "fieldtype": "Check",
+   "label": "Allow any portal user to create projects"
+  },
+  {
+   "default": "0",
+   "description": "Lets System Manager run the showcase seed from the portal Admin page. Turn off on production. Developer Mode also allows seeding without this flag.",
+   "fieldname": "allow_portal_demo_seed",
+   "fieldtype": "Check",
+   "label": "Allow portal demo seed (System Manager only)"
+  },
+  {
+   "collapsible": 1,
+   "description": "Rows define subfolder names created under each project’s attachment folder when a project is created or when folders are ensured from the portal. Leave empty to use built-in defaults. Changing this does not rename existing folders automatically.",
+   "fieldname": "folder_structure_section",
+   "fieldtype": "Section Break",
+   "label": "Project file subfolders (template)"
+  },
+  {
+   "fieldname": "folder_template",
+   "fieldtype": "Table",
+   "label": "Subfolder template",
+   "options": "Portal Folder Template Row"
+  },
+  {
+   "fieldname": "storage_section",
+   "fieldtype": "Section Break",
+   "label": "Central storage (Frappe Drive)"
+  },
+  {
+   "default": "0",
+   "fieldname": "use_frappe_drive",
+   "fieldtype": "Check",
+   "label": "Use Frappe Drive on this server"
+  },
+  {
+   "depends_on": "eval:doc.use_frappe_drive",
+   "fieldname": "frappe_drive_site_url",
+   "fieldtype": "Data",
+   "label": "Drive / site base URL",
+   "description": "When Drive is installed separately, optional link for deep links"
+  },
+  {
+   "depends_on": "eval:doc.use_frappe_drive",
+   "fieldname": "frappe_drive_upload_webhook",
+   "fieldtype": "Data",
+   "label": "Frappe Drive upload webhook URL",
+   "description": "Portal will post file content directly to this endpoint."
+  },
+  {
+   "fieldname": "column_break_storage",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "file_access_note",
+   "fieldtype": "Small Text",
+   "label": "Internal file policy note",
+   "description": "Shown to team in the Files area"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "integrations_section",
+   "fieldtype": "Section Break",
+   "label": "Cloud integrations (phase / placeholders)"
+  },
+  {
+   "default": "0",
+   "fieldname": "google_drive_enabled",
+   "fieldtype": "Check",
+   "label": "Google Drive integration (planned)"
+  },
+  {
+   "depends_on": "eval:doc.google_drive_enabled",
+   "fieldname": "google_drive_notes",
+   "fieldtype": "Small Text",
+   "label": "Google Drive setup notes"
+  },
+  {
+   "depends_on": "eval:doc.google_drive_enabled",
+   "fieldname": "google_drive_upload_webhook",
+   "fieldtype": "Data",
+   "label": "Google Drive upload webhook URL",
+   "description": "Portal will post file content directly to this endpoint."
+  },
+  {
+   "default": "0",
+   "fieldname": "bim_360_enabled",
+   "fieldtype": "Check",
+   "label": "BIM 360 / ACC integration (planned)"
+  },
+  {
+   "depends_on": "eval:doc.bim_360_enabled",
+   "fieldname": "bim_360_notes",
+   "fieldtype": "Small Text",
+   "label": "BIM 360 setup notes"
+  },
+  {
+   "depends_on": "eval:doc.bim_360_enabled",
+   "fieldname": "bim_360_upload_webhook",
+   "fieldtype": "Data",
+   "label": "BIM 360 / ACC upload webhook URL",
+   "description": "Portal will post file content directly to this endpoint."
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "client_portal_section",
+   "fieldtype": "Section Break",
+   "label": "Client portal"
+  },
+  {
+   "fieldname": "client_portal_intro",
+   "fieldtype": "Text Editor",
+   "label": "Welcome text for client document access"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-04-13 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Project Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

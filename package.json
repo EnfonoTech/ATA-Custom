@@ -1,0 +1,8 @@
+{
+  "name": "portal_app",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && yarn install --ignore-engines && YARN_IGNORE_ENGINES=1 yarn build",
+    "postinstall": "cd frontend && yarn install --ignore-engines && YARN_IGNORE_ENGINES=1 yarn build"
+  }
+}

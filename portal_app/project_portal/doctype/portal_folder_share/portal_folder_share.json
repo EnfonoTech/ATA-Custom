@@ -1,0 +1,201 @@
+{
+ "actions": [],
+ "autoname": "format:PFS-{YYYY}-{#####}",
+ "creation": "2026-04-27 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "folder_path",
+  "folder_label",
+  "column_break_basic",
+  "share_kind",
+  "user",
+  "user_email",
+  "user_full_name",
+  "section_break_link",
+  "share_token",
+  "share_url",
+  "section_break_status",
+  "expires_at",
+  "revoked",
+  "revoked_by",
+  "revoked_at",
+  "column_break_status",
+  "created_by_user",
+  "last_accessed_at",
+  "access_count"
+ ],
+ "fields": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1
+  },
+  {
+   "fieldname": "folder_path",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Folder path",
+   "reqd": 1,
+   "length": 500
+  },
+  {
+   "fieldname": "folder_label",
+   "fieldtype": "Data",
+   "label": "Folder label",
+   "length": 500
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "User",
+   "fieldname": "share_kind",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Share kind",
+   "options": "User\nLink",
+   "reqd": 1
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"User\"",
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "User",
+   "options": "User"
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"User\"",
+   "fieldname": "user_email",
+   "fieldtype": "Data",
+   "label": "User email"
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"User\"",
+   "fieldname": "user_full_name",
+   "fieldtype": "Data",
+   "label": "User full name"
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"Link\"",
+   "fieldname": "section_break_link",
+   "fieldtype": "Section Break",
+   "label": "Link"
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"Link\"",
+   "fieldname": "share_token",
+   "fieldtype": "Small Text",
+   "label": "Share token (signed)",
+   "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.share_kind === \"Link\"",
+   "fieldname": "share_url",
+   "fieldtype": "Data",
+   "label": "Share URL",
+   "length": 1000,
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_status",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "expires_at",
+   "fieldtype": "Datetime",
+   "label": "Expires at"
+  },
+  {
+   "default": "0",
+   "fieldname": "revoked",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Revoked"
+  },
+  {
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "label": "Revoked by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revoked_at",
+   "fieldtype": "Datetime",
+   "label": "Revoked at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "created_by_user",
+   "fieldtype": "Link",
+   "label": "Created by user",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_accessed_at",
+   "fieldtype": "Datetime",
+   "label": "Last accessed",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "access_count",
+   "fieldtype": "Int",
+   "label": "Access count",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-27 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Folder Share",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Projects Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

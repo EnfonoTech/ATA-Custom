@@ -1,0 +1,19 @@
+{
+    "content": null,
+    "creation": "2026-02-05 16:14:40.774423",
+    "docstatus": 0,
+    "doctype": "Page",
+    "idx": 0,
+    "modified": "2026-02-05 16:14:40.774423",
+    "modified_by": "Administrator",
+    "module": "Project Portal",
+    "name": "portal_app",
+    "owner": "Administrator",
+    "page_name": "portal_app",
+    "roles": [],
+    "script": null,
+    "standard": "Yes",
+    "style": null,
+    "system_page": 0,
+    "title": "Portal App"
+}

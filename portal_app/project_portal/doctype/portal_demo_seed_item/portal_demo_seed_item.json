@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-04-28 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "record_doctype",
+  "record_name",
+  "record_label",
+  "skipped"
+ ],
+ "fields": [
+  {
+   "fieldname": "record_doctype",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "DocType",
+   "reqd": 1,
+   "length": 140
+  },
+  {
+   "fieldname": "record_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Record",
+   "reqd": 1,
+   "length": 280
+  },
+  {
+   "fieldname": "record_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Label",
+   "length": 280
+  },
+  {
+   "default": "0",
+   "description": "If checked, the record already existed before this seed run and will NOT be deleted on cleanup.",
+   "fieldname": "skipped",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Pre-existing"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-04-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Demo Seed Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 0
+}

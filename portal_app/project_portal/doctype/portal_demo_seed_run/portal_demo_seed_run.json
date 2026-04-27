@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:DEMO-{YYYY}-{#####}",
+ "creation": "2026-04-28 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "run_label",
+  "status",
+  "column_break_basic",
+  "run_at",
+  "run_by",
+  "section_break_options",
+  "include_users",
+  "include_customers",
+  "include_projects",
+  "column_break_options",
+  "include_tasks",
+  "include_files",
+  "demo_password_hint",
+  "section_break_records",
+  "created_users",
+  "created_customers",
+  "created_projects",
+  "created_tasks",
+  "created_files",
+  "section_break_meta",
+  "summary_json",
+  "notes"
+ ],
+ "fields": [
+  {
+   "default": "Portal demo run",
+   "description": "Friendly name for this seed run.",
+   "fieldname": "run_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Run label",
+   "reqd": 1,
+   "length": 140
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nCleaned\nFailed",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_basic",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "run_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Run at",
+   "read_only": 1
+  },
+  {
+   "fieldname": "run_by",
+   "fieldtype": "Link",
+   "label": "Run by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_options",
+   "fieldtype": "Section Break",
+   "label": "What to seed"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_users",
+   "fieldtype": "Check",
+   "label": "Demo users"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_customers",
+   "fieldtype": "Check",
+   "label": "Demo customers"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_projects",
+   "fieldtype": "Check",
+   "label": "Demo projects"
+  },
+  {
+   "fieldname": "column_break_options",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_tasks",
+   "fieldtype": "Check",
+   "label": "Demo tasks"
+  },
+  {
+   "default": "1",
+   "fieldname": "include_files",
+   "fieldtype": "Check",
+   "label": "Sample attachment"
+  },
+  {
+   "fieldname": "demo_password_hint",
+   "fieldtype": "Data",
+   "label": "Demo password hint",
+   "read_only": 1,
+   "length": 80
+  },
+  {
+   "fieldname": "section_break_records",
+   "fieldtype": "Section Break",
+   "label": "Records created"
+  },
+  {
+   "fieldname": "created_users",
+   "fieldtype": "Table",
+   "label": "Users",
+   "options": "Portal Demo Seed Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_customers",
+   "fieldtype": "Table",
+   "label": "Customers",
+   "options": "Portal Demo Seed Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_projects",
+   "fieldtype": "Table",
+   "label": "Projects",
+   "options": "Portal Demo Seed Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_tasks",
+   "fieldtype": "Table",
+   "label": "Tasks",
+   "options": "Portal Demo Seed Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "created_files",
+   "fieldtype": "Table",
+   "label": "Files",
+   "options": "Portal Demo Seed Item",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_meta",
+   "fieldtype": "Section Break",
+   "label": "Meta"
+  },
+  {
+   "fieldname": "summary_json",
+   "fieldtype": "Code",
+   "label": "Summary (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Demo Seed Run",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

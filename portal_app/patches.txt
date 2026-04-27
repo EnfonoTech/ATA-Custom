@@ -1,0 +1,5 @@
+[pre_model_sync]
+
+[post_model_sync]
+portal_app.patches.add_project_portal_fields
+portal_app.patches.add_portal_customer_access
