@@ -2,6 +2,7 @@
 import { ref, provide, onErrorCaptured, onMounted, onUnmounted } from "vue";
 import Sidebar from "@/component/Sidebar.vue";
 import Header from "@/component/Header.vue";
+import Toaster from "@/component/Toaster.vue";
 import { call } from "@/api";
 import { setCurrencyLocale } from "@/utils/currency";
 
@@ -18,6 +19,7 @@ const portalCapabilities = ref({
 	can_create_project: false,
 	manageable_project_names: [],
 	allowed_project_names: [],
+	team_member_project_names: [],
 	can_edit_portal_folder_template: false,
 	portal_user: "",
 });
@@ -108,5 +110,6 @@ onMounted(async () => {
 				</Suspense>
 			</div>
 		</div>
+		<Toaster />
 	</div>
 </template>

@@ -23,9 +23,84 @@ const isPrivateUpload = ref(false);
 const dragOver = ref(false);
 const fileInput = ref(null);
 const uploadCardRef = ref(null);
+const filesScrollRoot = ref(null);
+
+function scrollFilesPage(where) {
+	const el = filesScrollRoot.value;
+	if (!el) return;
+	const top = where === "bottom" ? el.scrollHeight : 0;
+	el.scrollTo({ top, behavior: "smooth" });
+}
 const folderPickerOpen = ref(false);
 const folderPickerSearch = ref("");
 const folderPickerExpanded = ref(new Set());
+
+// Bulk-select state for the file list
+const selectedFileNames = ref([]);
+const selectedFileSet = computed(() => new Set(selectedFileNames.value));
+const allVisibleSelected = computed(
+	() => visibleFiles.value.length > 0 && visibleFiles.value.every((f) => selectedFileSet.value.has(f.name)),
+);
+const someVisibleSelected = computed(
+	() => visibleFiles.value.some((f) => selectedFileSet.value.has(f.name)),
+);
+function toggleFileSelection(name) {
+	const set = new Set(selectedFileNames.value);
+	set.has(name) ? set.delete(name) : set.add(name);
+	selectedFileNames.value = [...set];
+}
+function toggleSelectAllVisible() {
+	if (allVisibleSelected.value) {
+		const ids = new Set(visibleFiles.value.map((f) => f.name));
+		selectedFileNames.value = selectedFileNames.value.filter((n) => !ids.has(n));
+	} else {
+		const set = new Set(selectedFileNames.value);
+		for (const f of visibleFiles.value) set.add(f.name);
+		selectedFileNames.value = [...set];
+	}
+}
+function clearFileSelection() {
+	selectedFileNames.value = [];
+}
+function fmtFileSize(bytes) {
+	if (bytes == null) return "—";
+	const n = Number(bytes);
+	if (Number.isNaN(n) || !n) return "—";
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+async function downloadSelectedZip() {
+	if (!project.value || !selectedFileNames.value.length) return;
+	try {
+		const url = `/api/method/portal_app.api.files.download_files_zip`;
+		const fd = new FormData();
+		fd.append("project", project.value);
+		fd.append("file_names", JSON.stringify(selectedFileNames.value));
+		const csrf = document.cookie
+			.split("; ")
+			.find((c) => c.startsWith("csrf_token="))
+			?.split("=")[1];
+		const res = await fetch(url, {
+			method: "POST",
+			credentials: "include",
+			headers: csrf ? { "X-Frappe-CSRF-Token": decodeURIComponent(csrf) } : {},
+			body: fd,
+		});
+		if (!res.ok) throw new Error("ZIP download failed");
+		const blob = await res.blob();
+		const a = document.createElement("a");
+		a.href = URL.createObjectURL(blob);
+		a.download = `${project.value}-files.zip`;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(a.href);
+	} catch (e) {
+		fileListActionError.value = "Could not download the ZIP. Try again, or check the Error Log.";
+	}
+}
 const destination = ref("erpnext");
 const externalProvider = ref("frappe_drive");
 const targetFolder = ref("");
@@ -58,6 +133,7 @@ const userSearchQ = ref("");
 const userSearchHits = ref([]);
 const userSearchBusy = ref(false);
 const userExpiryDays = ref(30);
+const notifyOnShare = ref(false);
 const linkExpiryDays = ref(7);
 let userSearchTimer;
 
@@ -398,6 +474,7 @@ function resetShareUi() {
 watch([project, targetFolder, folderFilter], () => {
 	resetShareUi();
 });
+watch(project, () => clearFileSelection());
 
 watch(folderFilter, async (newPath, oldPath) => {
 	if (!newPath || newPath === oldPath) return;
@@ -482,6 +559,29 @@ function onFileInput(e) {
 	input.value = "";
 }
 
+// Drag-and-drop directly onto a folder card — uploads land in that folder.
+const dropTargetFolder = ref("");
+function onFolderDragOver(e, f) {
+	if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
+	if (isCustomerPortalUser.value || !project.value) return;
+	if (f.isRoot && !canShareFolder.value) return;
+	e.dataTransfer.dropEffect = "copy";
+	dropTargetFolder.value = f.name;
+}
+function onFolderDragLeave(e, f) {
+	if (dropTargetFolder.value === f.name) dropTargetFolder.value = "";
+}
+async function onFolderDrop(e, f) {
+	if (isCustomerPortalUser.value) return;
+	dropTargetFolder.value = "";
+	const files = e.dataTransfer?.files;
+	if (!files?.length || !project.value) return;
+	// Temporarily switch the upload target to this folder, run the upload, then leave it set
+	// (matches the auto-set-target behaviour when clicking a folder card).
+	targetFolder.value = f.name;
+	await handleFiles(files);
+}
+
 function onDrop(e) {
 	dragOver.value = false;
 	handleFiles(e.dataTransfer?.files);
@@ -538,11 +638,30 @@ function createShareLink() {
 	return createShareLinkForFolder(targetFolder.value);
 }
 
+// Share modal supports two target kinds: a folder, or a single file. The state
+// is kept lean — `shareModalFolder` holds either a folder path or a File doc
+// name; `shareModalKind` distinguishes them so we hit the right backend.
+const shareModalKind = ref("folder"); // "folder" | "file"
+
 async function openShareModal(folderPath) {
 	if (!folderPath || !canShareFolder.value) return;
+	shareModalKind.value = "folder";
 	shareModalFolder.value = folderPath;
 	const entry = folderEntries.value.find((f) => f.name === folderPath);
 	shareModalLabel.value = entry?.label || folderPath;
+	shareModalOpen.value = true;
+	shareModalError.value = "";
+	shareModalOk.value = "";
+	userSearchQ.value = "";
+	userSearchHits.value = [];
+	await loadFolderShares();
+}
+
+async function openShareModalForFile(file) {
+	if (!file?.name || !canShareFolder.value) return;
+	shareModalKind.value = "file";
+	shareModalFolder.value = file.name;
+	shareModalLabel.value = file.file_name || file.name;
 	shareModalOpen.value = true;
 	shareModalError.value = "";
 	shareModalOk.value = "";
@@ -555,6 +674,7 @@ function closeShareModal() {
 	shareModalOpen.value = false;
 	shareModalFolder.value = "";
 	shareModalLabel.value = "";
+	shareModalKind.value = "folder";
 	folderShares.value = [];
 	userSearchQ.value = "";
 	userSearchHits.value = [];
@@ -615,15 +735,27 @@ async function shareWithUser(uid) {
 	shareModalError.value = "";
 	shareModalOk.value = "";
 	try {
+		const isFile = shareModalKind.value === "file";
 		await call({
-			method: "portal_app.api.files.share_folder_with_user",
+			method: isFile
+				? "portal_app.api.files.share_file_with_user"
+				: "portal_app.api.files.share_folder_with_user",
 			type: "POST",
-			args: {
-				project: project.value,
-				folder_path: shareModalFolder.value,
-				user_id: uid,
-				expires_days: userExpiryDays.value,
-			},
+			args: isFile
+				? {
+					project: project.value,
+					file_name: shareModalFolder.value,
+					user_id: uid,
+					expires_days: userExpiryDays.value,
+					notify: notifyOnShare.value ? 1 : 0,
+				}
+				: {
+					project: project.value,
+					folder_path: shareModalFolder.value,
+					user_id: uid,
+					expires_days: userExpiryDays.value,
+					notify: notifyOnShare.value ? 1 : 0,
+				},
 		});
 		shareModalOk.value = "Access granted.";
 		userSearchQ.value = "";
@@ -766,7 +898,26 @@ async function deleteProjectFile(f) {
 </script>
 
 <template>
-	<div class="h-full overflow-auto p-6" style="background: var(--portal-bg)">
+	<div ref="filesScrollRoot" class="h-full overflow-auto p-6" style="background: var(--portal-bg)">
+		<!-- Floating scroll-to-top / scroll-to-bottom controls -->
+		<div class="pointer-events-none fixed bottom-6 right-6 z-30 flex flex-col gap-2">
+			<button
+				type="button"
+				class="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--portal-border)] bg-white/95 text-[color:var(--portal-text)] shadow-lg backdrop-blur transition hover:bg-[color:var(--portal-accent-soft)] hover:text-[color:var(--portal-accent-strong)]"
+				title="Scroll to top"
+				@click="scrollFilesPage('top')"
+			>
+				<FeatherIcon name="chevrons-up" class="h-4 w-4" />
+			</button>
+			<button
+				type="button"
+				class="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full border border-[color:var(--portal-border)] bg-white/95 text-[color:var(--portal-text)] shadow-lg backdrop-blur transition hover:bg-[color:var(--portal-accent-soft)] hover:text-[color:var(--portal-accent-strong)]"
+				title="Scroll to bottom"
+				@click="scrollFilesPage('bottom')"
+			>
+				<FeatherIcon name="chevrons-down" class="h-4 w-4" />
+			</button>
+		</div>
 		<div class="mx-auto max-w-5xl space-y-5">
 			<div class="portal-hero portal-anim-in">
 				<div class="relative">
@@ -902,11 +1053,16 @@ async function deleteProjectFile(f) {
 						v-for="f in folderEntries"
 						:key="`nav-grid-${f.name}`"
 						class="flex flex-col overflow-hidden rounded-xl border text-sm transition"
-						:class="
+						:class="[
 							folderFilter === f.name
 								? 'portal-selected-ring bg-[color:var(--portal-accent-soft)]'
-								: 'border-[color:var(--portal-border)] bg-white hover:border-[color:var(--portal-border-strong)] hover:shadow-md'
-						"
+								: 'border-[color:var(--portal-border)] bg-white hover:border-[color:var(--portal-border-strong)] hover:shadow-md',
+							dropTargetFolder === f.name ? 'ring-2 ring-[color:var(--portal-accent)] bg-[color:var(--portal-accent-soft)]' : '',
+						]"
+						:data-folder="f.name"
+						@dragover.prevent="onFolderDragOver($event, f)"
+						@dragleave="onFolderDragLeave($event, f)"
+						@drop.prevent="onFolderDrop($event, f)"
 					>
 						<button
 							type="button"
@@ -1305,25 +1461,63 @@ async function deleteProjectFile(f) {
 				<p v-if="fileListActionError" class="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-800">
 					{{ fileListActionError }}
 				</p>
+				<div
+					v-if="selectedFileNames.length"
+					class="flex flex-wrap items-center justify-between gap-2 border-b border-[color:var(--portal-border)] bg-[color:var(--portal-accent-soft)] px-4 py-2.5 text-xs"
+				>
+					<span class="font-medium text-[color:var(--portal-accent-strong)]">
+						{{ selectedFileNames.length }} file{{ selectedFileNames.length === 1 ? "" : "s" }} selected
+					</span>
+					<div class="flex items-center gap-2">
+						<button class="portal-btn portal-btn-primary text-xs" @click="downloadSelectedZip">
+							<FeatherIcon name="download" class="h-3.5 w-3.5" />
+							Download as ZIP
+						</button>
+						<button class="portal-btn portal-btn-ghost text-xs" @click="clearFileSelection">Clear</button>
+					</div>
+				</div>
 				<table class="w-full text-left text-sm">
 					<thead>
-						<tr class="border-b bg-gray-50 text-gray-600">
-							<th class="px-4 py-3">File</th>
-							<th class="px-4 py-3">Size</th>
-							<th class="px-4 py-3">Subfolder</th>
-							<th class="px-4 py-3">Owner</th>
-							<th class="px-4 py-3">Created</th>
-							<th class="px-4 py-3">Link</th>
-							<th v-if="showFileDeleteColumn" class="px-4 py-3">Delete</th>
+						<tr class="border-b border-[color:var(--portal-border)] text-[color:var(--portal-muted)]" style="background: var(--portal-bg-dim);">
+							<th class="px-3 py-3 w-9">
+								<input
+									type="checkbox"
+									class="rounded border-gray-300"
+									:checked="allVisibleSelected"
+									:indeterminate.prop="someVisibleSelected && !allVisibleSelected"
+									@change="toggleSelectAllVisible"
+								/>
+							</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">File</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Size</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Subfolder</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Owner</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Created</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Link</th>
+							<th v-if="canShareFolder" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Share</th>
+							<th v-if="showFileDeleteColumn" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Delete</th>
 						</tr>
 					</thead>
 					<tbody>
-						<tr v-for="f in visibleFiles" :key="f.name" class="border-b border-gray-100">
+						<tr
+							v-for="f in visibleFiles"
+							:key="f.name"
+							class="border-b border-[color:var(--portal-border)] transition"
+							:class="selectedFileSet.has(f.name) ? 'bg-[color:var(--portal-accent-soft)]' : ''"
+						>
+							<td class="px-3 py-3">
+								<input
+									type="checkbox"
+									class="rounded border-gray-300"
+									:checked="selectedFileSet.has(f.name)"
+									@change="toggleFileSelection(f.name)"
+								/>
+							</td>
 							<td class="px-4 py-3">
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="ml-1 text-xs text-gray-400">(private)</span>
 							</td>
-							<td class="px-4 py-3">{{ f.file_size ?? "—" }}</td>
+							<td class="px-4 py-3">{{ fmtFileSize(f.file_size) }}</td>
 							<td class="px-4 py-3">{{ subfolderLabel(f.folder) }}</td>
 							<td class="px-4 py-3">{{ f.owner }}</td>
 							<td class="px-4 py-3">{{ f.creation }}</td>
@@ -1333,10 +1527,23 @@ async function deleteProjectFile(f) {
 									:href="f.file_url"
 									target="_blank"
 									rel="noopener"
-									class="text-blue-600 underline"
+									class="text-[color:var(--portal-accent)] hover:underline"
 								>
 									Open
 								</a>
+							</td>
+							<td v-if="canShareFolder" class="px-4 py-3">
+								<button
+									v-if="!f.is_folder"
+									type="button"
+									class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-[color:var(--portal-accent-strong)] transition hover:bg-[color:var(--portal-accent-soft)]"
+									:title="'Share “' + f.file_name + '” with a teammate'"
+									@click="openShareModalForFile(f)"
+								>
+									<FeatherIcon name="share-2" class="h-3 w-3" />
+									Share
+								</button>
+								<span v-else class="text-xs text-[color:var(--portal-subtle)]">—</span>
 							</td>
 							<td v-if="showFileDeleteColumn" class="px-4 py-3">
 								<button
@@ -1490,9 +1697,11 @@ async function deleteProjectFile(f) {
 									class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
 									style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
 								>
-									<FeatherIcon name="share-2" class="h-4 w-4" />
+									<FeatherIcon :name="shareModalKind === 'file' ? 'file' : 'share-2'" class="h-4 w-4" />
 								</div>
-								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Share folder</h2>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">
+									{{ shareModalKind === "file" ? "Share file" : "Share folder" }}
+								</h2>
 							</div>
 							<p class="mt-1 truncate text-xs text-[color:var(--portal-muted)]">
 								{{ shareModalLabel }}
@@ -1547,6 +1756,11 @@ async function deleteProjectFile(f) {
 									/>
 								</div>
 							</div>
+							<label class="mt-2 flex items-center gap-2 text-xs text-[color:var(--portal-muted)]">
+								<input v-model="notifyOnShare" type="checkbox" class="rounded border-gray-300" />
+								<FeatherIcon name="mail" class="h-3 w-3" />
+								Email the user when I add them
+							</label>
 
 							<div
 								v-if="userSearchHits.length"
@@ -1624,8 +1838,8 @@ async function deleteProjectFile(f) {
 							</ul>
 						</section>
 
-						<!-- Public link -->
-						<section v-if="shareTrackingAvailable">
+						<!-- Public link (folder shares only — single-file links not implemented) -->
+						<section v-if="shareTrackingAvailable && shareModalKind === 'folder'">
 							<p class="portal-section-title mb-2">Anyone with the link</p>
 							<div
 								v-if="!activeLinkShare"

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch, inject } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, watch, inject } from "vue";
 import { call } from "@/api";
 import { useRouter } from "vue-router";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
@@ -246,22 +246,7 @@ function onCpFocus() {
 
 watch(searchQ, (q) => {
 	clearTimeout(searchTimer);
-	searchTimer = setTimeout(async () => {
-		const t = (q || "").trim();
-		if (t.length < 2) {
-			searchHits.value = [];
-			return;
-		}
-		try {
-			searchHits.value = await call({
-				method: "portal_app.api.projects.search_portal_users",
-				args: { txt: t },
-			});
-		} catch (e) {
-			console.error(e);
-			searchHits.value = [];
-		}
-	}, 300);
+	searchTimer = setTimeout(() => runUserSearch(q), 200);
 });
 
 function addTeamUser(u) {
@@ -274,6 +259,61 @@ function addTeamUser(u) {
 function removeTeamUser(u) {
 	teamList.value = teamList.value.filter((x) => x !== u);
 }
+
+// Refs on each picker wrapper so we can detect clicks outside and close the dropdown.
+const teamPickerRef = ref(null);
+const customerPickerRef = ref(null);
+const cpPickerRef = ref(null);
+
+function onSearchFocus() {
+	const q = (searchQ.value || "").trim();
+	if (!searchHits.value.length) {
+		// Mirror customer/cp behaviour — pop existing matches on focus, even with empty q.
+		runUserSearch(q);
+	}
+}
+
+async function runUserSearch(q) {
+	try {
+		searchHits.value = await call({
+			method: "portal_app.api.projects.search_portal_users",
+			args: { txt: (q || "").trim() },
+		});
+	} catch (e) {
+		console.error(e);
+		searchHits.value = [];
+	}
+}
+
+/** Enter key on the team-search input: pick the top hit, add to team, save immediately. */
+async function onTeamSearchEnter() {
+	const top = (searchHits.value || []).find((h) => !teamList.value.includes(h.name));
+	if (top) {
+		addTeamUser(top.name);
+		await saveTeam();
+		return;
+	}
+	// No usable suggestion — if there's at least one user typed, just save current list.
+	if (teamList.value.length) {
+		await saveTeam();
+	}
+}
+
+function onDocClickClosePickers(e) {
+	const t = e.target;
+	if (teamPickerRef.value && !teamPickerRef.value.contains(t)) {
+		searchHits.value = [];
+	}
+	if (customerPickerRef.value && !customerPickerRef.value.contains(t)) {
+		customerHits.value = [];
+	}
+	if (cpPickerRef.value && !cpPickerRef.value.contains(t)) {
+		cpHits.value = [];
+	}
+}
+
+onMounted(() => document.addEventListener("click", onDocClickClosePickers));
+onBeforeUnmount(() => document.removeEventListener("click", onDocClickClosePickers));
 
 async function syncCustomerPortalUserIds(userIds) {
 	cpSaving.value = true;
@@ -634,27 +674,27 @@ async function submitNewCustomer() {
 					<div v-if="canManage" class="space-y-3">
 						<template v-if="canLinkCustomer">
 							<label class="text-xs font-medium text-gray-600">Search customers</label>
-							<div @focusin="onCustomerFocus">
+							<div ref="customerPickerRef" class="space-y-2" @focusin="onCustomerFocus">
 								<TextInput
 									v-model="customerSearchQ"
 									class="w-full rounded-xl"
 									placeholder="Click to see existing customers, or type to filter…"
 								/>
-							</div>
-							<div
-								v-if="customerHits.length"
-								class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
-							>
-								<button
-									v-for="c in customerHits"
-									:key="c.name"
-									type="button"
-									class="flex w-full flex-col gap-0.5 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white"
-									@click="linkCustomer(c.name)"
+								<div
+									v-if="customerHits.length"
+									class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
 								>
-									<span class="font-medium text-gray-900">{{ c.customer_name || c.name }}</span>
-									<span class="text-xs text-gray-500">{{ c.name }}</span>
-								</button>
+									<button
+										v-for="c in customerHits"
+										:key="c.name"
+										type="button"
+										class="flex w-full flex-col gap-0.5 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white"
+										@click="linkCustomer(c.name)"
+									>
+										<span class="font-medium text-gray-900">{{ c.customer_name || c.name }}</span>
+										<span class="text-xs text-gray-500">{{ c.name }}</span>
+									</button>
+								</div>
 							</div>
 							<div class="flex flex-wrap gap-2">
 								<button
@@ -712,22 +752,33 @@ async function submitNewCustomer() {
 						</h2>
 						<span v-if="!canManage" class="text-xs text-[color:var(--portal-muted)]">View only — ask a project manager to change membership.</span>
 					</div>
-					<div v-if="canManage" class="mb-4 space-y-2">
-						<label class="text-xs font-medium text-gray-600">Add user (search by email / username)</label>
-						<TextInput v-model="searchQ" class="w-full rounded-xl" placeholder="Type at least 2 characters…" />
+					<div v-if="canManage" ref="teamPickerRef" class="mb-4 space-y-2">
+						<label class="text-xs font-medium text-gray-600">Add user (search by email, username, or full name)</label>
+						<div @focusin="onSearchFocus">
+							<TextInput
+								v-model="searchQ"
+								class="w-full rounded-xl"
+								placeholder="Click to see existing users, type to filter, press Enter to add + save"
+								@keyup.enter="onTeamSearchEnter"
+							/>
+						</div>
 						<div
 							v-if="searchHits.length"
-							class="max-h-40 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
+							class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
 						>
 							<button
 								v-for="h in searchHits"
 								:key="h.name"
 								type="button"
-								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white"
+								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+								:disabled="teamList.includes(h.name)"
 								@click="addTeamUser(h.name)"
 							>
-								<span class="font-medium text-gray-900">{{ h.name }}</span>
-								<span class="truncate text-gray-500">{{ h.full_name }}</span>
+								<span class="min-w-0 flex-1 truncate">
+									<span class="font-medium text-gray-900">{{ h.full_name || h.name }}</span>
+									<span class="ml-2 text-xs text-gray-500">{{ h.email || h.name }}</span>
+								</span>
+								<span v-if="teamList.includes(h.name)" class="text-xs text-gray-400">on team</span>
 							</button>
 						</div>
 					</div>
@@ -812,33 +863,33 @@ async function submitNewCustomer() {
 
 					<p class="mb-2 text-xs font-medium uppercase text-gray-500">Add existing user</p>
 					<label class="mb-2 block text-xs text-gray-600">Search by email, username, or full name — they are added as soon as you choose one.</label>
-					<div @focusin="onCpFocus">
+					<div ref="cpPickerRef" class="mb-3 space-y-2" @focusin="onCpFocus">
 						<TextInput
 							v-model="cpSearchQ"
-							class="mb-3 w-full rounded-xl"
+							class="w-full rounded-xl"
 							placeholder="Click to see existing portal users, or type to filter…"
 							:disabled="cpSaving"
 						/>
-					</div>
-					<div
-						v-if="cpHits.length"
-						class="mb-3 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
-					>
-						<button
-							v-for="u in cpHits"
-							:key="u.name"
-							type="button"
-							class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-							:disabled="cpSaving || customerPortalUserIds.has(u.name)"
-							@click="addCustomerPortalUserImmediate(u.name)"
+						<div
+							v-if="cpHits.length"
+							class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
 						>
-							<span class="min-w-0">
-								<span class="font-medium text-gray-900">{{ u.full_name || u.name }}</span>
-								<span class="mt-0.5 block truncate text-xs text-gray-500">{{ u.email || u.name }}</span>
-							</span>
-							<span v-if="customerPortalUserIds.has(u.name)" class="shrink-0 text-xs text-gray-400">Added</span>
-							<span v-else class="shrink-0 text-xs font-medium text-blue-600">Add</span>
-						</button>
+							<button
+								v-for="u in cpHits"
+								:key="u.name"
+								type="button"
+								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+								:disabled="cpSaving || customerPortalUserIds.has(u.name)"
+								@click="addCustomerPortalUserImmediate(u.name)"
+							>
+								<span class="min-w-0">
+									<span class="font-medium text-gray-900">{{ u.full_name || u.name }}</span>
+									<span class="mt-0.5 block truncate text-xs text-gray-500">{{ u.email || u.name }}</span>
+								</span>
+								<span v-if="customerPortalUserIds.has(u.name)" class="shrink-0 text-xs text-gray-400">Added</span>
+								<span v-else class="shrink-0 text-xs font-medium text-blue-600">Add</span>
+							</button>
+						</div>
 					</div>
 					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
 					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>

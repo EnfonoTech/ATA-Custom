@@ -10,6 +10,37 @@
 
 ## 1. Architecture overview
 
+```mermaid
+flowchart LR
+    subgraph Browser["🌐 Browser (SPA)"]
+        UI["Vue 3 · Vue Router · Tailwind · frappe-ui"]
+        Toast["Global Toaster · CSRF retry · Auto-refresh on focus"]
+    end
+
+    subgraph Frappe["⚙️  Frappe / gunicorn"]
+        API["@frappe.whitelist() endpoints<br/>portal_app.api.*"]
+        DocTypes["DocTypes<br/>Project · File · DocShare · Task<br/>Portal Project Settings (Single)<br/>Portal Folder Template Row (child)<br/>Portal Folder Share (audit + expiry)<br/>Portal Demo Seed Run · Portal Demo Seed Item"]
+        Cron["Hourly scheduler<br/>cron_revoke_expired_shares"]
+    end
+
+    subgraph Storage["💾 Storage"]
+        DB[("MariaDB")]
+        FS["/private/files<br/>/public/files"]
+        Drive["Frappe Drive ·<br/>Google Drive ·<br/>BIM 360 (webhooks)"]
+    end
+
+    UI -- "fetch /api/method/*" --> API
+    UI -- "FormData uploads" --> API
+    API --> DocTypes
+    DocTypes --> DB
+    API --> FS
+    API -- "optional fan-out" --> Drive
+    Cron --> DocTypes
+```
+
+The text-art version below renders fine in plain editors; GitHub renders the
+Mermaid diagram above instead.
+
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │                         Browser (SPA)                          │
@@ -24,6 +55,8 @@
 │                Portal Project Settings (Single)                │
 │                Portal Folder Template Row (child)              │
 │                Portal Folder Share (audit/expiry tracking)     │
+│                Portal Demo Seed Run + Item                     │
+│   • Hourly cron: revoke expired shares                         │
 └───────────────┬────────────────────────────────────┬───────────┘
                 │                                    │
                 ▼                                    ▼
@@ -31,6 +64,25 @@
         │   MariaDB    │                  │  /private/files,   │
         │              │                  │  /public/files     │
         └──────────────┘                  └────────────────────┘
+```
+
+### Sharing flow (Drive-style)
+
+```mermaid
+sequenceDiagram
+    participant Member as Project member
+    participant API as files.share_folder_with_user
+    participant DB as MariaDB
+    participant Frappe as frappe.share.add_docshare
+
+    Member->>API: POST { project, folder_path, user_id, expires_days, notify? }
+    API->>DB: insert / update Portal Folder Share row
+    API->>Frappe: DocShare on the folder File doc
+    API->>Frappe: DocShare on every nested File (cascade)
+    API->>Frappe: DocShare on the parent Project doc
+    API->>API: optional sendmail to recipient
+    API->>DB: COMMIT (so a parallel tab sees the row immediately)
+    API-->>Member: { ok, share_name, docshare_count }
 ```
 
 ### Two halves

@@ -150,23 +150,13 @@ doc_events = {}
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"portal_app.tasks.all"
-# 	],
-# 	"daily": [
-# 		"portal_app.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"portal_app.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"portal_app.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"portal_app.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	"hourly": [
+		# Mark every Portal Folder Share row whose expires_at has passed as revoked,
+		# and drop the underlying ERPNext DocShares so the recipient really loses access.
+		"portal_app.api.files.cron_revoke_expired_shares",
+	],
+}
 
 # Testing
 # -------

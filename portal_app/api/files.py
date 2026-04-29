@@ -371,6 +371,132 @@ def _share_record_active(rec: dict) -> bool:
 	return True
 
 
+@frappe.whitelist()
+def download_files_zip(project, file_names=None, folder_path=None):
+	"""Stream a ZIP of the given File records (or every file under a folder).
+
+	Inputs accept JSON-encoded list (matches `args` from the SPA's `call`):
+	    file_names: ["FN1", "FN2", …]                  (preferred)
+	    folder_path: "Home/Attachments/<project>/…"   (fallback — bundles all leaf files)
+
+	Permission: any user allocated to the project.
+	"""
+	import io
+	import zipfile
+
+	helper.assert_project_access(project)
+
+	if isinstance(file_names, str):
+		try:
+			file_names = json.loads(file_names)
+		except Exception:
+			file_names = [s for s in file_names.split(",") if s.strip()]
+
+	names: list[str] = []
+	if file_names:
+		# Validate every name belongs to this project.
+		for n in file_names:
+			n = cstr(n).strip()
+			if not n:
+				continue
+			row = frappe.db.get_value(
+				"File",
+				n,
+				["attached_to_doctype", "attached_to_name", "is_folder"],
+				as_dict=True,
+			)
+			if not row or row.get("is_folder"):
+				continue
+			if row.get("attached_to_doctype") != "Project" or row.get("attached_to_name") != project:
+				continue
+			names.append(n)
+	elif folder_path:
+		canonical, _label = _resolve_share_folder(project, cstr(folder_path).strip())
+		rows = frappe.get_all(
+			"File",
+			filters={
+				"attached_to_doctype": "Project",
+				"attached_to_name": project,
+				"is_folder": 0,
+			},
+			or_filters=[["folder", "=", canonical], ["folder", "like", canonical + "/%"]],
+			fields=["name"],
+			limit_page_length=1000,
+			ignore_permissions=True,
+		)
+		names = [r["name"] for r in rows]
+
+	if not names:
+		frappe.throw(_("No files to download in this selection."))
+
+	buf = io.BytesIO()
+	with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+		seen = set()
+		for n in names:
+			doc = frappe.get_doc("File", n)
+			try:
+				content = doc.get_content()
+				# Avoid duplicate entries.
+				arcname = (doc.folder or "").replace("Home/Attachments/", "").rstrip("/")
+				arcname = f"{arcname}/{doc.file_name}" if arcname else doc.file_name
+				dedup = arcname
+				i = 1
+				while dedup in seen:
+					stem, dot, ext = arcname.rpartition(".")
+					dedup = f"{stem} ({i}).{ext}" if stem else f"{arcname} ({i})"
+					i += 1
+				seen.add(dedup)
+				zf.writestr(dedup, content)
+			except Exception:
+				frappe.log_error(frappe.get_traceback(), f"Portal: zip include {n}")
+
+	buf.seek(0)
+	zip_bytes = buf.read()
+	# Stream as a download.
+	frappe.local.response.filename = f"{project}-files.zip"
+	frappe.local.response.filecontent = zip_bytes
+	frappe.local.response.type = "binary"
+
+
+def cron_revoke_expired_shares():
+	"""Hourly scheduler: revoke every Portal Folder Share whose expiry has passed.
+
+	Hooked from `scheduler_events.hourly` in hooks.py. Idempotent. Each revoked row
+	also has its cascade DocShares (folder + nested files + project) dropped so the
+	recipient genuinely loses access at the moment of expiry, not whenever an admin
+	next clicks Revoke.
+	"""
+	if not _share_doctype_available():
+		return
+	from frappe.utils import now_datetime
+
+	now_dt = now_datetime()
+	rows = frappe.get_all(
+		"Portal Folder Share",
+		filters={
+			"revoked": 0,
+			"expires_at": ["is", "set"],
+			"expires_at": ["<", now_dt],
+		},
+		fields=["name", "project", "folder_path", "user", "share_kind"],
+		limit_page_length=2000,
+		ignore_permissions=True,
+	)
+	for r in rows:
+		try:
+			doc = frappe.get_doc("Portal Folder Share", r["name"])
+			if int(doc.revoked or 0):
+				continue
+			doc.revoked = 1
+			doc.revoked_at = now_dt
+			doc.save(ignore_permissions=True)
+			if doc.share_kind == "User" and doc.user and doc.folder_path:
+				_revoke_folder_docshares(doc.project, doc.folder_path, doc.user)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), f"Portal: cron revoke {r.get('name')}")
+	frappe.db.commit()
+
+
 def _expiry_datetime(days: int):
 	from frappe.utils import add_days, now_datetime
 
@@ -426,7 +552,7 @@ def create_folder_share_link(project, folder_path=None, folder=None, expires_day
 
 
 @frappe.whitelist()
-def share_folder_with_user(project, folder_path, user_id, expires_days=30):
+def share_folder_with_user(project, folder_path, user_id, expires_days=30, notify=0):
 	"""Grant a portal user read access to all files in a folder (and its subfolders).
 
 	Falls back to ERPNext-native DocShare alone when the Portal Folder Share doctype
@@ -549,6 +675,25 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30):
 	if frappe.db.exists("Project", project):
 		_grant("Project", project)
 
+	# Optional email to the recipient (caller passes notify=1).
+	if int(notify or 0) and user_row.get("email"):
+		try:
+			project_title = frappe.db.get_value("Project", project, "project_name") or project
+			frappe.sendmail(
+				recipients=[user_row["email"]],
+				subject=_("You were granted access to a folder on {0}").format(project_title),
+				message=(
+					f"<p>Hi {user_row.get('full_name') or user_row.get('email')},</p>"
+					f"<p><strong>{frappe.session.user}</strong> just shared the folder "
+					f"<strong>{label}</strong> on project <strong>{project_title}</strong> with you.</p>"
+					f"<p>Open the portal at <a href=\"{frappe.utils.get_url('/portal-app/shared-with-me')}\">"
+					f"{frappe.utils.get_url('/portal-app/shared-with-me')}</a> to view the files.</p>"
+				),
+				now=False,
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Portal: share email")
+
 	# Commit immediately so a concurrent browser tab on /shared-with-me or /manage-shares
 	# sees the new row on its very next call, not after the request transaction closes.
 	frappe.db.commit()
@@ -569,6 +714,152 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30):
 
 
 @frappe.whitelist()
+def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0):
+	"""Share a single File (not a folder) with one teammate.
+
+	Same model as `share_folder_with_user` but the cascade is just one File doc plus
+	the parent Project (for navigation). The audit row is reused — `folder_path`
+	holds the File doc name; the Manage-shares page renders these as
+	"file-only shares" because the row's path doesn't match any folder in the
+	template.
+	"""
+	helper.assert_project_access(project)
+	tracking_available = _share_doctype_available()
+
+	fname = cstr(file_name or "").strip()
+	if not fname:
+		frappe.throw(_("File is required."))
+	row = frappe.db.get_value(
+		"File",
+		fname,
+		["is_folder", "attached_to_doctype", "attached_to_name", "file_name"],
+		as_dict=True,
+	)
+	if not row:
+		frappe.throw(_("File not found."))
+	if int(row.get("is_folder") or 0):
+		frappe.throw(_("This is a folder, not a file. Use Share on the folder instead."))
+	if row.get("attached_to_doctype") != "Project" or row.get("attached_to_name") != project:
+		frappe.throw(_("This file does not belong to the selected project."))
+
+	uid = cstr(user_id or "").strip()
+	if not uid:
+		frappe.throw(_("User is required."))
+	if not frappe.db.exists("User", uid):
+		frappe.throw(_("User {0} not found.").format(uid))
+	if uid in {"Guest", "Administrator"}:
+		frappe.throw(_("Cannot share file with {0}.").format(uid))
+
+	try:
+		expires_days = max(1, min(365, int(expires_days)))
+	except Exception:
+		expires_days = 30
+
+	user_row = frappe.db.get_value("User", uid, ["email", "full_name"], as_dict=True) or {}
+	display_name = row.get("file_name") or fname
+
+	share_name = None
+	expires_at_value = None
+	if tracking_available:
+		existing = frappe.get_all(
+			"Portal Folder Share",
+			filters={
+				"project": project,
+				"folder_path": fname,
+				"share_kind": "User",
+				"user": uid,
+				"revoked": 0,
+			},
+			fields=["name"],
+			limit_page_length=1,
+			ignore_permissions=True,
+		)
+		if existing:
+			doc = frappe.get_doc("Portal Folder Share", existing[0]["name"])
+			doc.expires_at = _expiry_datetime(expires_days)
+			doc.user_email = user_row.get("email") or doc.user_email
+			doc.user_full_name = user_row.get("full_name") or doc.user_full_name
+			doc.save(ignore_permissions=True)
+		else:
+			doc = frappe.get_doc(
+				{
+					"doctype": "Portal Folder Share",
+					"project": project,
+					"folder_path": fname,
+					"folder_label": display_name,
+					"share_kind": "User",
+					"user": uid,
+					"user_email": user_row.get("email"),
+					"user_full_name": user_row.get("full_name"),
+					"expires_at": _expiry_datetime(expires_days),
+					"created_by_user": frappe.session.user,
+				}
+			)
+			doc.insert(ignore_permissions=True)
+		share_name = doc.name
+		expires_at_value = str(doc.expires_at) if doc.get("expires_at") else None
+
+	# Grant ERPNext-native DocShare on the file + parent Project for navigation.
+	docshare_ok = False
+	try:
+		from frappe.share import add_docshare
+
+		add_docshare("File", fname, user=uid, read=1, flags={"ignore_share_permission": True}, notify=0)
+		docshare_ok = True
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), f"Portal: file docshare grant {fname}")
+
+	if frappe.db.exists("Project", project):
+		try:
+			from frappe.share import add_docshare
+
+			add_docshare(
+				"Project",
+				project,
+				user=uid,
+				read=1,
+				flags={"ignore_share_permission": True},
+				notify=0,
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Portal: project docshare grant for file share")
+
+	# Optional email to recipient.
+	if int(notify or 0) and user_row.get("email"):
+		try:
+			project_title = frappe.db.get_value("Project", project, "project_name") or project
+			frappe.sendmail(
+				recipients=[user_row["email"]],
+				subject=_("You were granted access to a file on {0}").format(project_title),
+				message=(
+					f"<p>Hi {user_row.get('full_name') or user_row.get('email')},</p>"
+					f"<p><strong>{frappe.session.user}</strong> just shared the file "
+					f"<strong>{display_name}</strong> on project <strong>{project_title}</strong> with you.</p>"
+					f"<p>Open the portal at <a href=\"{frappe.utils.get_url('/portal-app/shared-with-me')}\">"
+					f"{frappe.utils.get_url('/portal-app/shared-with-me')}</a> to view it.</p>"
+				),
+				now=False,
+			)
+		except Exception:
+			frappe.log_error(frappe.get_traceback(), "Portal: file share email")
+
+	frappe.db.commit()
+
+	return {
+		"ok": True,
+		"share_name": share_name,
+		"file": fname,
+		"file_label": display_name,
+		"user": uid,
+		"user_email": user_row.get("email"),
+		"user_full_name": user_row.get("full_name"),
+		"expires_at": expires_at_value,
+		"docshare_ok": docshare_ok,
+		"tracking_available": tracking_available,
+	}
+
+
+@frappe.whitelist()
 def list_folder_shares(project, folder_path=None):
 	"""Return active shares for one folder, or all folders in a project (folder_path omitted).
 
@@ -582,7 +873,13 @@ def list_folder_shares(project, folder_path=None):
 
 	filters = {"project": project, "revoked": 0}
 	if folder_path:
-		canonical, _label = _resolve_share_folder(project, cstr(folder_path or "").strip())
+		hint = cstr(folder_path or "").strip()
+		# Try resolving as a folder first; if that fails (e.g. the caller wants the
+		# share list for a single file), fall back to the raw File doc name.
+		try:
+			canonical, _label = _resolve_share_folder(project, hint)
+		except Exception:
+			canonical = hint
 		filters["folder_path"] = canonical
 
 	rows = frappe.get_all(
@@ -684,13 +981,23 @@ def revoke_folder_share(share_name):
 			frappe.throw(_("Share record not found."))
 		if row.get("share_doctype") != "File":
 			frappe.throw(_("Not a folder share."))
-		project_for_folder = frappe.db.get_value(
-			"File",
-			{"name": row.get("share_name"), "is_folder": 1},
-			"file_name",
+		# Derive the parent project from the File doc's path (Home/Attachments/<project>/...).
+		# Earlier code used File.file_name here, which is the leaf folder name (e.g.
+		# "04-WORKGDRAWINGS") — not a Project ID — so assert_manage_project always failed
+		# even for full Projects Managers.
+		fname = cstr(row.get("share_name") or "").replace("\\", "/")
+		parts = fname.split("/")
+		project_for_folder = (
+			parts[2] if len(parts) >= 3 and parts[0] == "Home" and parts[1] == "Attachments" else None
 		)
-		if project_for_folder:
-			# Native DocShare rows have no created_by audit, so only managers may revoke.
+		if not project_for_folder or not frappe.db.exists("Project", project_for_folder):
+			# Couldn't infer a project — fall back to staff-level access (System / Projects Manager).
+			if not helper.has_portal_staff_project_access():
+				frappe.throw(
+					_("Only a project manager can revoke this share."),
+					frappe.PermissionError,
+				)
+		else:
 			helper.assert_manage_project(project_for_folder)
 		try:
 			import frappe.share as _share
@@ -770,14 +1077,22 @@ def _revoke_folder_docshares(project: str, folder: str, user: str) -> None:
 
 @frappe.whitelist()
 def list_shared_with_me():
-	"""Return all folders + files shared with the current user, grouped by project.
+	"""Return everything the current user can see, grouped by project.
 
-	Combines two sources:
-	  - Portal Folder Share rows (Auditor-tracked, with expiry / revoke)
-	  - Native ERPNext DocShare rows on File / Project (so things shared from Desk also show up)
+	Sources, in priority order:
+	  1. **Portal Folder Share** rows where this user is the recipient (Auditor-tracked,
+	     with expiry / revoke).
+	  2. Native ERPNext **DocShare** rows on File / Project (so shares created from
+	     Desk also appear).
+	  3. **Team membership** — projects where the user is in `Project Users`. We add
+	     a synthetic root entry per project so they have one place to browse all the
+	     project files they're entitled to as a team member.
+	  4. **Your uploads** — files the user owns, surfaced as a synthetic folder entry
+	     per project.
 
-	Each project entry includes the folders the user can access plus the actual files
-	visible inside those folders. The portal renders this on the "Shared with me" page.
+	Every entry carries an `entry_type` ("share", "membership", "owner") so the UI
+	can render an appropriate icon + badge. File entries inside an entry also carry
+	an `owner_self` flag so the user can see at a glance which files are theirs.
 	"""
 	if frappe.session.user in ("Guest", "Administrator"):
 		return {"projects": []}
@@ -809,15 +1124,21 @@ def list_shared_with_me():
 			exp = r.get("expires_at")
 			if exp and get_datetime(exp) < now_dt:
 				continue
+			# A file share's folder_path is the File doc name (a hash) rather than a
+			# Home/Attachments/... path. We tag it so the hydration step below fetches
+			# the single file directly instead of trying to list its "contents".
+			fpath = r["folder_path"] or ""
+			is_file_share = bool(fpath) and not fpath.startswith("Home/Attachments/")
 			folders_by_project.setdefault(r["project"], []).append(
 				{
 					"share_name": r["name"],
-					"folder_path": r["folder_path"],
-					"folder_label": r.get("folder_label") or r["folder_path"],
+					"folder_path": fpath,
+					"folder_label": r.get("folder_label") or fpath,
 					"expires_at": str(r["expires_at"]) if r.get("expires_at") else None,
 					"shared_by": r.get("created_by_user"),
 					"shared_on": str(r.get("creation")) if r.get("creation") else None,
 					"native": False,
+					"is_file_share": is_file_share,
 				}
 			)
 
@@ -853,9 +1174,15 @@ def list_shared_with_me():
 		# Skip if a Portal Folder Share already covers this folder.
 		if any(f["folder_path"] == fname for f in folders_by_project.get(project, [])):
 			continue
-		# Build a label relative to the project root.
+		# Build a label relative to the project root. For direct-file shares (where the
+		# File doc name is a hash, not a path), fall back to the file's display name.
 		project_root = f"Home/Attachments/{project}"
-		label = fname[len(project_root) + 1 :] if fname.startswith(project_root + "/") else fname
+		if fname.startswith(project_root + "/"):
+			label = fname[len(project_root) + 1 :]
+		elif fname == project_root:
+			label = _("Project folder (all files)")
+		else:
+			label = file_row.get("file_name") or fname
 		folders_by_project.setdefault(project, []).append(
 			{
 				"share_name": r.get("share_name") or fname,
@@ -865,6 +1192,82 @@ def list_shared_with_me():
 				"shared_by": None,
 				"shared_on": str(r.get("creation")) if r.get("creation") else None,
 				"native": True,
+				"is_file_share": int(file_row.get("is_folder") or 0) == 0,
+			}
+		)
+
+	# 3. Team-membership entries — every project where the user is in Project Users
+	# gets a synthetic "Team access" root row so they have one place to browse all
+	# the project files they can see by virtue of being on the team.
+	team_member_projects = []
+	try:
+		rows = frappe.db.sql(
+			"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
+			user,
+		)
+		team_member_projects = [r[0] for r in rows if r and r[0]]
+	except Exception:
+		team_member_projects = []
+	for pj in team_member_projects:
+		if not frappe.db.exists("Project", pj):
+			continue
+		project_root = f"Home/Attachments/{pj}"
+		# Skip if a Portal Folder Share already covers the entire project root.
+		existing_paths = {f["folder_path"] for f in folders_by_project.get(pj, [])}
+		if project_root in existing_paths:
+			continue
+		folders_by_project.setdefault(pj, []).append(
+			{
+				"share_name": f"membership::{pj}",
+				"folder_path": project_root,
+				"folder_label": _("Project files (team access)"),
+				"expires_at": None,
+				"shared_by": None,
+				"shared_on": None,
+				"native": False,
+				"is_file_share": False,
+				"entry_type": "membership",
+			}
+		)
+
+	# 4. Own uploads — files this user attached to any allowed project. Surface as
+	# a synthetic per-project entry so users see "what I have here" even when no
+	# explicit share exists. Only included if the project is already in the map
+	# (i.e. covered by a share OR membership above).
+	for pj in list(folders_by_project.keys()):
+		try:
+			my_files = frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": "Project",
+					"attached_to_name": pj,
+					"is_folder": 0,
+					"owner": user,
+				},
+				fields=["name", "file_name", "file_url", "folder", "file_size", "is_private", "creation"],
+				order_by="creation desc",
+				limit_page_length=400,
+				ignore_permissions=True,
+			)
+		except Exception:
+			my_files = []
+		if not my_files:
+			continue
+		for f in my_files:
+			f["owner_self"] = True
+		folders_by_project[pj].append(
+			{
+				"share_name": f"owner::{pj}",
+				"folder_path": f"__owner__::{pj}",
+				"folder_label": _("Files I uploaded"),
+				"expires_at": None,
+				"shared_by": None,
+				"shared_on": None,
+				"native": False,
+				"is_file_share": False,
+				"entry_type": "owner",
+				"file_count": len(my_files),
+				"files": my_files,
 			}
 		)
 
@@ -880,25 +1283,63 @@ def list_shared_with_me():
 			)
 			or {"name": project, "project_name": project}
 		)
-		# Sort folders by depth then name so the project root sits first.
-		folders.sort(key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower()))
-		# Files visible to this user under each folder.
+		# Sort: membership row first, share rows in folder order, owner row last.
+		def _sort_key(f):
+			et = f.get("entry_type")
+			depth_label = (f.get("folder_label") or "").count("/")
+			label = (f.get("folder_label") or "").lower()
+			if et == "membership":
+				return (0, depth_label, label)
+			if et == "owner":
+				return (2, depth_label, label)
+			return (1, depth_label, label)
+
+		folders.sort(key=_sort_key)
+		# Files visible to this user under each entry. A file-share entry is a single
+		# File (not a folder) — fetch it directly. Owner entries are pre-hydrated above.
 		for folder in folders:
+			if folder.get("entry_type") == "owner":
+				continue  # already hydrated
 			fpath = folder["folder_path"]
-			files = frappe.get_all(
-				"File",
-				filters={
-					"attached_to_doctype": "Project",
-					"attached_to_name": project,
-					"is_folder": 0,
-				},
-				or_filters=[["folder", "=", fpath], ["folder", "like", fpath + "/%"]],
-				fields=["name", "file_name", "file_url", "folder", "file_size", "is_private", "creation"],
-				order_by="creation desc",
-				limit_page_length=400,
-			)
+			if folder.get("is_file_share"):
+				row = frappe.db.get_value(
+					"File",
+					fpath,
+					[
+						"name",
+						"file_name",
+						"file_url",
+						"folder",
+						"file_size",
+						"is_private",
+						"creation",
+						"owner",
+					],
+					as_dict=True,
+				)
+				files = [row] if row else []
+			else:
+				files = frappe.get_all(
+					"File",
+					filters={
+						"attached_to_doctype": "Project",
+						"attached_to_name": project,
+						"is_folder": 0,
+					},
+					or_filters=[["folder", "=", fpath], ["folder", "like", fpath + "/%"]],
+					fields=["name", "file_name", "file_url", "folder", "file_size", "is_private", "creation", "owner"],
+					order_by="creation desc",
+					limit_page_length=400,
+					ignore_permissions=True,
+				)
+			# Tag files the current user owns so the UI can highlight them.
+			for f in files:
+				if f.get("owner") == user:
+					f["owner_self"] = True
 			folder["file_count"] = len(files)
 			folder["files"] = files
+			# Default entry_type for legacy entries so the UI doesn't choke.
+			folder.setdefault("entry_type", "share")
 		projects_out.append(
 			{
 				"project": project_meta.get("name") or project,
@@ -983,11 +1424,16 @@ def list_managed_shares():
 				{"project": pj, "folders": {}},
 			)
 			fkey = r["folder_path"]
+			# A direct file share's folder_path is the File doc name (a hash) rather
+			# than a Home/Attachments/... path. Tag it so the Manage Shares UI can
+			# show a different icon and label.
+			is_file_share = bool(fkey) and not fkey.startswith("Home/Attachments/")
 			folder = by_project[pj]["folders"].setdefault(
 				fkey,
 				{
 					"folder_path": fkey,
 					"folder_label": r.get("folder_label") or fkey,
+					"is_file_share": is_file_share,
 					"user_shares": [],
 					"link_shares": [],
 				},
@@ -1087,6 +1533,93 @@ def list_managed_shares():
 				}
 			)
 
+	# Make sure every manageable project has an entry in by_project, even if it has
+	# no shares yet — the page is a project-admin browser, not a share-only list.
+	for pj in manageable:
+		by_project.setdefault(pj, {"project": pj, "folders": {}})
+
+	# For each project we manage, also walk the standard subfolder tree + files so
+	# the admin sees the full structure with shares overlaid (rather than only the
+	# rows that already happen to have a share). File-level shares are nested
+	# under the file row.
+	for pj in manageable:
+		try:
+			folder_ctx = ensure_project_folders(pj)
+		except Exception:
+			folder_ctx = {"project_root": f"Home/Attachments/{pj}", "subfolders": []}
+		project_root = folder_ctx.get("project_root") or f"Home/Attachments/{pj}"
+		# Project root + each subfolder become folder entries (no shares = empty arrays).
+		all_folder_paths = [(project_root, _("Project folder (all files)"))]
+		for sf in folder_ctx.get("subfolders") or []:
+			all_folder_paths.append((sf.get("name"), sf.get("label") or sf.get("name")))
+		for fpath, flabel in all_folder_paths:
+			if not fpath:
+				continue
+			by_project[pj]["folders"].setdefault(
+				fpath,
+				{
+					"folder_path": fpath,
+					"folder_label": flabel,
+					"is_file_share": False,
+					"user_shares": [],
+					"link_shares": [],
+				},
+			)
+		# Pull every File for the project once, then bucket by parent folder.
+		try:
+			file_rows = frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": "Project",
+					"attached_to_name": pj,
+					"is_folder": 0,
+				},
+				fields=[
+					"name",
+					"file_name",
+					"file_url",
+					"folder",
+					"file_size",
+					"is_private",
+					"creation",
+					"owner",
+				],
+				order_by="creation desc",
+				limit_page_length=2000,
+				ignore_permissions=True,
+			)
+		except Exception:
+			file_rows = []
+		# Index file-level Portal Folder Share rows so we can attach them per file.
+		shares_by_file: dict[str, list] = {}
+		for fkey, folder in by_project[pj]["folders"].items():
+			if folder.get("is_file_share"):
+				shares_by_file.setdefault(fkey, []).extend(folder["user_shares"])
+		# Attach files to their folder entries; tag each file with any file-level shares.
+		for fr in file_rows:
+			parent = fr.get("folder")
+			if not parent or parent not in by_project[pj]["folders"]:
+				# File sits in a folder that wasn't in the standard template — surface it
+				# under the project root so the manager can still see it.
+				parent = project_root
+				by_project[pj]["folders"].setdefault(
+					parent,
+					{
+						"folder_path": parent,
+						"folder_label": _("Project folder (all files)"),
+						"is_file_share": False,
+						"user_shares": [],
+						"link_shares": [],
+					},
+				)
+			fr_shares = shares_by_file.get(fr["name"], [])
+			by_project[pj]["folders"][parent].setdefault("files", []).append(
+				{
+					**fr,
+					"shares": fr_shares,
+				}
+			)
+
 	# Hydrate each project with metadata + flatten folder dict to list.
 	projects_out = []
 	for pj, payload in by_project.items():
@@ -1097,10 +1630,23 @@ def list_managed_shares():
 			or {"name": pj, "project_name": pj}
 		)
 		folders_list = list(payload["folders"].values())
-		folders_list.sort(key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower()))
-		# Tally totals so the UI can show a quick badge.
+		# Drop the synthetic file-share rows — those are inlined as `shares` on the
+		# corresponding file row inside the parent folder.
+		folders_list = [f for f in folders_list if not f.get("is_file_share")]
+		# Make sure every entry has a files[] (even if empty) so the UI is uniform.
+		for f in folders_list:
+			f.setdefault("files", [])
+			f["file_count"] = len(f["files"])
+			f["share_count"] = len(f["user_shares"]) + len(f["link_shares"])
+			# Sum per-file share counts so the folder header can show "+N file shares"
+			f["file_share_count"] = sum(len(x.get("shares") or []) for x in f["files"])
+		folders_list.sort(
+			key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower())
+		)
 		total_user = sum(len(f["user_shares"]) for f in folders_list)
 		total_link = sum(len(f["link_shares"]) for f in folders_list)
+		total_file_shares = sum(f.get("file_share_count", 0) for f in folders_list)
+		total_files = sum(f.get("file_count", 0) for f in folders_list)
 		projects_out.append(
 			{
 				"project": meta.get("name") or pj,
@@ -1109,7 +1655,13 @@ def list_managed_shares():
 				"customer": meta.get("customer"),
 				"is_manageable": pj in manageable,
 				"folders": folders_list,
-				"counts": {"user_shares": total_user, "link_shares": total_link},
+				"counts": {
+					"folders": len(folders_list),
+					"files": total_files,
+					"user_shares": total_user,
+					"link_shares": total_link,
+					"file_shares": total_file_shares,
+				},
 			}
 		)
 	projects_out.sort(key=lambda p: (p["project_name"] or "").lower())

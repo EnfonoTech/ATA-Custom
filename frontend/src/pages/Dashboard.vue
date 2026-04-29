@@ -3,6 +3,8 @@ import { ref, onMounted, inject, computed } from "vue";
 import { call } from "@/api";
 import { useRouter } from "vue-router";
 import { FeatherIcon } from "frappe-ui";
+import SkeletonBlock from "@/component/SkeletonBlock.vue";
+import BudgetMeter from "@/component/BudgetMeter.vue";
 
 const router = useRouter();
 const loading = ref(true);
@@ -110,10 +112,25 @@ function statusPillClass(s) {
 				</div>
 			</div>
 
-			<div v-if="loading" class="portal-card-strong p-8 text-center text-[color:var(--portal-muted)]">
-				<div class="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-[color:var(--portal-accent)] border-t-transparent"></div>
-				Loading dashboard…
-			</div>
+			<template v-if="loading">
+				<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+					<div v-for="i in 4" :key="`kpi-${i}`" class="portal-kpi">
+						<SkeletonBlock w="2.25rem" h="2.25rem" rounded="0.75rem" />
+						<div class="min-w-0 flex-1 space-y-2">
+							<SkeletonBlock w="60%" h="0.7rem" />
+							<SkeletonBlock w="40%" h="1.4rem" />
+						</div>
+					</div>
+				</div>
+				<div class="grid gap-4 lg:grid-cols-2">
+					<div v-for="i in 2" :key="`row-${i}`" class="portal-card-strong space-y-3 p-5">
+						<SkeletonBlock w="40%" h="1rem" />
+						<SkeletonBlock h="2.25rem" />
+						<SkeletonBlock h="2.25rem" />
+						<SkeletonBlock h="2.25rem" />
+					</div>
+				</div>
+			</template>
 			<div
 				v-else-if="loadError"
 				class="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-700 shadow-sm"
@@ -156,15 +173,19 @@ function statusPillClass(s) {
 						<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #db2777, #f472b6); color: #fff;">
 							<FeatherIcon name="alert-triangle" class="h-4 w-4" />
 						</div>
-						<div class="min-w-0">
+						<div class="min-w-0 flex-1">
 							<p class="portal-section-title">Budget risk</p>
-							<p class="mt-1 text-base font-semibold text-[color:var(--portal-text)]">
+							<p class="mt-1 text-sm font-semibold text-[color:var(--portal-text)]">
 								<span class="text-[color:var(--portal-warning)]">{{ data.budget_health?.at_risk || 0 }}</span>
 								<span class="text-[color:var(--portal-muted)]"> at risk · </span>
 								<span class="text-[color:var(--portal-danger)]">{{ data.budget_health?.over_100 || 0 }}</span>
 								<span class="text-[color:var(--portal-muted)]"> over</span>
 							</p>
-							<p class="mt-0.5 text-[10px] text-[color:var(--portal-subtle)]">Thresholds: 80%+ and 100%+ spent</p>
+							<BudgetMeter
+								class="mt-2"
+								:pct="data.budget_health?.max_pct || 0"
+								label="Highest spend"
+							/>
 						</div>
 					</div>
 				</div>

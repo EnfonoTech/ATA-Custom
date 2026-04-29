@@ -89,6 +89,9 @@ function collapseAll() {
 const filteredProjects = computed(() => {
 	const q = search.value.trim().toLowerCase();
 	const onlyMine = filterMode.value === "mine";
+	// Default ("All shares" + no query): show every manageable project, every folder,
+	// every file. The admin gets a complete browser with shares overlaid.
+	if (!q && !onlyMine) return projects.value;
 	return projects.value
 		.map((p) => {
 			const folders = p.folders
@@ -105,35 +108,56 @@ const filteredProjects = computed(() => {
 						if (!q) return true;
 						return String(s.share_url || "").toLowerCase().includes(q);
 					});
+					const fileMatches = (f.files || []).filter((file) => {
+						const fileShares = (file.shares || []).filter((s) => {
+							if (onlyMine && !s.created_by_user) return false;
+							if (!q) return true;
+							return [s.user, s.user_email, s.user_full_name]
+								.filter(Boolean)
+								.some((v) => String(v).toLowerCase().includes(q));
+						});
+						const nameHit = !q || String(file.file_name || "").toLowerCase().includes(q);
+						return nameHit || fileShares.length > 0;
+					});
 					const folderHit = String(f.folder_label || "").toLowerCase().includes(q);
 					return {
 						...f,
 						user_shares: folderHit ? f.user_shares : userMatches,
 						link_shares: folderHit ? f.link_shares : linkMatches,
+						files: folderHit ? f.files || [] : fileMatches,
 					};
 				})
-				.filter((f) => f.user_shares.length || f.link_shares.length);
+				.filter(
+					(f) =>
+						f.user_shares.length ||
+						f.link_shares.length ||
+						(f.files || []).length,
+				);
 			const projectHit =
 				String(p.project_name || "").toLowerCase().includes(q) ||
 				String(p.customer || "").toLowerCase().includes(q) ||
 				String(p.project || "").toLowerCase().includes(q);
 			return projectHit ? { ...p, folders: p.folders } : { ...p, folders };
 		})
-		.filter((p) => p.folders.some((f) => f.user_shares.length || f.link_shares.length));
+		.filter((p) => p.folders.length > 0);
 });
 
 const totals = computed(() => {
 	let users = 0,
 		links = 0,
-		folders = 0;
+		folders = 0,
+		files = 0;
 	for (const p of projects.value) {
+		folders += p.folders.length;
 		for (const f of p.folders) {
-			if (f.user_shares.length || f.link_shares.length) folders += 1;
 			users += f.user_shares.length;
 			links += f.link_shares.length;
+			const fs = f.files || [];
+			files += fs.length;
+			for (const file of fs) users += (file.shares || []).length;
 		}
 	}
-	return { users, links, folders };
+	return { users, links, folders, files, projects: projects.value.length };
 });
 
 /** Pivot the same data into a "By user" view: one card per user with all the
@@ -142,22 +166,24 @@ const totals = computed(() => {
 const byUser = computed(() => {
 	const userMap = new Map();
 	const linkRows = [];
+	const addUserShare = (s, ctx) => {
+		const key = s.user || s.user_email || s.share_name;
+		if (!userMap.has(key)) {
+			userMap.set(key, {
+				key,
+				user: s.user,
+				user_email: s.user_email,
+				user_full_name: s.user_full_name,
+				avatar_letter: (s.user_full_name || s.user_email || s.user || "?").charAt(0).toUpperCase(),
+				rows: [],
+			});
+		}
+		userMap.get(key).rows.push({ ...s, ...ctx });
+	};
 	for (const p of projects.value) {
 		for (const f of p.folders) {
 			for (const s of f.user_shares) {
-				const key = s.user || s.user_email || s.share_name;
-				if (!userMap.has(key)) {
-					userMap.set(key, {
-						key,
-						user: s.user,
-						user_email: s.user_email,
-						user_full_name: s.user_full_name,
-						avatar_letter: (s.user_full_name || s.user_email || s.user || "?").charAt(0).toUpperCase(),
-						rows: [],
-					});
-				}
-				userMap.get(key).rows.push({
-					...s,
+				addUserShare(s, {
 					project: p.project,
 					project_name: p.project_name,
 					project_status: p.status,
@@ -174,6 +200,19 @@ const byUser = computed(() => {
 					folder_path: f.folder_path,
 					folder_label: f.folder_label,
 				});
+			}
+			for (const file of f.files || []) {
+				for (const s of file.shares || []) {
+					addUserShare(s, {
+						project: p.project,
+						project_name: p.project_name,
+						project_status: p.status,
+						customer: p.customer,
+						folder_path: f.folder_path,
+						folder_label: `${f.folder_label} / ${file.file_name}`,
+						is_file_share: true,
+					});
+				}
 			}
 		}
 	}
@@ -257,6 +296,16 @@ async function copyLink(url) {
 	}
 }
 
+function fmtFileSize(bytes) {
+	if (bytes == null) return "—";
+	const n = Number(bytes);
+	if (Number.isNaN(n) || !n) return "—";
+	if (n < 1024) return `${n} B`;
+	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 function fmtDate(s) {
 	if (!s) return "—";
 	const d = new Date(String(s).replace(" ", "T"));
@@ -312,18 +361,36 @@ function openFolderInFiles(project, folderPath) {
 			</div>
 
 			<!-- KPIs -->
-			<div class="grid gap-3 sm:grid-cols-3">
+			<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 				<div class="portal-kpi">
 					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff;">
+						<FeatherIcon name="briefcase" class="h-4 w-4" />
+					</div>
+					<div class="min-w-0">
+						<p class="portal-section-title">Projects</p>
+						<p class="mt-1 text-2xl font-semibold text-[color:var(--portal-text)]">{{ totals.projects }}</p>
+					</div>
+				</div>
+				<div class="portal-kpi">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #06b6d4, #22d3ee); color: #fff;">
 						<FeatherIcon name="folder" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
-						<p class="portal-section-title">Folders shared</p>
+						<p class="portal-section-title">Folders</p>
 						<p class="mt-1 text-2xl font-semibold text-[color:var(--portal-text)]">{{ totals.folders }}</p>
 					</div>
 				</div>
 				<div class="portal-kpi">
 					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #fff;">
+						<FeatherIcon name="file" class="h-4 w-4" />
+					</div>
+					<div class="min-w-0">
+						<p class="portal-section-title">Files</p>
+						<p class="mt-1 text-2xl font-semibold text-[color:var(--portal-text)]">{{ totals.files }}</p>
+					</div>
+				</div>
+				<div class="portal-kpi">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #f59e0b, #fbbf24); color: #fff;">
 						<FeatherIcon name="users" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -484,8 +551,10 @@ function openFolderInFiles(project, folderPath) {
 						</div>
 						<span v-if="p.status" class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 						<span v-if="!p.is_manageable" class="portal-pill portal-pill-muted">read-only</span>
-						<span class="portal-pill portal-pill-muted">{{ p.counts?.user_shares || 0 }} users</span>
-						<span class="portal-pill portal-pill-muted">{{ p.counts?.link_shares || 0 }} links</span>
+						<span class="portal-pill portal-pill-muted">{{ p.counts?.folders || 0 }} folder{{ (p.counts?.folders || 0) === 1 ? "" : "s" }}</span>
+						<span class="portal-pill portal-pill-muted">{{ p.counts?.files || 0 }} file{{ (p.counts?.files || 0) === 1 ? "" : "s" }}</span>
+						<span class="portal-pill portal-pill-accent">{{ (p.counts?.user_shares || 0) + (p.counts?.file_shares || 0) }} share{{ ((p.counts?.user_shares || 0) + (p.counts?.file_shares || 0)) === 1 ? "" : "s" }}</span>
+						<span v-if="p.counts?.link_shares" class="portal-pill portal-pill-muted">{{ p.counts.link_shares }} link{{ p.counts.link_shares === 1 ? "" : "s" }}</span>
 						<button
 							class="portal-btn portal-btn-ghost text-xs"
 							@click.stop="openProject(p.project)"
@@ -510,15 +579,29 @@ function openFolderInFiles(project, folderPath) {
 									:name="expandedFolders.has(`${p.project}::${f.folder_path}`) ? 'chevron-down' : 'chevron-right'"
 									class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-muted)]"
 								/>
-								<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-accent)]" />
+								<FeatherIcon
+									:name="f.is_file_share ? 'file' : 'folder'"
+									class="h-3.5 w-3.5 shrink-0"
+									:class="f.is_file_share ? 'text-[color:var(--portal-warning)]' : 'text-[color:var(--portal-accent)]'"
+								/>
 								<span class="min-w-0 flex-1 truncate font-medium text-[color:var(--portal-text)]">
 									{{ f.folder_label }}
 								</span>
-								<span class="portal-pill portal-pill-muted">
+								<span v-if="(f.files || []).length" class="portal-pill portal-pill-muted">
+									{{ (f.files || []).length }} file{{ (f.files || []).length === 1 ? "" : "s" }}
+								</span>
+								<span v-if="f.user_shares.length" class="portal-pill portal-pill-accent">
 									{{ f.user_shares.length }} user{{ f.user_shares.length === 1 ? "" : "s" }}
 								</span>
 								<span v-if="f.link_shares.length" class="portal-pill portal-pill-muted">
 									{{ f.link_shares.length }} link{{ f.link_shares.length === 1 ? "" : "s" }}
+								</span>
+								<span
+									v-if="!f.user_shares.length && !f.link_shares.length"
+									class="portal-pill"
+									style="background: rgba(148, 163, 184, 0.12); color: rgb(100, 116, 139); border-color: rgba(148, 163, 184, 0.25);"
+								>
+									no shares
 								</span>
 								<button
 									class="portal-btn portal-btn-ghost text-xs"
@@ -606,11 +689,58 @@ function openFolderInFiles(project, folderPath) {
 									</button>
 								</div>
 
+								<!-- Files inside this folder -->
+								<div v-if="(f.files || []).length" class="border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-12 py-2">
+									<p class="portal-section-title mb-1.5">Files in this folder ({{ (f.files || []).length }})</p>
+									<div
+										v-for="file in f.files"
+										:key="file.name"
+										class="flex flex-wrap items-center gap-3 rounded-lg border border-[color:var(--portal-border)] bg-white px-3 py-2 text-sm transition hover:border-[color:var(--portal-accent)] mb-1.5 last:mb-0"
+									>
+										<FeatherIcon name="file" class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-muted)]" />
+										<div class="min-w-0 flex-1">
+											<p class="flex items-center gap-2 truncate font-medium text-[color:var(--portal-text)]">
+												<a v-if="file.file_url" :href="file.file_url" target="_blank" rel="noopener" class="truncate hover:underline">
+													{{ file.file_name }}
+												</a>
+												<span v-else class="truncate">{{ file.file_name }}</span>
+												<span v-if="file.is_private" class="text-[10px] text-[color:var(--portal-subtle)]">(private)</span>
+											</p>
+											<p class="truncate text-[11px] text-[color:var(--portal-muted)]">
+												{{ fmtFileSize(file.file_size) }} · uploaded by {{ file.owner }} · {{ fmtDate(file.creation) }}
+											</p>
+										</div>
+										<!-- Per-file shares -->
+										<div v-if="(file.shares || []).length" class="flex flex-wrap items-center gap-1.5">
+											<span
+												v-for="s in file.shares"
+												:key="s.share_name"
+												class="inline-flex items-center gap-1 rounded-full border border-[color:var(--portal-border)] bg-[color:var(--portal-accent-soft)] px-2 py-0.5 text-[11px] text-[color:var(--portal-accent-strong)]"
+												:title="(s.user_full_name || s.user) + (s.expires_at ? ' · expires ' + fmtDate(s.expires_at) : '')"
+											>
+												<span class="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-white" style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);">
+													{{ (s.user_full_name || s.user_email || s.user || '?').charAt(0).toUpperCase() }}
+												</span>
+												<span class="truncate max-w-[120px]">{{ s.user_full_name || s.user || s.user_email }}</span>
+												<button
+													class="rounded p-0.5 text-red-700 transition hover:bg-red-50 disabled:opacity-50"
+													:disabled="!s.can_revoke || busyShare === s.share_name"
+													:title="'Revoke this user\'s access to ' + file.file_name"
+													@click="revokeShare(s)"
+												>
+													<FeatherIcon name="x" class="h-3 w-3" />
+												</button>
+											</span>
+										</div>
+										<span v-else class="text-[11px] text-[color:var(--portal-muted)]">no file-level shares</span>
+									</div>
+								</div>
+
 								<div
-									v-if="!f.user_shares.length && !f.link_shares.length"
+									v-if="!f.user_shares.length && !f.link_shares.length && !(f.files || []).length"
 									class="px-12 py-3 text-xs text-[color:var(--portal-muted)]"
 								>
-									No active shares on this folder.
+									This folder is empty and has no shares.
 								</div>
 							</div>
 						</div>

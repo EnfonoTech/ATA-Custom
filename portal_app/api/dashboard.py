@@ -60,7 +60,8 @@ def get_dashboard_data():
 	if has_expense:
 		cost_fields.append("total_expense_claim")
 
-	budget_health = {"under_80": 0, "at_risk": 0, "over_100": 0}
+	budget_health = {"under_80": 0, "at_risk": 0, "over_100": 0, "avg_pct": 0.0, "max_pct": 0.0}
+	pct_samples = []
 	for p in frappe.get_all(
 		"Project",
 		filters={"name": ["in", allowed]},
@@ -76,12 +77,16 @@ def get_dashboard_data():
 		if budget <= 0:
 			continue
 		ratio = (spent / budget) * 100.0
+		pct_samples.append(ratio)
 		if ratio >= 100:
 			budget_health["over_100"] += 1
 		elif ratio >= 80:
 			budget_health["at_risk"] += 1
 		else:
 			budget_health["under_80"] += 1
+	if pct_samples:
+		budget_health["avg_pct"] = round(sum(pct_samples) / len(pct_samples), 1)
+		budget_health["max_pct"] = round(max(pct_samples), 1)
 
 	return {
 		**portfolio,

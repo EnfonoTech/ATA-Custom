@@ -2,7 +2,9 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { call } from "@/api";
-import { Button, TextInput } from "frappe-ui";
+import { Button, TextInput, FeatherIcon } from "frappe-ui";
+import EmptyState from "@/component/EmptyState.vue";
+import SkeletonBlock from "@/component/SkeletonBlock.vue";
 
 const router = useRouter();
 
@@ -69,8 +71,12 @@ function isTask(ev) {
 
 function eventPillClass(ev) {
 	return isTask(ev)
-		? "bg-violet-100 text-violet-900 hover:bg-violet-200"
-		: "bg-sky-100 text-sky-900 hover:bg-sky-200";
+		? "bg-violet-50 text-violet-900 ring-1 ring-violet-200 hover:bg-violet-100"
+		: "bg-sky-50 text-sky-900 ring-1 ring-sky-200 hover:bg-sky-100";
+}
+
+function eventDotClass(ev) {
+	return isTask(ev) ? "bg-violet-500" : "bg-sky-500";
 }
 
 const rangeTitle = computed(() => {
@@ -241,28 +247,38 @@ onMounted(() => loadEvents());
 </script>
 
 <template>
-	<div class="h-full overflow-auto bg-gray-50 p-4 sm:p-6">
-		<div class="mx-auto max-w-6xl space-y-4">
-			<div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-				<div>
-					<h1 class="text-2xl font-bold text-gray-900">Calendar</h1>
-					<p class="text-sm text-gray-600">
-						Each entry is a <strong>project</strong> or <strong>task</strong>. It is drawn on every day from its
-						<strong>start</strong> through its <strong>end</strong> (inclusive), so the bar “covers” that whole
-						range on the grid. Dates come from ERPNext
-						<em>expected</em> start/end, or <em>actual</em> dates if expected is empty; tasks can also use
-						<em>closing date</em>. Click any entry to open that project in the portal.
-					</p>
-				</div>
-				<div class="flex flex-wrap gap-2 text-xs text-gray-600">
-					<span class="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-sky-900">Project</span>
-					<span class="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-violet-900">Task</span>
+	<div class="h-full overflow-auto p-4 sm:p-6" style="background: var(--portal-bg)">
+		<div class="mx-auto max-w-6xl space-y-5">
+			<div class="portal-hero portal-anim-in">
+				<div class="relative flex flex-wrap items-start justify-between gap-3">
+					<div class="min-w-0">
+						<span class="portal-pill portal-pill-accent">
+							<FeatherIcon name="calendar" class="h-3 w-3" />
+							Calendar
+						</span>
+						<h1 class="mt-2 text-2xl font-semibold tracking-tight text-[color:var(--portal-text)]">
+							Project & task timeline
+						</h1>
+						<p class="mt-1 max-w-2xl text-sm text-[color:var(--portal-muted)]">
+							Each entry is a <strong>project</strong> or <strong>task</strong>, drawn on every day from its start through its end. Click any entry to open that project.
+						</p>
+					</div>
+					<div class="flex shrink-0 flex-wrap gap-2">
+						<span class="portal-pill" style="background: rgba(56, 189, 248, 0.12); color: rgb(7, 89, 133); border-color: rgba(56, 189, 248, 0.3);">
+							<span class="h-2 w-2 rounded-full bg-sky-500"></span>
+							Project
+						</span>
+						<span class="portal-pill" style="background: rgba(167, 139, 250, 0.12); color: rgb(76, 29, 149); border-color: rgba(167, 139, 250, 0.3);">
+							<span class="h-2 w-2 rounded-full bg-violet-500"></span>
+							Task
+						</span>
+					</div>
 				</div>
 			</div>
 
-			<div class="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+			<div class="portal-card-strong flex flex-col gap-3 p-4">
 				<div class="flex flex-wrap items-center gap-2">
-					<div class="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-0.5">
+					<div class="inline-flex rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-0.5">
 						<button
 							v-for="mode in [
 								{ id: 'month', label: 'Month' },
@@ -274,40 +290,43 @@ onMounted(() => loadEvents());
 							class="rounded-lg px-3 py-1.5 text-sm font-medium transition"
 							:class="
 								viewMode === mode.id
-									? 'bg-white text-gray-900 shadow-sm'
-									: 'text-gray-600 hover:text-gray-900'
+									? 'bg-white text-[color:var(--portal-text)] shadow-sm'
+									: 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'
 							"
 							@click="viewMode = mode.id"
 						>
 							{{ mode.label }}
 						</button>
 					</div>
-					<div class="mx-2 hidden h-6 w-px bg-gray-200 sm:block" />
-					<Button type="button" variant="outline" class="text-sm" @click="goToday">Today</Button>
+					<div class="mx-2 hidden h-6 w-px bg-[color:var(--portal-border)] sm:block" />
+					<button class="portal-btn" @click="goToday">
+						<FeatherIcon name="target" class="h-3.5 w-3.5" />
+						Today
+					</button>
 					<div class="flex items-center gap-1">
 						<button
 							type="button"
-							class="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+							class="rounded-lg border border-[color:var(--portal-border)] bg-white px-2 py-1.5 text-[color:var(--portal-text)] transition hover:bg-[color:var(--portal-bg)]"
 							aria-label="Previous"
 							@click="shiftPeriod(-1)"
 						>
-							‹
+							<FeatherIcon name="chevron-left" class="h-4 w-4" />
 						</button>
-						<span class="min-w-[10rem] text-center text-sm font-semibold text-gray-800">{{ rangeTitle }}</span>
+						<span class="min-w-[10rem] text-center text-sm font-semibold text-[color:var(--portal-text)]">{{ rangeTitle }}</span>
 						<button
 							type="button"
-							class="rounded-lg border border-gray-200 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+							class="rounded-lg border border-[color:var(--portal-border)] bg-white px-2 py-1.5 text-[color:var(--portal-text)] transition hover:bg-[color:var(--portal-bg)]"
 							aria-label="Next"
 							@click="shiftPeriod(1)"
 						>
-							›
+							<FeatherIcon name="chevron-right" class="h-4 w-4" />
 						</button>
 					</div>
 				</div>
 
 				<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
 					<div class="lg:col-span-2">
-						<label class="mb-1 block text-xs font-medium text-gray-500">Search</label>
+						<label class="portal-section-title mb-1 block">Search</label>
 						<TextInput
 							v-model="searchQuery"
 							class="w-full rounded-xl"
@@ -315,22 +334,16 @@ onMounted(() => loadEvents());
 						/>
 					</div>
 					<div>
-						<label class="mb-1 block text-xs font-medium text-gray-500">Type</label>
-						<select
-							v-model="typeFilter"
-							class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
-						>
+						<label class="portal-section-title mb-1 block">Type</label>
+						<select v-model="typeFilter" class="portal-input">
 							<option value="all">Projects &amp; tasks</option>
 							<option value="project">Projects only</option>
 							<option value="task">Tasks only</option>
 						</select>
 					</div>
 					<div>
-						<label class="mb-1 block text-xs font-medium text-gray-500">Project</label>
-						<select
-							v-model="projectFilter"
-							class="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900"
-						>
+						<label class="portal-section-title mb-1 block">Project</label>
+						<select v-model="projectFilter" class="portal-input">
 							<option value="">All accessible projects</option>
 							<option v-for="p in projectOptions" :key="p.name" :value="p.name">
 								{{ p.project_name || p.name }}
@@ -340,27 +353,29 @@ onMounted(() => loadEvents());
 				</div>
 			</div>
 
-			<div v-if="loading" class="rounded-2xl border bg-white p-8 text-center text-gray-500">Loading calendar…</div>
-
-			<div
-				v-else-if="!events.length"
-				class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950"
-			>
-				<p class="font-semibold text-amber-900">No dated projects or tasks in this view</p>
-				<p class="mt-2 text-amber-900/90">
-					The portal only shows rows that have at least one calendar date in ERPNext. Set
-					<strong>Expected Start / End</strong> on the Project (or rely on Actual Start/End from timesheets), and
-					<strong>Expected</strong> or <strong>Actual</strong> dates (or Closing Date) on Tasks. Then pick the month
-					that overlaps those dates, or clear the search / project filter above.
-				</p>
+			<div v-if="loading" class="portal-card-strong space-y-3 p-5">
+				<div class="grid grid-cols-7 gap-2">
+					<SkeletonBlock v-for="i in 7" :key="`day-h-${i}`" h="1.25rem" />
+				</div>
+				<div class="grid grid-cols-7 gap-2">
+					<SkeletonBlock v-for="i in 35" :key="`day-${i}`" h="5rem" rounded="0.75rem" />
+				</div>
 			</div>
+
+			<EmptyState
+				v-else-if="!events.length"
+				icon="calendar"
+				title="No dated projects or tasks in this view"
+				message="Set Expected Start / End on the Project (or actual dates from timesheets), and dates on Tasks. Then pick a month that overlaps, or clear the search / project filter above."
+				gradient="linear-gradient(135deg, #f59e0b 0%, #fb923c 100%)"
+			/>
 
 			<!-- Month grid -->
 			<div
 				v-else-if="viewMode === 'month' && events.length"
-				class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+				class="overflow-hidden rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-sm"
 			>
-				<div class="grid grid-cols-7 border-b border-gray-200 bg-gray-50">
+				<div class="grid grid-cols-7 border-b border-[color:var(--portal-border)] bg-[color:var(--portal-bg)]">
 					<div
 						v-for="w in weekdayLabels"
 						:key="w"
@@ -440,7 +455,7 @@ onMounted(() => loadEvents());
 			</div>
 
 			<!-- Agenda list -->
-			<div v-else-if="viewMode === 'list' && events.length" class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+			<div v-else-if="viewMode === 'list' && events.length" class="overflow-hidden rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-sm">
 				<div class="border-b border-gray-100 bg-gray-50 px-4 py-2 text-xs font-semibold uppercase text-gray-500">
 					All matching items ({{ listRows.length }})
 				</div>

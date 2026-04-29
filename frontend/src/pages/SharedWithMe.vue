@@ -106,6 +106,32 @@ function fmtDate(s) {
 	return d.toLocaleDateString();
 }
 
+/** Strip "Home/Attachments/<project>/" from a file's folder path so the breadcrumb
+ *  shows just the project-relative location. Returns "" for files at the project
+ *  root (no breadcrumb shown in that case). */
+function folderRelativeBreadcrumb(folderPath, project) {
+	if (!folderPath || !project) return "";
+	const root = `Home/Attachments/${project}`;
+	if (folderPath === root) return "";
+	if (folderPath.startsWith(root + "/")) {
+		return folderPath.slice(root.length + 1).split("/").join(" / ");
+	}
+	return folderPath;
+}
+
+function entryIcon(f) {
+	if (f.entry_type === "membership") return "users";
+	if (f.entry_type === "owner") return "upload";
+	if (f.is_file_share) return "file";
+	return "folder";
+}
+function entryIconClass(f) {
+	if (f.entry_type === "membership") return "text-[color:var(--portal-success)]";
+	if (f.entry_type === "owner") return "text-[color:var(--portal-accent)]";
+	if (f.is_file_share) return "text-[color:var(--portal-warning)]";
+	return "text-[color:var(--portal-accent)]";
+}
+
 function statusPillClass(s) {
 	const t = String(s || "").toLowerCase();
 	if (t === "completed") return "portal-pill-success";
@@ -287,10 +313,21 @@ function openFolderInFiles(project, folderPath) {
 									:name="expandedFolders.has(`${p.project}::${f.folder_path}`) ? 'chevron-down' : 'chevron-right'"
 									class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-muted)]"
 								/>
-								<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-accent)]" />
+								<FeatherIcon
+									:name="entryIcon(f)"
+									class="h-3.5 w-3.5 shrink-0"
+									:class="entryIconClass(f)"
+								/>
 								<span class="min-w-0 flex-1 truncate font-medium text-[color:var(--portal-text)]">
 									{{ f.folder_label }}
 								</span>
+								<span v-if="f.entry_type === 'membership'" class="portal-pill portal-pill-success">
+									Team access
+								</span>
+								<span v-else-if="f.entry_type === 'owner'" class="portal-pill portal-pill-accent">
+									Your uploads
+								</span>
+								<span v-else-if="f.is_file_share" class="portal-pill portal-pill-muted">single file</span>
 								<span class="portal-pill portal-pill-muted">{{ f.file_count }} file{{ f.file_count === 1 ? "" : "s" }}</span>
 								<span v-if="f.expires_at" class="hidden text-[11px] text-[color:var(--portal-muted)] sm:inline">
 									Expires {{ fmtDate(f.expires_at) }}
@@ -324,10 +361,27 @@ function openFolderInFiles(project, folderPath) {
 								>
 									<FeatherIcon name="file" class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-muted)]" />
 									<div class="min-w-0 flex-1">
-										<p class="truncate font-medium text-[color:var(--portal-text)]">
-											{{ file.file_name }}
-											<span v-if="file.is_private" class="ml-1 text-[10px] text-[color:var(--portal-subtle)]">
+										<p class="flex items-center gap-2 truncate font-medium text-[color:var(--portal-text)]">
+											<span class="truncate">{{ file.file_name }}</span>
+											<span v-if="file.owner_self" class="portal-pill portal-pill-accent text-[10px]">You</span>
+											<span v-if="file.is_private" class="text-[10px] text-[color:var(--portal-subtle)]">
 												(private)
+											</span>
+										</p>
+										<!-- Subfolder breadcrumb so the user knows exactly where this file lives. -->
+										<p
+											v-if="folderRelativeBreadcrumb(file.folder, p.project)"
+											class="flex items-center gap-1 truncate text-[11px] text-[color:var(--portal-muted)]"
+										>
+											<FeatherIcon name="map-pin" class="h-3 w-3 shrink-0 text-[color:var(--portal-subtle)]" />
+											<span class="flex flex-wrap items-center gap-1">
+												<template
+													v-for="(seg, i) in folderRelativeBreadcrumb(file.folder, p.project).split(' / ')"
+													:key="`crumb-${file.name}-${i}`"
+												>
+													<span v-if="i > 0" class="text-[color:var(--portal-subtle)]">/</span>
+													<span class="truncate">{{ seg }}</span>
+												</template>
 											</span>
 										</p>
 										<p class="truncate text-[11px] text-[color:var(--portal-muted)]">

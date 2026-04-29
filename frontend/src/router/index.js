@@ -1,20 +1,23 @@
 import { createRouter, createWebHistory } from "vue-router";
-import Login from "@/pages/Login.vue";
-import Layout from "@/pages/Layout.vue";
-import Dashboard from "@/pages/Dashboard.vue";
-import Projects from "@/pages/Projects.vue";
-import ProjectDetail from "@/pages/ProjectDetail.vue";
-import Kanban from "@/pages/Kanban.vue";
-import Calendar from "@/pages/Calendar.vue";
-import Tasks from "@/pages/Tasks.vue";
-import Files from "@/pages/Files.vue";
-import FileTools from "@/pages/FileTools.vue";
-import SharedFolder from "@/pages/SharedFolder.vue";
-import SharedWithMe from "@/pages/SharedWithMe.vue";
-import ManageShares from "@/pages/ManageShares.vue";
-import Profile from "@/pages/Profile.vue";
-import Admin from "@/pages/Admin.vue";
 import { call } from "@/api";
+
+// Layout + Login eager-load (Layout wraps every authed page; Login is the first paint
+// for unauth visitors). Everything else is lazy-loaded so the initial bundle stays small.
+import Layout from "@/pages/Layout.vue";
+import Login from "@/pages/Login.vue";
+const Dashboard     = () => import("@/pages/Dashboard.vue");
+const Projects      = () => import("@/pages/Projects.vue");
+const ProjectDetail = () => import("@/pages/ProjectDetail.vue");
+const Kanban        = () => import("@/pages/Kanban.vue");
+const Calendar      = () => import("@/pages/Calendar.vue");
+const Tasks         = () => import("@/pages/Tasks.vue");
+const Files         = () => import("@/pages/Files.vue");
+const FileTools     = () => import("@/pages/FileTools.vue");
+const SharedFolder  = () => import("@/pages/SharedFolder.vue");
+const SharedWithMe  = () => import("@/pages/SharedWithMe.vue");
+const ManageShares  = () => import("@/pages/ManageShares.vue");
+const Profile       = () => import("@/pages/Profile.vue");
+const Admin         = () => import("@/pages/Admin.vue");
 
 const routes = [
 	{

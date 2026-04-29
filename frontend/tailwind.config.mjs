@@ -1,7 +1,7 @@
 import frappeUiPreset from "frappe-ui/tailwind";
 
 export default {
-    darkMode: false,
+    darkMode: "media",
     presets: [
         frappeUiPreset
     ],

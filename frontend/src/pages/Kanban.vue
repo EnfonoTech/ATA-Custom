@@ -65,6 +65,49 @@ async function updateStage(projectName, stage) {
 		stageSaving.value = "";
 	}
 }
+
+// Drag-and-drop between columns. We carry the project name in dataTransfer; on drop
+// we call the same updateStage endpoint, then reload the board.
+const dragProject = ref("");
+const dragTargetStage = ref("");
+function onCardDragStart(e, p) {
+	if (!canEditProject(p.name)) {
+		e.preventDefault();
+		return;
+	}
+	dragProject.value = p.name;
+	if (e.dataTransfer) {
+		e.dataTransfer.effectAllowed = "move";
+		try {
+			e.dataTransfer.setData("text/plain", p.name);
+		} catch {
+			/* some browsers reject custom types */
+		}
+	}
+}
+function onCardDragEnd() {
+	dragProject.value = "";
+	dragTargetStage.value = "";
+}
+function onColumnDragOver(e, col) {
+	if (!dragProject.value) return;
+	e.preventDefault();
+	if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+	dragTargetStage.value = col.stage;
+}
+function onColumnDragLeave(col) {
+	if (dragTargetStage.value === col.stage) dragTargetStage.value = "";
+}
+async function onColumnDrop(col) {
+	const name = dragProject.value;
+	dragProject.value = "";
+	dragTargetStage.value = "";
+	if (!name) return;
+	// Skip when dropped on the same column.
+	const current = board.value.columns.find((c) => c.projects.some((p) => p.name === name));
+	if (current?.stage === col.stage) return;
+	await updateStage(name, col.stage);
+}
 </script>
 
 <template>
@@ -92,7 +135,11 @@ async function updateStage(projectName, stage) {
 				<div
 					v-for="col in board.columns"
 					:key="col.stage"
-					class="portal-card-strong w-80 shrink-0 overflow-hidden p-0"
+					class="portal-card-strong w-80 shrink-0 overflow-hidden p-0 transition"
+					:class="dragTargetStage === col.stage ? 'ring-2 ring-[color:var(--portal-accent)]' : ''"
+					@dragover="onColumnDragOver($event, col)"
+					@dragleave="onColumnDragLeave(col)"
+					@drop.prevent="onColumnDrop(col)"
 				>
 					<div
 						class="relative flex items-center justify-between gap-2 px-3 py-3"
@@ -112,7 +159,11 @@ async function updateStage(projectName, stage) {
 							v-for="p in col.projects"
 							:key="p.name"
 							class="cursor-pointer rounded-xl border border-[color:var(--portal-border)] bg-white p-3 text-sm transition hover:border-[color:var(--portal-accent)] hover:shadow-md"
+							:class="dragProject === p.name ? 'opacity-50' : ''"
+							:draggable="canEditProject(p.name)"
 							@click="router.push('/projects/' + encodeURIComponent(p.name))"
+							@dragstart="onCardDragStart($event, p)"
+							@dragend="onCardDragEnd"
 						>
 							<div class="flex items-start justify-between gap-2">
 								<div class="min-w-0">

@@ -12,6 +12,8 @@ const search = ref("");
 const status = ref("");
 const viewMode = ref("year");
 const expandedYears = ref({});
+// Membership filter: "all" (default), "team" (I'm a team member), "manage" (I manage)
+const membershipFilter = ref("all");
 
 const portalCapabilities = inject("portalCapabilities", ref({}));
 const refreshPortalCapabilities = inject("refreshPortalCapabilities", async () => {});
@@ -173,9 +175,20 @@ function projectYear(p) {
 	return "No Year";
 }
 
+const visibleProjects = computed(() => {
+	if (membershipFilter.value === "all") return projects.value;
+	const teamSet = new Set(portalCapabilities.value?.team_member_project_names || []);
+	const manageSet = new Set(portalCapabilities.value?.manageable_project_names || []);
+	return projects.value.filter((p) => {
+		if (membershipFilter.value === "team") return teamSet.has(p.name);
+		if (membershipFilter.value === "manage") return manageSet.has(p.name);
+		return true;
+	});
+});
+
 const groupedProjectsByYear = computed(() => {
 	const out = {};
-	for (const p of projects.value) {
+	for (const p of visibleProjects.value) {
 		const y = projectYear(p);
 		if (!out[y]) out[y] = [];
 		out[y].push(p);
@@ -267,16 +280,48 @@ function toggleYear(y) {
 				<div class="mb-3 flex flex-wrap items-center gap-2 text-sm text-[color:var(--portal-muted)]">
 					<span class="portal-pill portal-pill-muted">
 						<FeatherIcon name="folder" class="h-3 w-3" />
-						{{ projects.length }} projects
+						{{ visibleProjects.length }} of {{ projects.length }} projects
 					</span>
 					<span class="portal-pill portal-pill-accent">
 						<FeatherIcon name="circle" class="h-3 w-3" />
-						Open {{ projects.filter((p) => p.status === "Open").length }}
+						Open {{ visibleProjects.filter((p) => p.status === "Open").length }}
 					</span>
 					<span class="portal-pill portal-pill-success">
 						<FeatherIcon name="check-circle" class="h-3 w-3" />
-						Completed {{ projects.filter((p) => p.status === "Completed").length }}
+						Completed {{ visibleProjects.filter((p) => p.status === "Completed").length }}
 					</span>
+				</div>
+				<div class="mb-3 inline-flex rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-0.5 text-xs">
+					<button
+						class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium"
+						:class="membershipFilter === 'all' ? 'bg-white text-[color:var(--portal-text)] shadow-sm' : 'text-[color:var(--portal-muted)]'"
+						@click="membershipFilter = 'all'"
+					>
+						<FeatherIcon name="layers" class="h-3.5 w-3.5" />
+						All accessible
+					</button>
+					<button
+						class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium"
+						:class="membershipFilter === 'team' ? 'bg-white text-[color:var(--portal-text)] shadow-sm' : 'text-[color:var(--portal-muted)]'"
+						@click="membershipFilter = 'team'"
+					>
+						<FeatherIcon name="users" class="h-3.5 w-3.5" />
+						I'm a team member
+						<span class="portal-pill portal-pill-muted">
+							{{ (portalCapabilities.team_member_project_names || []).length }}
+						</span>
+					</button>
+					<button
+						class="flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-medium"
+						:class="membershipFilter === 'manage' ? 'bg-white text-[color:var(--portal-text)] shadow-sm' : 'text-[color:var(--portal-muted)]'"
+						@click="membershipFilter = 'manage'"
+					>
+						<FeatherIcon name="shield" class="h-3.5 w-3.5" />
+						I manage
+						<span class="portal-pill portal-pill-muted">
+							{{ (portalCapabilities.manageable_project_names || []).length }}
+						</span>
+					</button>
 				</div>
 				<div class="flex flex-wrap gap-3">
 					<div class="relative min-w-[200px] flex-1">
@@ -320,7 +365,7 @@ function toggleYear(y) {
 					</thead>
 					<tbody>
 						<tr
-							v-for="p in projects"
+							v-for="p in visibleProjects"
 							:key="p.name"
 							class="cursor-pointer border-b border-[color:var(--portal-border)] transition hover:bg-[color:var(--portal-accent-soft)]"
 							@click="router.push('/projects/' + encodeURIComponent(p.name))"
@@ -336,7 +381,7 @@ function toggleYear(y) {
 							<td class="px-4 py-3">{{ p.expected_end_date || "—" }}</td>
 							<td class="px-4 py-3 text-right font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</td>
 						</tr>
-						<tr v-if="!projects.length">
+						<tr v-if="!visibleProjects.length">
 							<td colspan="8" class="p-10 text-center text-[color:var(--portal-muted)]">No projects match your filters.</td>
 						</tr>
 					</tbody>
@@ -344,7 +389,7 @@ function toggleYear(y) {
 			</div>
 			<div v-else-if="viewMode === 'cards'" class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 				<div
-					v-for="p in projects"
+					v-for="p in visibleProjects"
 					:key="p.name"
 					class="portal-card cursor-pointer p-5 transition hover:-translate-y-0.5"
 					@click="router.push('/projects/' + encodeURIComponent(p.name))"
@@ -379,7 +424,7 @@ function toggleYear(y) {
 					</div>
 				</div>
 				<div
-					v-if="!projects.length"
+					v-if="!visibleProjects.length"
 					class="sm:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-[color:var(--portal-border-strong)] bg-white p-10 text-center text-[color:var(--portal-muted)]"
 				>
 					No projects match your filters.
@@ -434,7 +479,7 @@ function toggleYear(y) {
 					</div>
 				</div>
 				<div
-					v-if="!projects.length"
+					v-if="!visibleProjects.length"
 					class="rounded-2xl border border-dashed border-[color:var(--portal-border-strong)] bg-white p-10 text-center text-[color:var(--portal-muted)]"
 				>
 					No projects match your filters.

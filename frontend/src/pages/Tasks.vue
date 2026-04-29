@@ -1,8 +1,12 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch, inject } from "vue";
 import { call } from "@/api";
 import { useRoute, useRouter } from "vue-router";
 import { Button, TextInput, FeatherIcon } from "frappe-ui";
+import { useToast } from "@/composables/useToast";
+
+const portalCapabilities = inject("portalCapabilities", ref({}));
+const toaster = useToast();
 
 const route = useRoute();
 const router = useRouter();
@@ -24,6 +28,117 @@ const statusOptions = ["Open", "Working", "Pending Review", "Overdue", "Complete
 const priorityOptions = ["Low", "Medium", "High", "Urgent"];
 
 let debounce;
+
+// Comments modal state
+const commentsTask = ref(null);
+const commentsLoading = ref(false);
+const commentsList = ref([]);
+const commentsDraft = ref("");
+const commentsBusy = ref(false);
+
+async function openCommentsFor(t) {
+	commentsTask.value = t;
+	commentsList.value = [];
+	commentsDraft.value = "";
+	commentsLoading.value = true;
+	try {
+		const res = await call({
+			method: "portal_app.api.projects.list_task_comments",
+			args: { task: t.name },
+		});
+		commentsList.value = res?.comments || [];
+	} catch (e) {
+		toaster.error(e?.responseBody?.message || "Could not load comments.");
+	} finally {
+		commentsLoading.value = false;
+	}
+}
+function closeComments() {
+	commentsTask.value = null;
+	commentsList.value = [];
+	commentsDraft.value = "";
+}
+async function postComment() {
+	const body = commentsDraft.value.trim();
+	if (!body || !commentsTask.value) return;
+	commentsBusy.value = true;
+	try {
+		await call({
+			method: "portal_app.api.projects.add_task_comment",
+			type: "POST",
+			args: { task: commentsTask.value.name, content: body },
+		});
+		commentsDraft.value = "";
+		// Reload thread
+		const res = await call({
+			method: "portal_app.api.projects.list_task_comments",
+			args: { task: commentsTask.value.name },
+		});
+		commentsList.value = res?.comments || [];
+	} catch (e) {
+		toaster.error(e?.responseBody?.message || "Could not post comment.");
+	} finally {
+		commentsBusy.value = false;
+	}
+}
+
+function fmtDateTime(s) {
+	if (!s) return "";
+	const d = new Date(String(s).replace(" ", "T"));
+	return Number.isNaN(d.getTime()) ? s : d.toLocaleString();
+}
+
+function stripHtml(html) {
+	if (!html) return "";
+	const div = document.createElement("div");
+	div.innerHTML = String(html);
+	return div.textContent || div.innerText || "";
+}
+
+// Quick-create state. Visible only to project admins; backend enforces this too.
+const newTaskOpen = ref(false);
+const newTaskSubject = ref("");
+const newTaskProject = ref("");
+const newTaskPriority = ref("Medium");
+const newTaskEnd = ref("");
+const newTaskBusy = ref(false);
+const manageableProjects = computed(() => portalCapabilities.value?.manageable_project_names || []);
+const canCreateTask = computed(() => manageableProjects.value.length > 0);
+
+async function createNewTask() {
+	const subject = newTaskSubject.value.trim();
+	if (!subject) {
+		toaster.error("Subject is required.");
+		return;
+	}
+	const proj = newTaskProject.value || project.value || manageableProjects.value[0];
+	if (!proj) {
+		toaster.error("Pick a project for this task.");
+		return;
+	}
+	newTaskBusy.value = true;
+	try {
+		await call({
+			method: "portal_app.api.projects.create_task",
+			type: "POST",
+			args: {
+				project: proj,
+				subject,
+				status: "Open",
+				priority: newTaskPriority.value || "Medium",
+				exp_end_date: newTaskEnd.value || undefined,
+			},
+		});
+		toaster.success(`Task created on ${proj}.`);
+		newTaskSubject.value = "";
+		newTaskEnd.value = "";
+		await loadTasks();
+	} catch (e) {
+		toaster.error(e?.responseBody?.message || "Could not create task.");
+	} finally {
+		newTaskBusy.value = false;
+	}
+}
 
 function applyRoutePreset() {
 	if (route.query.project) project.value = String(route.query.project);
@@ -134,10 +249,57 @@ onMounted(async () => {
 							Search and filter tasks, track progress, and update status — all from one place.
 						</p>
 					</div>
-					<button class="portal-btn" @click="router.push('/projects')">
-						<FeatherIcon name="arrow-left" class="h-4 w-4" />
-						Back to projects
-					</button>
+					<div class="flex items-center gap-2">
+						<button v-if="canCreateTask" class="portal-btn portal-btn-primary" @click="newTaskOpen = !newTaskOpen">
+							<FeatherIcon :name="newTaskOpen ? 'x' : 'plus'" class="h-4 w-4" />
+							{{ newTaskOpen ? "Cancel" : "New task" }}
+						</button>
+						<button class="portal-btn" @click="router.push('/projects')">
+							<FeatherIcon name="arrow-left" class="h-4 w-4" />
+							Back to projects
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div v-if="newTaskOpen && canCreateTask" class="portal-card-strong space-y-3 p-4">
+				<div class="grid gap-3 md:grid-cols-[1fr_minmax(0,160px)_minmax(0,140px)_minmax(0,160px)_auto]">
+					<div>
+						<label class="portal-section-title mb-1 block">Subject</label>
+						<TextInput
+							v-model="newTaskSubject"
+							class="w-full rounded-xl"
+							placeholder="What needs to be done?"
+							@keyup.enter="createNewTask"
+						/>
+					</div>
+					<div>
+						<label class="portal-section-title mb-1 block">Project</label>
+						<select v-model="newTaskProject" class="portal-input">
+							<option v-for="p in manageableProjects" :key="p" :value="p">{{ p }}</option>
+						</select>
+					</div>
+					<div>
+						<label class="portal-section-title mb-1 block">Priority</label>
+						<select v-model="newTaskPriority" class="portal-input">
+							<option v-for="p in priorityOptions" :key="p" :value="p">{{ p }}</option>
+						</select>
+					</div>
+					<div>
+						<label class="portal-section-title mb-1 block">Due date</label>
+						<input v-model="newTaskEnd" type="date" class="portal-input" />
+					</div>
+					<div class="flex items-end">
+						<Button
+							variant="solid"
+							class="rounded-xl"
+							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+							:loading="newTaskBusy"
+							@click="createNewTask"
+						>
+							Create
+						</Button>
+					</div>
 				</div>
 			</div>
 
@@ -255,6 +417,7 @@ onMounted(async () => {
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Progress</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Start</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">End</th>
+							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Discuss</th>
 							<th class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider">Action</th>
 						</tr>
 					</thead>
@@ -313,6 +476,15 @@ onMounted(async () => {
 							<td class="px-3 py-3">
 								<input v-model="t.exp_end_date" type="date" class="portal-input py-1.5" />
 							</td>
+							<td class="px-3 py-3">
+								<button
+									class="portal-btn portal-btn-ghost text-xs"
+									@click="openCommentsFor(t)"
+								>
+									<FeatherIcon name="message-circle" class="h-3.5 w-3.5" />
+									Comments
+								</button>
+							</td>
 							<td class="px-3 py-3 text-right">
 								<Button
 									type="button"
@@ -328,7 +500,7 @@ onMounted(async () => {
 							</td>
 						</tr>
 						<tr v-if="!tasks.length">
-							<td colspan="8" class="px-3 py-12 text-center text-[color:var(--portal-muted)]">
+							<td colspan="9" class="px-3 py-12 text-center text-[color:var(--portal-muted)]">
 								No tasks found. Try clearing filters or disabling “Only my tasks”.
 							</td>
 						</tr>
@@ -340,5 +512,77 @@ onMounted(async () => {
 				{{ err }}
 			</div>
 		</div>
+
+		<Teleport to="body">
+			<div
+				v-if="commentsTask"
+				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+				@click.self="closeComments"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+				<div class="relative z-10 flex max-h-[85vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in">
+					<div class="flex items-start justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
+						<div class="min-w-0 flex-1">
+							<div class="flex items-center gap-2">
+								<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);">
+									<FeatherIcon name="message-circle" class="h-4 w-4" />
+								</div>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Comments</h2>
+							</div>
+							<p class="mt-1 truncate text-xs text-[color:var(--portal-muted)]">
+								{{ commentsTask.subject || commentsTask.name }} · {{ commentsTask.project }}
+							</p>
+						</div>
+						<button class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)]" @click="closeComments">
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+					<div class="flex-1 overflow-auto px-5 py-4">
+						<p v-if="commentsLoading" class="text-sm text-[color:var(--portal-muted)]">Loading…</p>
+						<div v-else-if="!commentsList.length" class="rounded-xl border border-dashed border-[color:var(--portal-border-strong)] py-8 text-center text-sm text-[color:var(--portal-muted)]">
+							No comments yet. Be the first to add one.
+						</div>
+						<ul v-else class="space-y-3">
+							<li v-for="c in commentsList" :key="c.name" class="flex gap-3">
+								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white" style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);">
+									{{ (c.author_full_name || c.owner || "?").charAt(0).toUpperCase() }}
+								</div>
+								<div class="min-w-0 flex-1">
+									<p class="text-sm">
+										<strong class="text-[color:var(--portal-text)]">{{ c.author_full_name || c.owner }}</strong>
+										<span class="ml-2 text-[11px] text-[color:var(--portal-muted)]">{{ fmtDateTime(c.creation) }}</span>
+									</p>
+									<p class="mt-0.5 whitespace-pre-wrap break-words text-sm text-[color:var(--portal-text)]">{{ stripHtml(c.content) }}</p>
+								</div>
+							</li>
+						</ul>
+					</div>
+					<div class="border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-3">
+						<div class="flex items-end gap-2">
+							<textarea
+								v-model="commentsDraft"
+								rows="2"
+								class="portal-input flex-1 resize-none"
+								placeholder="Write a comment… (Cmd/Ctrl+Enter to send)"
+								@keydown.meta.enter="postComment"
+								@keydown.ctrl.enter="postComment"
+							/>
+							<Button
+								variant="solid"
+								class="rounded-xl"
+								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+								:loading="commentsBusy"
+								:disabled="!commentsDraft.trim()"
+								@click="postComment"
+							>
+								Send
+							</Button>
+						</div>
+					</div>
+				</div>
+			</div>
+		</Teleport>
 	</div>
 </template>

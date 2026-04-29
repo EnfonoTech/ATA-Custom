@@ -402,6 +402,16 @@ def get_capabilities():
 
 	allowed_names = helper.get_allowed_project_names()
 	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	# Projects where this user is explicitly listed in the Project Users table.
+	# Used by the Projects page filter and the Shared-with-me page (so a team
+	# member sees the project as part of "what I can access").
+	team_member_names: list[str] = []
+	if frappe.session.user not in ("Guest", "Administrator"):
+		rows = frappe.db.sql(
+			"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
+			frappe.session.user,
+		)
+		team_member_names = [r[0] for r in rows if r and r[0] in allowed_names]
 
 	is_customer_portal = helper.user_is_customer_portal_user()
 	staff_project_access = helper.has_portal_staff_project_access()
@@ -414,6 +424,10 @@ def get_capabilities():
 		# Every project the current user is allocated to (project member, manager, or staff).
 		# The portal uses this to show upload + share UI to all team members, not just managers.
 		"allowed_project_names": allowed_names if not effective_customer_portal else [],
+		# Projects where the user appears in the Project Users table — narrower than
+		# allowed (excludes manager-via-role overrides). Powers the "I'm a team
+		# member" filter on Projects and the Shared-with-me Team membership rows.
+		"team_member_project_names": team_member_names if not effective_customer_portal else [],
 		"is_customer_portal_user": effective_customer_portal,
 		"can_manage_customers": helper.can_manage_customers_in_portal(),
 		"can_edit_portal_folder_template": helper.can_edit_portal_folder_template()
@@ -930,6 +944,123 @@ def update_task(task, status=None, priority=None, progress=None, exp_start_date=
 
 	doc.save(ignore_permissions=True)
 	return {"ok": True, "task": doc.name}
+
+
+@frappe.whitelist()
+def list_task_comments(task):
+	"""Read-only thread for a Task. Anyone with access to the task's project can see them."""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	task = cstr(task or "").strip()
+	if not task:
+		return {"comments": []}
+	_assert_task_access(task)
+	rows = frappe.get_all(
+		"Comment",
+		filters={
+			"reference_doctype": "Task",
+			"reference_name": task,
+			"comment_type": "Comment",
+		},
+		fields=["name", "owner", "creation", "content"],
+		order_by="creation asc",
+		limit_page_length=200,
+		ignore_permissions=True,
+	)
+	# Hydrate owner full name for nicer display.
+	users = {r["owner"] for r in rows if r.get("owner")}
+	user_meta = {}
+	if users:
+		for u in frappe.get_all(
+			"User",
+			filters={"name": ["in", list(users)]},
+			fields=["name", "full_name", "user_image"],
+			ignore_permissions=True,
+		):
+			user_meta[u["name"]] = u
+	for r in rows:
+		meta = user_meta.get(r.get("owner")) or {}
+		r["author_full_name"] = meta.get("full_name")
+		r["author_image"] = meta.get("user_image")
+	return {"comments": rows}
+
+
+@frappe.whitelist()
+def add_task_comment(task, content):
+	"""Append a comment to a Task using Frappe's built-in Comment doctype."""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	if helper.user_is_customer_portal_user() and not helper.has_portal_staff_project_access():
+		frappe.throw(_("Customer portal users have view-only task access."), frappe.PermissionError)
+	task = cstr(task or "").strip()
+	body = cstr(content or "").strip()
+	if not task or not body:
+		frappe.throw(_("Task and content are required."))
+	_assert_task_access(task)
+	can_edit = helper.can_manage_project(
+		frappe.db.get_value("Task", task, "project")
+	) or _task_is_assigned_to_user(task, frappe.session.user)
+	if not can_edit:
+		frappe.throw(
+			_("Only project managers or assigned users can comment on this task."),
+			frappe.PermissionError,
+		)
+	if len(body) > 5000:
+		body = body[:5000]
+	doc = frappe.get_doc(
+		{
+			"doctype": "Comment",
+			"comment_type": "Comment",
+			"reference_doctype": "Task",
+			"reference_name": task,
+			"content": body,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+	return {"ok": True, "name": doc.name}
+
+
+@frappe.whitelist()
+def create_task(project, subject, status="Open", priority="Medium", exp_end_date=None):
+	"""Quick-create a Task on a project the caller can manage.
+
+	Restricted to project managers (Portal Project Manager / Projects Manager / System
+	Manager) — collaborators can update tasks but creating new ones is a manager action.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	subject = cstr(subject or "").strip()
+	if not subject:
+		frappe.throw(_("Subject is required."))
+	project = cstr(project or "").strip()
+	if not project:
+		frappe.throw(_("Pick a project for this task."))
+	helper.assert_manage_project(project)
+
+	allowed_statuses = {"Open", "Working", "Pending Review", "Overdue", "Completed", "Cancelled"}
+	allowed_priorities = {"Low", "Medium", "High", "Urgent"}
+	doc = frappe.get_doc(
+		{
+			"doctype": "Task",
+			"subject": subject[:140],
+			"project": project,
+			"status": status if status in allowed_statuses else "Open",
+			"priority": priority if priority in allowed_priorities else "Medium",
+			"exp_end_date": exp_end_date or None,
+			"is_group": 0,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+	return {
+		"ok": True,
+		"name": doc.name,
+		"subject": doc.subject,
+		"project": doc.project,
+		"status": doc.status,
+		"priority": doc.priority,
+	}
 
 
 def _calendar_title_matches(search_l: str, title: str | None, extra: str | None = None) -> bool:
