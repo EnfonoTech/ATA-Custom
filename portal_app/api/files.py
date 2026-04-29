@@ -982,9 +982,24 @@ def get_shared_folder_files(token):
 
 @frappe.whitelist()
 def upload_project_file():
-	project = frappe.form_dict.get("project")
+	project = cstr(frappe.form_dict.get("project") or "").strip()
+	# Backwards-compatibility: accept the older `attached_to_name` field name too.
 	if not project:
-		frappe.throw(_("project is required"))
+		project = cstr(frappe.form_dict.get("attached_to_name") or "").strip()
+	# Last resort — derive the project from the target_folder path which always
+	# looks like Home/Attachments/<project>/... in this app. Lets the upload still
+	# succeed if the SPA somehow drops the explicit `project` form field.
+	target_folder_hint = cstr(frappe.form_dict.get("target_folder") or "").strip()
+	if not project and target_folder_hint:
+		parts = target_folder_hint.replace("\\", "/").split("/")
+		if len(parts) >= 3 and parts[0] == "Home" and parts[1] == "Attachments":
+			project = parts[2]
+	if not project:
+		frappe.throw(
+			_(
+				"No project selected for this upload. Pick a project on the Files page (or open the project's detail page) and try again."
+			)
+		)
 	helper.assert_customer_portal_can_upload(project)
 
 	upload = frappe.request.files.get("file")

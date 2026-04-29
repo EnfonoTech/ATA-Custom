@@ -160,7 +160,16 @@ function apiErr(e) {
 }
 
 async function handleFiles(fileList) {
-	if (!props.project || !fileList?.length || !targetFolder.value) return;
+	if (!fileList?.length) return;
+	if (!props.project) {
+		uploadError.value =
+			"No project selected for this upload. Open a project (or pick one on the Files page) and try again.";
+		return;
+	}
+	if (!targetFolder.value) {
+		uploadError.value = "Pick a target subfolder before uploading.";
+		return;
+	}
 	uploadBusy.value = true;
 	uploadError.value = "";
 	uploadInfo.value = "";

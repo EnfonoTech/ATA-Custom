@@ -432,7 +432,16 @@ function apiErr(e) {
 }
 
 async function handleFiles(fileList) {
-	if (!project.value || !fileList?.length) return;
+	if (!fileList?.length) return;
+	if (!project.value) {
+		uploadError.value =
+			"Pick a project from the dropdown above before uploading. The page reloads the project list in the background — refresh once if it stays empty.";
+		return;
+	}
+	if (!targetFolder.value) {
+		uploadError.value = "Pick a target subfolder before uploading.";
+		return;
+	}
 	uploadBusy.value = true;
 	uploadError.value = "";
 	uploadInfo.value = "";

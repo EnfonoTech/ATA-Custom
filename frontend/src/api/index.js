@@ -80,8 +80,9 @@ export async function call({ method, args = {}, type = "GET", responseType = "js
 
 	let res = await send(getCsrfToken());
 
-	if (!res.ok && isPost && res.status === 403) {
-		// Try one CSRF refresh + retry. Frappe re-issues the token after server restart / migrate.
+	// Frappe returns CSRFTokenError as HTTP 400 in some setups and 403 in others.
+	// Peek at the body for any non-OK POST and retry once with a fresh token if it's CSRF.
+	if (!res.ok && isPost && (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 417)) {
 		const errPeek = await res.clone().json().catch(() => ({}));
 		if (isCsrfError(errPeek)) {
 			const fresh = await refreshCsrfToken();
@@ -127,7 +128,7 @@ export async function uploadFile(method, file, extraFields = {}) {
 	};
 
 	let res = await sendOnce(getCsrfToken());
-	if (!res.ok && res.status === 403) {
+	if (!res.ok && (res.status === 400 || res.status === 401 || res.status === 403 || res.status === 417)) {
 		const errPeek = await res.clone().json().catch(() => ({}));
 		if (isCsrfError(errPeek)) {
 			const fresh = await refreshCsrfToken();
