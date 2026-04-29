@@ -413,6 +413,8 @@ def create_folder_share_link(project, folder_path=None, folder=None, expires_day
 		doc.insert(ignore_permissions=True)
 		share_name = doc.name
 
+	frappe.db.commit()
+
 	return {
 		"url": url,
 		"expires_days": expires_days,
@@ -507,13 +509,17 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30):
 
 	def _grant(doctype, name, read=1, write=0):
 		nonlocal docshare_count
+		# Use `add_docshare` (not `add`) — only that one accepts the `flags` kwarg
+		# that lets us bypass the share-permission check. The whitelisted `add`
+		# wrapper drops `flags` from its signature, so passing it raises TypeError
+		# and the entire share silently no-ops.
 		try:
-			import frappe.share as _share
+			from frappe.share import add_docshare
 
-			_share.add(
+			add_docshare(
 				doctype,
 				name,
-				uid,
+				user=uid,
 				read=read,
 				write=write,
 				flags={"ignore_share_permission": True},
@@ -542,6 +548,10 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30):
 	# Parent Project doc — read-only access for navigation.
 	if frappe.db.exists("Project", project):
 		_grant("Project", project)
+
+	# Commit immediately so a concurrent browser tab on /shared-with-me or /manage-shares
+	# sees the new row on its very next call, not after the request transaction closes.
+	frappe.db.commit()
 
 	return {
 		"ok": True,
@@ -596,6 +606,7 @@ def list_folder_shares(project, folder_path=None):
 		],
 		order_by="creation desc",
 		limit_page_length=200,
+		ignore_permissions=True,
 	)
 
 	from frappe.utils import get_datetime, now_datetime
@@ -625,6 +636,7 @@ def _list_native_docshares(project: str, folder_path: str | None) -> list[dict]:
 		fields=["name", "user", "read", "write", "share", "creation"],
 		order_by="creation desc",
 		limit_page_length=200,
+		ignore_permissions=True,
 	)
 	out = []
 	for r in rows:
@@ -686,6 +698,7 @@ def revoke_folder_share(share_name):
 			_share.remove("File", row.get("share_name"), row.get("user"))
 		except Exception:
 			frappe.delete_doc("DocShare", share_name, ignore_permissions=True)
+		frappe.db.commit()
 		return {"ok": True, "share_name": share_name, "native": True}
 
 	doc = frappe.get_doc("Portal Folder Share", share_name)
@@ -708,6 +721,8 @@ def revoke_folder_share(share_name):
 
 	if doc.share_kind == "User" and doc.user and doc.folder_path:
 		_revoke_folder_docshares(doc.project, doc.folder_path, doc.user)
+
+	frappe.db.commit()
 
 	return {"ok": True, "share_name": doc.name}
 
@@ -788,6 +803,7 @@ def list_shared_with_me():
 				"creation",
 			],
 			limit_page_length=500,
+			ignore_permissions=True,
 		)
 		for r in rows:
 			exp = r.get("expires_at")
@@ -811,6 +827,7 @@ def list_shared_with_me():
 		filters={"share_doctype": "File", "user": user, "read": 1},
 		fields=["share_name", "creation"],
 		limit_page_length=2000,
+		ignore_permissions=True,
 	)
 	for r in docshare_rows:
 		fname = r["share_name"]
@@ -897,6 +914,209 @@ def list_shared_with_me():
 
 
 @frappe.whitelist()
+def list_managed_shares():
+	"""All active shares for projects the current user can MANAGE.
+
+	Powers the "Manage shares" page. Restricted to project admins (portal project
+	managers / Projects Manager / System Manager). Project members who can only
+	collaborate use the regular Share modal on each folder; this page is the
+	birds-eye admin view.
+
+	Returns one row per (project, folder, recipient) plus link shares, grouped on
+	the client side. Every row's `can_revoke` is true here because the caller has
+	manage rights on the parent project.
+	"""
+	if frappe.session.user in ("Guest", "Administrator"):
+		return {"projects": []}
+
+	# Manage-shares is admin-only — return the projects the caller can manage.
+	allowed = helper.get_allowed_project_names()
+	if not allowed:
+		return {"projects": []}
+	manageable = {p for p in allowed if helper.can_manage_project(p)}
+	if not manageable:
+		# Not a manager on any project — surface an empty payload with a hint flag so
+		# the UI can show a "you are not a project admin" lock screen.
+		return {"projects": [], "not_admin": True}
+	visible_projects = list(manageable)
+
+	from frappe.utils import get_datetime, now_datetime
+
+	now_dt = now_datetime()
+	by_project: dict[str, dict] = {}
+
+	if _share_doctype_available():
+		# Explicit ignore_permissions=True so a portal_project_manager (without the
+		# Frappe-side "System Manager" role) can still read every share row on the
+		# projects they manage — not just rows they themselves created.
+		rows = frappe.get_all(
+			"Portal Folder Share",
+			filters={"project": ["in", visible_projects], "revoked": 0},
+			fields=[
+				"name",
+				"project",
+				"folder_path",
+				"folder_label",
+				"share_kind",
+				"user",
+				"user_email",
+				"user_full_name",
+				"share_url",
+				"expires_at",
+				"created_by_user",
+				"creation",
+				"last_accessed_at",
+				"access_count",
+			],
+			order_by="creation desc",
+			limit_page_length=2000,
+			ignore_permissions=True,
+		)
+		for r in rows:
+			exp = r.get("expires_at")
+			if exp and get_datetime(exp) < now_dt:
+				continue
+			pj = r["project"]
+			can_revoke = pj in manageable or r.get("created_by_user") == frappe.session.user
+			by_project.setdefault(
+				pj,
+				{"project": pj, "folders": {}},
+			)
+			fkey = r["folder_path"]
+			folder = by_project[pj]["folders"].setdefault(
+				fkey,
+				{
+					"folder_path": fkey,
+					"folder_label": r.get("folder_label") or fkey,
+					"user_shares": [],
+					"link_shares": [],
+				},
+			)
+			entry = {
+				"share_name": r["name"],
+				"share_kind": r["share_kind"],
+				"user": r.get("user"),
+				"user_email": r.get("user_email"),
+				"user_full_name": r.get("user_full_name"),
+				"share_url": r.get("share_url"),
+				"expires_at": str(r["expires_at"]) if r.get("expires_at") else None,
+				"created_by_user": r.get("created_by_user"),
+				"created_on": str(r.get("creation")) if r.get("creation") else None,
+				"last_accessed_at": str(r.get("last_accessed_at")) if r.get("last_accessed_at") else None,
+				"access_count": int(r.get("access_count") or 0),
+				"can_revoke": can_revoke,
+				"native": False,
+			}
+			if r["share_kind"] == "Link":
+				folder["link_shares"].append(entry)
+			else:
+				folder["user_shares"].append(entry)
+
+	# Native ERPNext DocShare rows on File folders for projects the user can manage.
+	# We only include manageable projects here because the row has no audit metadata
+	# to attribute back to the current user.
+	if manageable:
+		native_rows = frappe.get_all(
+			"DocShare",
+			filters={"share_doctype": "File", "user": ["!=", ""], "read": 1},
+			fields=["name", "share_name", "user", "creation"],
+			order_by="creation desc",
+			limit_page_length=5000,
+			ignore_permissions=True,
+		)
+		# share_folder_with_user cascades a DocShare on every nested File. Pre-build a
+		# set of File doc names that are actual folders so we can skip those child-file
+		# rows here — otherwise the page would balloon to one entry per file.
+		all_share_files = {r["share_name"] for r in native_rows if r.get("share_name")}
+		folder_files = set()
+		if all_share_files:
+			folder_files = {
+				row["name"]
+				for row in frappe.get_all(
+					"File",
+					filters={"name": ["in", list(all_share_files)], "is_folder": 1},
+					fields=["name"],
+					limit_page_length=len(all_share_files) + 10,
+					ignore_permissions=True,
+				)
+			}
+		manageable_set = manageable
+		for r in native_rows:
+			fname = r["share_name"]
+			if not fname or fname not in folder_files:
+				# Skip cascade rows on individual files; the folder-level row is what
+				# represents the share to the user in the UI.
+				continue
+			parts = fname.split("/")
+			pj = parts[2] if len(parts) >= 3 and parts[0] == "Home" and parts[1] == "Attachments" else None
+			if not pj or pj not in manageable_set:
+				continue
+			by_project.setdefault(pj, {"project": pj, "folders": {}})
+			folder_entry = by_project[pj]["folders"].setdefault(
+				fname,
+				{
+					"folder_path": fname,
+					"folder_label": (
+						"/".join(parts[3:]) if len(parts) > 3 else _("Project folder (all files)")
+					),
+					"user_shares": [],
+					"link_shares": [],
+				},
+			)
+			# Skip duplicates (same user, same folder, already from Portal Folder Share).
+			if any(s.get("user") == r["user"] for s in folder_entry["user_shares"]):
+				continue
+			user_row = frappe.db.get_value(
+				"User", r["user"], ["email", "full_name"], as_dict=True
+			) or {}
+			folder_entry["user_shares"].append(
+				{
+					"share_name": r["name"],
+					"share_kind": "User",
+					"user": r["user"],
+					"user_email": user_row.get("email"),
+					"user_full_name": user_row.get("full_name"),
+					"share_url": None,
+					"expires_at": None,
+					"created_by_user": None,
+					"created_on": str(r.get("creation")) if r.get("creation") else None,
+					"last_accessed_at": None,
+					"access_count": 0,
+					"can_revoke": True,
+					"native": True,
+				}
+			)
+
+	# Hydrate each project with metadata + flatten folder dict to list.
+	projects_out = []
+	for pj, payload in by_project.items():
+		meta = (
+			frappe.db.get_value(
+				"Project", pj, ["name", "project_name", "status", "customer"], as_dict=True
+			)
+			or {"name": pj, "project_name": pj}
+		)
+		folders_list = list(payload["folders"].values())
+		folders_list.sort(key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower()))
+		# Tally totals so the UI can show a quick badge.
+		total_user = sum(len(f["user_shares"]) for f in folders_list)
+		total_link = sum(len(f["link_shares"]) for f in folders_list)
+		projects_out.append(
+			{
+				"project": meta.get("name") or pj,
+				"project_name": meta.get("project_name") or pj,
+				"status": meta.get("status"),
+				"customer": meta.get("customer"),
+				"is_manageable": pj in manageable,
+				"folders": folders_list,
+				"counts": {"user_shares": total_user, "link_shares": total_link},
+			}
+		)
+	projects_out.sort(key=lambda p: (p["project_name"] or "").lower())
+	return {"projects": projects_out}
+
+
+@frappe.whitelist()
 def extend_folder_share(share_name, expires_days=30):
 	if not _share_doctype_available():
 		frappe.throw(_("Per-share expiry tracking is unavailable on this site. Re-share to refresh access."))
@@ -915,6 +1135,7 @@ def extend_folder_share(share_name, expires_days=30):
 		frappe.throw(_("This share has been revoked."))
 	doc.expires_at = _expiry_datetime(expires_days)
 	doc.save(ignore_permissions=True)
+	frappe.db.commit()
 	return {"ok": True, "expires_at": str(doc.expires_at)}
 
 

@@ -513,23 +513,25 @@ def sync_project_team(project, users):
 
 @frappe.whitelist()
 def search_customers(txt=""):
+	"""Customer typeahead. Empty `txt` returns the most recently modified customers
+	so the picker can show options as soon as the user clicks the field."""
 	helper.assert_can_manage_customers_in_portal()
 
 	txt = (txt or "").strip()
 	safe = cstr(txt).replace("%", "").replace("_", "").strip()[:100]
-	if len(safe) < 2:
-		return []
 
-	return frappe.get_all(
-		"Customer",
-		or_filters=[
-			["name", "like", f"%{safe}%"],
-			["customer_name", "like", f"%{safe}%"],
-		],
+	kwargs = dict(
 		fields=["name", "customer_name", "customer_type"],
 		limit_page_length=25,
 		order_by="modified desc",
 	)
+	if safe:
+		kwargs["or_filters"] = [
+			["name", "like", f"%{safe}%"],
+			["customer_name", "like", f"%{safe}%"],
+		]
+
+	return frappe.get_all("Customer", **kwargs)
 
 
 @frappe.whitelist()
@@ -782,13 +784,16 @@ def search_portal_users(txt=""):
 	kwargs = dict(
 		filters=filters,
 		fields=["name", "full_name", "email", "user_image"],
-		limit_page_length=20,
-		order_by="name asc",
+		limit_page_length=25,
+		order_by="full_name asc",
 	)
 	if safe:
+		# Match by username (User.name = email), email, or full name so users can be
+		# found by however they're known — display name, login, or address.
 		kwargs["or_filters"] = [
 			["name", "like", f"%{safe}%"],
 			["email", "like", f"%{safe}%"],
+			["full_name", "like", f"%{safe}%"],
 		]
 
 	return frappe.get_all("User", **kwargs)

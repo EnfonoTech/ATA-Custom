@@ -581,30 +581,33 @@ async function loadFolderShares() {
 	}
 }
 
+async function runUserSearch(text) {
+	const t = String(text || "").trim();
+	userSearchBusy.value = true;
+	try {
+		const res = await call({
+			method: "portal_app.api.projects.search_portal_users",
+			args: { txt: t },
+		});
+		const hits = Array.isArray(res) ? res : res?.message || [];
+		const alreadyShared = new Set(userSharesForFolder.value.map((s) => s.user));
+		userSearchHits.value = hits.filter((u) => !alreadyShared.has(u.name));
+	} catch (e) {
+		userSearchHits.value = [];
+	} finally {
+		userSearchBusy.value = false;
+	}
+}
+
 watch(userSearchQ, (q) => {
 	clearTimeout(userSearchTimer);
-	const t = String(q || "").trim();
-	if (t.length < 2) {
-		userSearchHits.value = [];
-		return;
-	}
-	userSearchTimer = setTimeout(async () => {
-		userSearchBusy.value = true;
-		try {
-			const res = await call({
-				method: "portal_app.api.projects.search_portal_users",
-				args: { txt: t },
-			});
-			const hits = Array.isArray(res) ? res : res?.message || [];
-			const alreadyShared = new Set(userSharesForFolder.value.map((s) => s.user));
-			userSearchHits.value = hits.filter((u) => !alreadyShared.has(u.name));
-		} catch (e) {
-			userSearchHits.value = [];
-		} finally {
-			userSearchBusy.value = false;
-		}
-	}, 250);
+	userSearchTimer = setTimeout(() => runUserSearch(q), 200);
 });
+
+function onUserSearchFocus() {
+	// Pop the dropdown immediately with the latest matches (or top-N when empty).
+	if (!userSearchHits.value.length) runUserSearch(userSearchQ.value);
+}
 
 async function shareWithUser(uid) {
 	if (!project.value || !shareModalFolder.value || !uid) return;
@@ -1526,8 +1529,9 @@ async function deleteProjectFile(f) {
 										v-model="userSearchQ"
 										type="search"
 										class="portal-input pl-9"
-										placeholder="Search by email or username"
+										placeholder="Search by email, username, or full name"
 										:disabled="shareModalSaving"
+										@focus="onUserSearchFocus"
 									/>
 								</div>
 								<div v-if="shareTrackingAvailable" class="flex shrink-0 items-center gap-1">
@@ -1566,10 +1570,17 @@ async function deleteProjectFile(f) {
 								</button>
 							</div>
 							<p
-								v-else-if="userSearchQ.trim().length >= 2 && !userSearchBusy"
+								v-else-if="userSearchBusy"
+								class="mt-2 flex items-center gap-2 text-xs text-[color:var(--portal-muted)]"
+							>
+								<span class="h-3 w-3 animate-spin rounded-full border-2 border-[color:var(--portal-accent)] border-t-transparent"></span>
+								Loading users…
+							</p>
+							<p
+								v-else
 								class="mt-2 text-xs text-[color:var(--portal-muted)]"
 							>
-								No matching users.
+								No matching users. Try a different name or email.
 							</p>
 						</section>
 

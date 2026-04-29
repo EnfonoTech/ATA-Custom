@@ -38,6 +38,15 @@ const groups = computed(() => {
 			{ name: "Shared with me", path: "/shared-with-me", icon: "share-2" },
 		],
 	};
+	// "Manage shares" is the project admin's audit + revoke console — only visible
+	// to users who can manage at least one project (not regular members).
+	if (!isCust && (portalCapabilities.value?.manageable_project_names || []).length) {
+		work.items.push({
+			name: "Manage shares",
+			path: "/manage-shares",
+			icon: "shield",
+		});
+	}
 	if (!isCust && portalCapabilities.value?.can_edit_portal_folder_template) {
 		work.items.push({
 			name: "File tools",

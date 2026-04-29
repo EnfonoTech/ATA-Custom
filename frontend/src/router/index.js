@@ -11,6 +11,7 @@ import Files from "@/pages/Files.vue";
 import FileTools from "@/pages/FileTools.vue";
 import SharedFolder from "@/pages/SharedFolder.vue";
 import SharedWithMe from "@/pages/SharedWithMe.vue";
+import ManageShares from "@/pages/ManageShares.vue";
 import Profile from "@/pages/Profile.vue";
 import Admin from "@/pages/Admin.vue";
 import { call } from "@/api";
@@ -39,6 +40,12 @@ const routes = [
 			{ path: "calendar", name: "Calendar", component: Calendar },
 			{ path: "files", name: "Files", component: Files },
 			{ path: "shared-with-me", name: "SharedWithMe", component: SharedWithMe },
+			{
+				path: "manage-shares",
+				name: "ManageShares",
+				component: ManageShares,
+				meta: { requiresProjectAdmin: true },
+			},
 			{
 				path: "file-tools",
 				name: "FileTools",
@@ -110,6 +117,19 @@ router.beforeEach(async (to) => {
 				method: "portal_app.api.projects.get_capabilities",
 			});
 			if (!caps?.can_edit_portal_folder_template) {
+				return "/dashboard";
+			}
+		} catch {
+			return "/dashboard";
+		}
+	}
+
+	if (to.meta.requiresProjectAdmin && isAuthenticated) {
+		try {
+			const caps = await call({
+				method: "portal_app.api.projects.get_capabilities",
+			});
+			if (!(caps?.manageable_project_names || []).length) {
 				return "/dashboard";
 			}
 		} catch {

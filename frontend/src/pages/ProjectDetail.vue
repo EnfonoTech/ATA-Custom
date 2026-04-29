@@ -198,45 +198,51 @@ watch(
 	{ immediate: true },
 );
 
+async function runCustomerSearch(q) {
+	if (!canLinkCustomer.value) {
+		customerHits.value = [];
+		return;
+	}
+	try {
+		customerHits.value = await call({
+			method: "portal_app.api.projects.search_customers",
+			args: { txt: (q || "").trim() },
+		});
+	} catch (e) {
+		console.error(e);
+		customerHits.value = [];
+	}
+}
 watch(customerSearchQ, (q) => {
 	clearTimeout(customerSearchTimer);
-	customerSearchTimer = setTimeout(async () => {
-		const t = (q || "").trim();
-		if (t.length < 2 || !canLinkCustomer.value) {
-			customerHits.value = [];
-			return;
-		}
-		try {
-			customerHits.value = await call({
-				method: "portal_app.api.projects.search_customers",
-				args: { txt: t },
-			});
-		} catch (e) {
-			console.error(e);
-			customerHits.value = [];
-		}
-	}, 300);
+	customerSearchTimer = setTimeout(() => runCustomerSearch(q), 200);
 });
+function onCustomerFocus() {
+	if (!customerHits.value.length) runCustomerSearch(customerSearchQ.value);
+}
 
+async function runCpSearch(q) {
+	if (!canManage.value || !project.value?.customer) {
+		cpHits.value = [];
+		return;
+	}
+	try {
+		cpHits.value = await call({
+			method: "portal_app.api.projects.search_portal_users",
+			args: { txt: (q || "").trim() },
+		});
+	} catch (e) {
+		console.error(e);
+		cpHits.value = [];
+	}
+}
 watch(cpSearchQ, (q) => {
 	clearTimeout(cpSearchTimer);
-	cpSearchTimer = setTimeout(async () => {
-		const t = (q || "").trim();
-		if (t.length < 2 || !canManage.value || !project.value?.customer) {
-			cpHits.value = [];
-			return;
-		}
-		try {
-			cpHits.value = await call({
-				method: "portal_app.api.projects.search_portal_users",
-				args: { txt: t },
-			});
-		} catch (e) {
-			console.error(e);
-			cpHits.value = [];
-		}
-	}, 300);
+	cpSearchTimer = setTimeout(() => runCpSearch(q), 200);
 });
+function onCpFocus() {
+	if (!cpHits.value.length) runCpSearch(cpSearchQ.value);
+}
 
 watch(searchQ, (q) => {
 	clearTimeout(searchTimer);
@@ -628,10 +634,16 @@ async function submitNewCustomer() {
 					<div v-if="canManage" class="space-y-3">
 						<template v-if="canLinkCustomer">
 							<label class="text-xs font-medium text-gray-600">Search customers</label>
-							<TextInput v-model="customerSearchQ" class="w-full rounded-xl" placeholder="Type at least 2 characters…" />
+							<div @focusin="onCustomerFocus">
+								<TextInput
+									v-model="customerSearchQ"
+									class="w-full rounded-xl"
+									placeholder="Click to see existing customers, or type to filter…"
+								/>
+							</div>
 							<div
 								v-if="customerHits.length"
-								class="max-h-40 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
+								class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
 							>
 								<button
 									v-for="c in customerHits"
@@ -799,13 +811,15 @@ async function submitNewCustomer() {
 					</ul>
 
 					<p class="mb-2 text-xs font-medium uppercase text-gray-500">Add existing user</p>
-					<label class="mb-2 block text-xs text-gray-600">Search by email or username — they are added as soon as you choose one.</label>
-					<TextInput
-						v-model="cpSearchQ"
-						class="mb-3 w-full rounded-xl"
-						placeholder="Type at least 2 characters…"
-						:disabled="cpSaving"
-					/>
+					<label class="mb-2 block text-xs text-gray-600">Search by email, username, or full name — they are added as soon as you choose one.</label>
+					<div @focusin="onCpFocus">
+						<TextInput
+							v-model="cpSearchQ"
+							class="mb-3 w-full rounded-xl"
+							placeholder="Click to see existing portal users, or type to filter…"
+							:disabled="cpSaving"
+						/>
+					</div>
 					<div
 						v-if="cpHits.length"
 						class="mb-3 max-h-40 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"

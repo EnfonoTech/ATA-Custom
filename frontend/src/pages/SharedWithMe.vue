@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed } from "vue";
 import { useRouter } from "vue-router";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
@@ -30,7 +30,22 @@ async function loadShared() {
 	}
 }
 
-onMounted(loadShared);
+function onVisible() {
+	if (document.visibilityState === "visible") loadShared();
+}
+function onFocus() {
+	loadShared();
+}
+
+onMounted(() => {
+	loadShared();
+	document.addEventListener("visibilitychange", onVisible);
+	window.addEventListener("focus", onFocus);
+});
+onBeforeUnmount(() => {
+	document.removeEventListener("visibilitychange", onVisible);
+	window.removeEventListener("focus", onFocus);
+});
 
 function toggleProject(name) {
 	const next = new Set(expandedProjects.value);
