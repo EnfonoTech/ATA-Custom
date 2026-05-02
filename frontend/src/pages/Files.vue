@@ -25,6 +25,59 @@ const fileInput = ref(null);
 const uploadCardRef = ref(null);
 const filesScrollRoot = ref(null);
 
+// Confirm-before-upload modal: stages files chosen via picker / drop zone / folder drop until
+// the user reviews and accepts the auto-generated name (which embeds today's date), the category
+// (target folder), and the date itself.
+const confirmUploadOpen = ref(false);
+const pendingUploads = ref([]);
+
+function todayIso() {
+	const d = new Date();
+	const mm = String(d.getMonth() + 1).padStart(2, "0");
+	const dd = String(d.getDate()).padStart(2, "0");
+	return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function splitFileName(name) {
+	const safe = String(name || "file");
+	const i = safe.lastIndexOf(".");
+	if (i <= 0) return { base: safe, ext: "" };
+	return { base: safe.slice(0, i), ext: safe.slice(i) };
+}
+
+function categoryToSlug(categoryName) {
+	const label = folderLabelByName.value?.[categoryName] || categoryName || "";
+	const leaf = String(label).split("/").pop() || "uncategorised";
+	return leaf
+		.trim()
+		.replace(/[\\/]+/g, "-")
+		.replace(/\s+/g, "-")
+		.replace(/[^a-zA-Z0-9_-]/g, "")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "") || "uncategorised";
+}
+
+function buildAutoName(base, ext, isoDate, categorySlug) {
+	const slug = categorySlug ? `_${categorySlug}` : "";
+	return `${base}${slug}_${isoDate}${ext}`;
+}
+
+function regenerateAutoName(row) {
+	row.name = buildAutoName(row.base, row.ext, row.date, categoryToSlug(row.category));
+}
+
+function onPendingDateChange(row) {
+	if (!row.nameEdited) regenerateAutoName(row);
+}
+
+function onPendingCategoryChange(row) {
+	if (!row.nameEdited) regenerateAutoName(row);
+}
+
+function onPendingNameChange(row) {
+	row.nameEdited = true;
+}
+
 function scrollFilesPage(where) {
 	const el = filesScrollRoot.value;
 	if (!el) return;
@@ -34,6 +87,9 @@ function scrollFilesPage(where) {
 const folderPickerOpen = ref(false);
 const folderPickerSearch = ref("");
 const folderPickerExpanded = ref(new Set());
+// Separate expansion state for the main "Tree" view on the page (independent of the picker dialog).
+// Keys: subfolder labels (e.g. "Drawings/Plans") plus a sentinel `__root__:<projectRootPath>` for the project root row.
+const folderTreeExpanded = ref(new Set());
 
 // Bulk-select state for the file list
 const selectedFileNames = ref([]);
@@ -62,6 +118,19 @@ function toggleSelectAllVisible() {
 function clearFileSelection() {
 	selectedFileNames.value = [];
 }
+function fmtDate(s) {
+	if (!s) return "—";
+	const dt = new Date(String(s).replace(" ", "T"));
+	if (Number.isNaN(dt.getTime())) return String(s);
+	return dt.toLocaleString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+		hour: "2-digit",
+		minute: "2-digit",
+	});
+}
+
 function fmtFileSize(bytes) {
 	if (bytes == null) return "—";
 	const n = Number(bytes);
@@ -273,6 +342,99 @@ const folderEntries = computed(() => {
 	return rows;
 });
 
+/**
+ * Tree-shaped projection of `folders` for the on-page "Tree" view. Unlike `folderEntries`
+ * (which always emits every folder), this only emits a node's descendants when that node is
+ * expanded — so the user explores one branch at a time instead of seeing the entire hierarchy
+ * up front.
+ */
+const folderTreeView = computed(() => {
+	const rows = [];
+	const root = projectRootPath.value;
+	const rootKey = root ? `__root__:${root}` : "";
+	const rootExpanded = !root || folderTreeExpanded.value.has(rootKey);
+
+	const treeRoot = { children: new Map() };
+	for (const f of folders.value) {
+		const segments = String(f.label || "").split("/").filter(Boolean);
+		let cursor = treeRoot;
+		const accumulated = [];
+		for (let i = 0; i < segments.length; i++) {
+			const seg = segments[i];
+			accumulated.push(seg);
+			if (!cursor.children.has(seg)) {
+				cursor.children.set(seg, {
+					children: new Map(),
+					name: i === segments.length - 1 ? f.name : "",
+					label: accumulated.join("/"),
+					seg,
+				});
+			} else if (i === segments.length - 1) {
+				const node = cursor.children.get(seg);
+				node.name = f.name;
+			}
+			cursor = cursor.children.get(seg);
+		}
+	}
+
+	const fileCountFor = (folderName) =>
+		(files.value || []).filter((x) => x.folder === folderName).length;
+
+	if (root) {
+		const rootCount = (files.value || []).filter((x) => {
+			const fp = String(x.folder || "");
+			return fp === root || fp.startsWith(`${root}/`);
+		}).length;
+		rows.push({
+			name: root,
+			label: "Project folder (all files)",
+			leafLabel: "Project folder (all files)",
+			parentPath: "",
+			depth: 0,
+			isRoot: true,
+			hasChildren: treeRoot.children.size > 0,
+			fileCount: rootCount,
+			expanded: rootExpanded,
+			expandKey: rootKey,
+		});
+	}
+
+	if (rootExpanded) {
+		const walk = (node, depth, parentPath) => {
+			const sorted = [...node.children.values()].sort((a, b) =>
+				String(a.seg || "").localeCompare(String(b.seg || ""), undefined, { numeric: true }),
+			);
+			for (const child of sorted) {
+				const expanded = folderTreeExpanded.value.has(child.label);
+				rows.push({
+					name: child.name,
+					label: child.label,
+					leafLabel: child.seg,
+					parentPath,
+					depth,
+					isRoot: false,
+					hasChildren: child.children.size > 0,
+					fileCount: child.name ? fileCountFor(child.name) : 0,
+					expanded,
+					expandKey: child.label,
+				});
+				if (expanded && child.children.size > 0) {
+					walk(child, depth + 1, parentPath ? `${parentPath} / ${child.seg}` : child.seg);
+				}
+			}
+		};
+		walk(treeRoot, 1, "");
+	}
+	return rows;
+});
+
+function toggleFolderTreeNode(key) {
+	if (!key) return;
+	const next = new Set(folderTreeExpanded.value);
+	next.has(key) ? next.delete(key) : next.add(key);
+	folderTreeExpanded.value = next;
+}
+
 function subfolderLabel(folderPath) {
 	const path = String(folderPath || "");
 	if (!path) return "—";
@@ -476,6 +638,14 @@ watch([project, targetFolder, folderFilter], () => {
 });
 watch(project, () => clearFileSelection());
 
+// Reset main-tree expansion when switching projects, then auto-open the new project root so
+// top-level subfolders are immediately visible (a fully-collapsed root would feel empty).
+watch(projectRootPath, (root) => {
+	const next = new Set();
+	if (root) next.add(`__root__:${root}`);
+	folderTreeExpanded.value = next;
+});
+
 watch(folderFilter, async (newPath, oldPath) => {
 	if (!newPath || newPath === oldPath) return;
 	if (isCustomerPortalUser.value) return;
@@ -508,7 +678,10 @@ function apiErr(e) {
 	return body?.message || body?.exc || "Upload failed.";
 }
 
-async function handleFiles(fileList) {
+// Stage the dropped/picked files into the confirmation modal. The actual upload only runs when
+// the user clicks "Upload" in `confirmUploadAndRun` — this is what gives them a chance to rename,
+// re-categorize (target folder), or set a date per file.
+function handleFiles(fileList) {
 	if (!fileList?.length) return;
 	if (!project.value) {
 		uploadError.value =
@@ -519,33 +692,84 @@ async function handleFiles(fileList) {
 		uploadError.value = "Pick a target subfolder before uploading.";
 		return;
 	}
+	uploadError.value = "";
+	uploadInfo.value = "";
+	const today = todayIso();
+	pendingUploads.value = Array.from(fileList).map((f) => {
+		const { base, ext } = splitFileName(f.name);
+		const category = targetFolder.value;
+		return {
+			originalFile: f,
+			base,
+			ext,
+			name: buildAutoName(base, ext, today, categoryToSlug(category)),
+			category,
+			date: today,
+			nameEdited: false,
+		};
+	});
+	confirmUploadOpen.value = true;
+}
+
+function cancelUploadConfirm() {
+	if (uploadBusy.value) return;
+	confirmUploadOpen.value = false;
+	pendingUploads.value = [];
+}
+
+async function confirmUploadAndRun() {
+	if (!pendingUploads.value.length) return;
+	for (const r of pendingUploads.value) {
+		if (!String(r.name || "").trim()) {
+			uploadError.value = "Each file needs a name.";
+			return;
+		}
+		if (!r.category) {
+			uploadError.value = "Each file needs a category (target folder).";
+			return;
+		}
+	}
 	uploadBusy.value = true;
 	uploadError.value = "";
 	uploadInfo.value = "";
 	let lastFolderLabel = "";
 	let uploadedCount = 0;
 	try {
-		for (const f of fileList) {
-			const res = await uploadFile("portal_app.api.files.upload_project_file", f, {
+		for (const r of pendingUploads.value) {
+			const renamed = new File([r.originalFile], r.name.trim(), {
+				type: r.originalFile.type,
+				lastModified: r.originalFile.lastModified,
+			});
+			const res = await uploadFile("portal_app.api.files.upload_project_file", renamed, {
 				project: project.value,
 				is_private: isPrivateUpload.value ? "1" : "0",
 				destination: destination.value,
 				external_provider: externalProvider.value,
-				target_folder: targetFolder.value,
+				target_folder: r.category,
 			});
 			if (res?.folder_label) lastFolderLabel = res.folder_label;
 			uploadedCount += 1;
 			if (res?.external_result && destination.value !== "erpnext") {
-				uploadInfo.value = `External upload completed for ${f.name}.`;
+				uploadInfo.value = `External upload completed for ${renamed.name}.`;
 			}
 		}
 		if (destination.value !== "external") await loadFiles();
 		if (destination.value === "external") {
 			uploadInfo.value = "Uploaded to external integration endpoint. ERPNext File was not created.";
-		} else if (uploadedCount && lastFolderLabel) {
-			uploadInfo.value = `Uploaded ${uploadedCount} file${uploadedCount === 1 ? "" : "s"} to ${lastFolderLabel}.`;
+		} else if (uploadedCount) {
+			const first = pendingUploads.value[0];
+			const firstName = first?.name?.trim() || "";
+			const folderLabel = lastFolderLabel || (first ? folderLabelByName.value[first.category] || first.category : "");
+			const when = fmtDate(new Date().toISOString());
+			if (uploadedCount === 1) {
+				uploadInfo.value = `Uploaded “${firstName}” to ${folderLabel} on ${when}.`;
+			} else {
+				uploadInfo.value = `Uploaded ${uploadedCount} files (incl. “${firstName}”) to ${folderLabel} on ${when}.`;
+			}
 		}
-		setTimeout(() => (uploadInfo.value = ""), 4000);
+		setTimeout(() => (uploadInfo.value = ""), 6000);
+		confirmUploadOpen.value = false;
+		pendingUploads.value = [];
 	} catch (e) {
 		uploadError.value = apiErr(e);
 	} finally {
@@ -1050,8 +1274,8 @@ async function deleteProjectFile(f) {
 				</div>
 				<div v-if="folderView === 'grid'" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 					<div
-						v-for="f in folderEntries"
-						:key="`nav-grid-${f.name}`"
+						v-for="f in folderTreeView"
+						:key="`nav-grid-${f.expandKey || f.name}`"
 						class="flex flex-col overflow-hidden rounded-xl border text-sm transition"
 						:class="[
 							folderFilter === f.name
@@ -1064,26 +1288,37 @@ async function deleteProjectFile(f) {
 						@dragleave="onFolderDragLeave($event, f)"
 						@drop.prevent="onFolderDrop($event, f)"
 					>
-						<button
-							type="button"
-							class="flex-1 px-3 py-3 text-left transition"
-							:style="{ paddingLeft: `${0.75 + Math.max(0, (f.depth || 0) - 1) * 0.9}rem` }"
-							@click="folderFilter = f.name"
-						>
-							<p v-if="f.parentPath" class="mb-0.5 flex items-center gap-1 truncate text-[10px] font-semibold uppercase tracking-wider text-[color:var(--portal-subtle)]">
-								<FeatherIcon v-if="(f.depth || 0) > 1" name="corner-down-right" class="h-3 w-3" />
-								<span class="truncate">{{ f.parentPath }}</span>
-							</p>
-							<p class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
+						<div class="flex items-stretch">
+							<button
+								v-if="f.hasChildren"
+								type="button"
+								class="flex w-9 shrink-0 items-center justify-center text-[color:var(--portal-muted)] transition hover:bg-[color:var(--portal-bg)] hover:text-[color:var(--portal-text)]"
+								:title="f.expanded ? 'Collapse' : 'Expand'"
+								@click.stop="toggleFolderTreeNode(f.expandKey)"
+							>
 								<FeatherIcon
-									:name="f.isRoot ? 'folder' : (f.fileCount > 0 ? 'folder' : 'folder-minus')"
-									class="h-4 w-4 shrink-0"
-									:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
+									:name="f.expanded ? 'chevron-down' : 'chevron-right'"
+									class="h-4 w-4"
 								/>
-								<span class="truncate">{{ f.leafLabel || f.label }}</span>
-							</p>
-							<p class="mt-1 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</p>
-						</button>
+							</button>
+							<span v-else class="w-9 shrink-0"></span>
+							<button
+								type="button"
+								class="flex-1 px-1 py-3 text-left transition"
+								:style="{ paddingLeft: `${Math.max(0, (f.depth || 0) - 1) * 0.6}rem` }"
+								@click="folderFilter = f.name"
+							>
+								<p class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
+									<FeatherIcon
+										:name="f.isRoot ? 'folder' : (f.fileCount > 0 ? 'folder' : 'folder-minus')"
+										class="h-4 w-4 shrink-0"
+										:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
+									/>
+									<span class="truncate">{{ f.leafLabel || f.label }}</span>
+								</p>
+								<p class="mt-1 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</p>
+							</button>
+						</div>
 						<div
 							v-if="!isCustomerPortalUser"
 							class="flex flex-wrap justify-end gap-1 border-t border-gray-200/80 bg-white/60 px-2 py-1.5"
@@ -1114,20 +1349,34 @@ async function deleteProjectFile(f) {
 				</div>
 				<div v-else class="overflow-hidden rounded-xl border border-[color:var(--portal-border)]">
 					<div
-						v-for="f in folderEntries"
-						:key="`nav-list-${f.name}`"
+						v-for="f in folderTreeView"
+						:key="`nav-list-${f.expandKey || f.name}`"
 						class="flex w-full items-stretch border-b border-[color:var(--portal-border)] text-sm last:border-b-0 transition"
 						:class="folderFilter === f.name ? 'bg-[color:var(--portal-accent-soft)]' : 'bg-white hover:bg-[color:var(--portal-bg)]'"
 					>
+						<div
+							class="flex shrink-0 items-center"
+							:style="{ paddingLeft: `${0.5 + (f.depth || 0) * 1.1}rem` }"
+						>
+							<button
+								v-if="f.hasChildren"
+								type="button"
+								class="flex h-7 w-7 items-center justify-center rounded text-[color:var(--portal-muted)] transition hover:bg-white hover:text-[color:var(--portal-text)]"
+								:title="f.expanded ? 'Collapse' : 'Expand'"
+								@click.stop="toggleFolderTreeNode(f.expandKey)"
+							>
+								<FeatherIcon
+									:name="f.expanded ? 'chevron-down' : 'chevron-right'"
+									class="h-3.5 w-3.5"
+								/>
+							</button>
+							<span v-else class="h-7 w-7"></span>
+						</div>
 						<button
 							type="button"
-							class="min-w-0 flex-1 px-3 py-2.5 text-left"
-							:style="{ paddingLeft: `${0.75 + Math.max(0, (f.depth || 0) - 1) * 1.25}rem` }"
+							class="min-w-0 flex-1 px-1 py-2.5 text-left"
 							@click="folderFilter = f.name"
 						>
-							<span v-if="f.parentPath" class="block truncate text-[10px] font-semibold uppercase tracking-wider text-[color:var(--portal-subtle)]">
-								<span v-if="(f.depth || 0) > 1" class="mr-1 text-[color:var(--portal-subtle)]">↳</span>{{ f.parentPath }}
-							</span>
 							<span class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
 								<FeatherIcon
 									name="folder"
@@ -1492,7 +1741,7 @@ async function deleteProjectFile(f) {
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Size</th>
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Subfolder</th>
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Owner</th>
-							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Created</th>
+							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Upload date</th>
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Link</th>
 							<th v-if="canShareFolder" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Share</th>
 							<th v-if="showFileDeleteColumn" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Delete</th>
@@ -1520,7 +1769,7 @@ async function deleteProjectFile(f) {
 							<td class="px-4 py-3">{{ fmtFileSize(f.file_size) }}</td>
 							<td class="px-4 py-3">{{ subfolderLabel(f.folder) }}</td>
 							<td class="px-4 py-3">{{ f.owner }}</td>
-							<td class="px-4 py-3">{{ f.creation }}</td>
+							<td class="px-4 py-3 whitespace-nowrap">{{ fmtDate(f.creation) }}</td>
 							<td class="px-4 py-3">
 								<a
 									v-if="f.file_url"
@@ -1898,6 +2147,76 @@ async function deleteProjectFile(f) {
 
 					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
 						<button class="portal-btn" @click="closeShareModal">Done</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<Teleport to="body">
+			<div
+				v-if="confirmUploadOpen"
+				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+				@click.self="cancelUploadConfirm"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+				<div class="relative z-10 w-full max-w-2xl rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in" @click.stop>
+					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
+						<div class="flex items-center gap-2">
+							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);">
+								<FeatherIcon name="upload-cloud" class="h-4 w-4" />
+							</div>
+							<div>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Confirm upload</h2>
+								<p class="text-xs text-[color:var(--portal-muted)]">Review {{ pendingUploads.length }} file{{ pendingUploads.length === 1 ? "" : "s" }} before sending. Names are auto-generated with today's date.</p>
+							</div>
+						</div>
+						<button type="button" class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)] disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+					<div class="max-h-[60vh] space-y-3 overflow-auto px-5 py-4">
+						<div class="flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--portal-accent)]/40 bg-[color:var(--portal-accent-soft)] px-3 py-2 text-xs text-[color:var(--portal-accent-strong)]">
+							<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0" />
+							<span class="font-semibold">Destination:</span>
+							<span class="truncate">{{ project }}</span>
+							<span class="text-[color:var(--portal-subtle)]">/</span>
+							<span class="truncate">{{ folderLabelByName[targetFolder] || targetFolder || "—" }}</span>
+							<span class="ml-auto text-[10px] font-medium uppercase tracking-wide text-[color:var(--portal-muted)]">Editable per file below</span>
+						</div>
+						<div v-for="(row, idx) in pendingUploads" :key="`pending-${idx}`" class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-3">
+							<p class="mb-2 flex items-center gap-2 text-xs text-[color:var(--portal-muted)]">
+								<FeatherIcon name="file" class="h-3.5 w-3.5 shrink-0" />
+								<span class="min-w-0 truncate">Original: {{ row.originalFile.name }}</span>
+								<span class="ml-auto shrink-0">{{ fmtFileSize(row.originalFile.size) }}</span>
+							</p>
+							<div class="grid gap-2 sm:grid-cols-3">
+								<label class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">File name</span>
+									<input v-model="row.name" type="text" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @input="onPendingNameChange(row)" />
+								</label>
+								<label class="block sm:col-span-2">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Category (folder)</span>
+									<select v-model="row.category" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingCategoryChange(row)">
+										<option v-if="projectRootPath" :value="projectRootPath">Project folder (all files)</option>
+										<option v-for="f in folders" :key="`pcat-${idx}-${f.name}`" :value="f.name">{{ folderOptionLabel(f.label) }}</option>
+									</select>
+								</label>
+								<label class="block">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Date</span>
+									<input v-model="row.date" type="date" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingDateChange(row)" />
+								</label>
+							</div>
+						</div>
+						<p v-if="uploadError" class="text-sm text-red-600">{{ uploadError }}</p>
+					</div>
+					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
+						<button type="button" class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">Cancel</button>
+						<button type="button" class="flex items-center gap-2 rounded-lg bg-[color:var(--portal-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50" :disabled="uploadBusy" @click="confirmUploadAndRun">
+							<FeatherIcon name="upload" class="h-4 w-4" />
+							{{ uploadBusy ? "Uploading…" : `Upload ${pendingUploads.length} file${pendingUploads.length === 1 ? "" : "s"}` }}
+						</button>
 					</div>
 				</div>
 			</div>
