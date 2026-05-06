@@ -22,6 +22,7 @@ const uploadInfo = ref("");
 const isPrivateUpload = ref(false);
 const dragOver = ref(false);
 const fileInput = ref(null);
+const folderInput = ref(null);
 const uploadCardRef = ref(null);
 const filesScrollRoot = ref(null);
 
@@ -30,6 +31,40 @@ const filesScrollRoot = ref(null);
 // (target folder), and the date itself.
 const confirmUploadOpen = ref(false);
 const pendingUploads = ref([]);
+// Folder upload — files preserve their internal structure under a wrapping folder
+// auto-named `<categoryNumberPrefix>_<date>` (`_v2`, `_v3` for same-day repeats).
+const pendingFolder = ref(null);
+const isFolderMode = computed(() => !!pendingFolder.value);
+
+// Portal File Type list (managed in ERP at /app/portal-file-type). Lets users tag each
+// upload as AutoCAD / PDF / GAD / etc. — pre-selected by extension on stage, editable.
+const fileTypes = ref([]);
+async function loadFileTypes() {
+	try {
+		const res = await call({ method: "portal_app.api.files.list_portal_file_types" });
+		fileTypes.value = (res?.types || []).map((t) => ({
+			name: t.name,
+			label: t.type_name || t.name,
+			extensions: String(t.extensions || "")
+				.split(",")
+				.map((e) => e.trim().toLowerCase())
+				.filter(Boolean),
+		}));
+	} catch {
+		fileTypes.value = [];
+	}
+}
+
+function detectFileType(originalName) {
+	const lower = String(originalName || "").toLowerCase();
+	const dot = lower.lastIndexOf(".");
+	if (dot < 0) return "";
+	const ext = lower.slice(dot);
+	for (const t of fileTypes.value) {
+		if (t.extensions.includes(ext)) return t.name;
+	}
+	return "";
+}
 
 function todayIso() {
 	const d = new Date();
@@ -60,6 +95,71 @@ function categoryToSlug(categoryName) {
 function buildAutoName(base, ext, isoDate, categorySlug) {
 	const slug = categorySlug ? `_${categorySlug}` : "";
 	return `${base}${slug}_${isoDate}${ext}`;
+}
+
+// Wrapping-folder name pattern: leading number prefix of the category leaf + ISO date.
+// Falls back to category slug when there's no number prefix.
+function categoryNumberPrefix(categoryName) {
+	const label = folderLabelByName.value?.[categoryName] || categoryName || "";
+	const leaf = String(label).split("/").pop() || "";
+	const match = leaf.trim().match(/^(\d+)/);
+	if (match) return match[1];
+	return categoryToSlug(categoryName);
+}
+function buildWrapperName(categoryName, isoDate) {
+	return `${categoryNumberPrefix(categoryName)}_${isoDate}`;
+}
+
+// Walk a webkitGetAsEntry tree, collecting `[{file, relativePath}]`.
+function _readEntry(entry, path, out) {
+	return new Promise((resolve) => {
+		if (!entry) return resolve();
+		if (entry.isFile) {
+			entry.file((f) => { out.push({ file: f, relativePath: path }); resolve(); }, () => resolve());
+		} else if (entry.isDirectory) {
+			const reader = entry.createReader();
+			const all = [];
+			const readBatch = () => {
+				reader.readEntries(async (entries) => {
+					if (!entries.length) {
+						const sub = `${path ? path + "/" : ""}${entry.name}`;
+						await Promise.all(all.map((e) => _readEntry(e, sub, out)));
+						resolve();
+						return;
+					}
+					all.push(...entries);
+					readBatch();
+				}, () => resolve());
+			};
+			readBatch();
+		} else { resolve(); }
+	});
+}
+async function collectFromDataTransfer(dt) {
+	const out = [];
+	const items = dt?.items;
+	if (items?.length) {
+		const entries = [];
+		for (const it of items) {
+			const e = typeof it.webkitGetAsEntry === "function" ? it.webkitGetAsEntry() : null;
+			if (e) entries.push(e);
+		}
+		if (entries.length) {
+			await Promise.all(entries.map((e) => _readEntry(e, "", out)));
+			return out;
+		}
+	}
+	for (const f of dt?.files || []) out.push({ file: f, relativePath: "" });
+	return out;
+}
+async function _dropContainsDirectory(dt) {
+	const items = dt?.items;
+	if (!items?.length) return false;
+	for (const it of items) {
+		const ent = typeof it.webkitGetAsEntry === "function" ? it.webkitGetAsEntry() : null;
+		if (ent && ent.isDirectory) return true;
+	}
+	return false;
 }
 
 function regenerateAutoName(row) {
@@ -612,6 +712,7 @@ onMounted(async () => {
 	}
 	await loadProjects();
 	await loadFiles();
+	loadFileTypes();
 	scrollToPortalHighlight();
 });
 
@@ -706,6 +807,7 @@ function handleFiles(fileList) {
 			category,
 			date: today,
 			nameEdited: false,
+			fileType: detectFileType(f.name),
 		};
 	});
 	confirmUploadOpen.value = true;
@@ -715,6 +817,26 @@ function cancelUploadConfirm() {
 	if (uploadBusy.value) return;
 	confirmUploadOpen.value = false;
 	pendingUploads.value = [];
+	pendingFolder.value = null;
+}
+
+function runConfirm() {
+	return isFolderMode.value ? confirmFolderUploadAndRun() : confirmUploadAndRun();
+}
+
+async function _prepareWrapper(category, isoDate) {
+	const wrapperBase = buildWrapperName(category, isoDate);
+	const prep = await call({
+		method: "portal_app.api.files.prepare_folder_upload",
+		type: "POST",
+		args: {
+			project: project.value,
+			target_folder: category,
+			folder_name: wrapperBase,
+		},
+	});
+	if (!prep?.folder_name) throw new Error("Folder reservation failed.");
+	return { fileDoc: prep.folder_name, label: prep.folder_label || wrapperBase, baseName: prep.file_name || wrapperBase };
 }
 
 async function confirmUploadAndRun() {
@@ -735,36 +857,62 @@ async function confirmUploadAndRun() {
 	let lastFolderLabel = "";
 	let uploadedCount = 0;
 	try {
-		for (const r of pendingUploads.value) {
-			const renamed = new File([r.originalFile], r.name.trim(), {
-				type: r.originalFile.type,
-				lastModified: r.originalFile.lastModified,
-			});
-			const res = await uploadFile("portal_app.api.files.upload_project_file", renamed, {
-				project: project.value,
-				is_private: isPrivateUpload.value ? "1" : "0",
-				destination: destination.value,
-				external_provider: externalProvider.value,
-				target_folder: r.category,
-			});
-			if (res?.folder_label) lastFolderLabel = res.folder_label;
-			uploadedCount += 1;
-			if (res?.external_result && destination.value !== "erpnext") {
-				uploadInfo.value = `External upload completed for ${renamed.name}.`;
-			}
-		}
-		if (destination.value !== "external") await loadFiles();
+		// External-only uploads bypass the wrap-in-folder flow (no ERPNext File doc created).
 		if (destination.value === "external") {
+			for (const r of pendingUploads.value) {
+				const renamed = new File([r.originalFile], r.name.trim(), {
+					type: r.originalFile.type,
+					lastModified: r.originalFile.lastModified,
+				});
+				await uploadFile("portal_app.api.files.upload_project_file", renamed, {
+					project: project.value,
+					is_private: isPrivateUpload.value ? "1" : "0",
+					destination: destination.value,
+					external_provider: externalProvider.value,
+					target_folder: r.category,
+					file_type: r.fileType || "",
+				});
+				uploadedCount += 1;
+			}
 			uploadInfo.value = "Uploaded to external integration endpoint. ERPNext File was not created.";
-		} else if (uploadedCount) {
-			const first = pendingUploads.value[0];
-			const firstName = first?.name?.trim() || "";
-			const folderLabel = lastFolderLabel || (first ? folderLabelByName.value[first.category] || first.category : "");
-			const when = fmtDate(new Date().toISOString());
-			if (uploadedCount === 1) {
-				uploadInfo.value = `Uploaded “${firstName}” to ${folderLabel} on ${when}.`;
-			} else {
-				uploadInfo.value = `Uploaded ${uploadedCount} files (incl. “${firstName}”) to ${folderLabel} on ${when}.`;
+		} else {
+			// Group rows by category so each category gets its own dated wrapping folder.
+			const byCategory = new Map();
+			for (const r of pendingUploads.value) {
+				if (!byCategory.has(r.category)) byCategory.set(r.category, []);
+				byCategory.get(r.category).push(r);
+			}
+			const today = todayIso();
+			for (const [category, rows] of byCategory) {
+				const wrapper = await _prepareWrapper(category, today);
+				lastFolderLabel = wrapper.label;
+				for (const r of rows) {
+					const renamed = new File([r.originalFile], r.name.trim(), {
+						type: r.originalFile.type,
+						lastModified: r.originalFile.lastModified,
+					});
+					await uploadFile("portal_app.api.files.upload_project_file", renamed, {
+						project: project.value,
+						is_private: isPrivateUpload.value ? "1" : "0",
+						destination: destination.value,
+						external_provider: externalProvider.value,
+						target_folder: wrapper.fileDoc,
+						relative_path: "",
+						file_type: r.fileType || "",
+					});
+					uploadedCount += 1;
+				}
+			}
+			await loadFiles();
+			if (uploadedCount) {
+				const first = pendingUploads.value[0];
+				const firstName = first?.name?.trim() || "";
+				const when = fmtDate(new Date().toISOString());
+				if (uploadedCount === 1) {
+					uploadInfo.value = `Uploaded “${firstName}” to ${lastFolderLabel} on ${when}.`;
+				} else {
+					uploadInfo.value = `Uploaded ${uploadedCount} files (incl. “${firstName}”) to ${lastFolderLabel} on ${when}.`;
+				}
 			}
 		}
 		setTimeout(() => (uploadInfo.value = ""), 6000);
@@ -777,10 +925,95 @@ async function confirmUploadAndRun() {
 	}
 }
 
+function stageFolderUpload(entries, categoryOverride) {
+	const items = (entries || []).filter((e) => e.file);
+	if (!items.length) return false;
+	if (!project.value) {
+		uploadError.value = "Pick a project from the dropdown above before uploading.";
+		return false;
+	}
+	const category = categoryOverride || targetFolder.value;
+	if (!category) {
+		uploadError.value = "Pick a target subfolder before uploading.";
+		return false;
+	}
+	const firstSeg = (p) => String(p || "").split("/")[0] || "";
+	const roots = new Set(items.map((it) => firstSeg(it.relativePath || it.file.webkitRelativePath || "")).filter(Boolean));
+	if (roots.size !== 1) {
+		uploadError.value = "Pick or drop exactly one folder.";
+		return false;
+	}
+	const sourceName = [...roots][0];
+	const today = todayIso();
+	pendingFolder.value = {
+		sourceName,
+		category,
+		date: today,
+		entries: items.map((it) => {
+			const p = String(it.relativePath || it.file.webkitRelativePath || "");
+			const trimmed = p.startsWith(sourceName + "/") ? p.slice(sourceName.length + 1) : "";
+			const slashIdx = trimmed.lastIndexOf("/");
+			const relativeDir = slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "";
+			return { file: it.file, relativeDir };
+		}),
+	};
+	pendingUploads.value = [];
+	uploadError.value = "";
+	uploadInfo.value = "";
+	confirmUploadOpen.value = true;
+	return true;
+}
+
+const pendingFolderWrapperName = computed(() => {
+	const f = pendingFolder.value;
+	if (!f) return "";
+	return buildWrapperName(f.category, f.date);
+});
+
+async function confirmFolderUploadAndRun() {
+	const f = pendingFolder.value;
+	if (!f) return;
+	if (!f.category) { uploadError.value = "Folder needs a category (target folder)."; return; }
+	uploadBusy.value = true;
+	uploadError.value = "";
+	uploadInfo.value = "";
+	try {
+		const wrapper = await _prepareWrapper(f.category, f.date);
+		for (const e of f.entries) {
+			await uploadFile("portal_app.api.files.upload_project_file", e.file, {
+				project: project.value,
+				is_private: isPrivateUpload.value ? "1" : "0",
+				destination: destination.value,
+				external_provider: externalProvider.value,
+				target_folder: wrapper.fileDoc,
+				relative_path: e.relativeDir || "",
+			});
+		}
+		await loadFiles();
+		const when = fmtDate(new Date().toISOString());
+		const fileCount = f.entries.length;
+		uploadInfo.value = `Uploaded folder “${wrapper.baseName}” (${fileCount} file${fileCount === 1 ? "" : "s"}) to ${wrapper.label} on ${when}.`;
+		setTimeout(() => (uploadInfo.value = ""), 6000);
+		confirmUploadOpen.value = false;
+		pendingFolder.value = null;
+	} catch (e) {
+		uploadError.value = apiErr(e);
+	} finally {
+		uploadBusy.value = false;
+	}
+}
+
 function onFileInput(e) {
 	const input = e.target;
 	handleFiles(input.files);
 	input.value = "";
+}
+function onFolderInput(e) {
+	const input = e.target;
+	const list = Array.from(input.files || []);
+	const entries = list.map((f) => ({ file: f, relativePath: f.webkitRelativePath || "" }));
+	stageFolderUpload(entries);
+	if (input) input.value = "";
 }
 
 // Drag-and-drop directly onto a folder card — uploads land in that folder.
@@ -798,17 +1031,29 @@ function onFolderDragLeave(e, f) {
 async function onFolderDrop(e, f) {
 	if (isCustomerPortalUser.value) return;
 	dropTargetFolder.value = "";
-	const files = e.dataTransfer?.files;
-	if (!files?.length || !project.value) return;
+	const dt = e.dataTransfer;
+	if (!dt || !project.value) return;
 	// Temporarily switch the upload target to this folder, run the upload, then leave it set
 	// (matches the auto-set-target behaviour when clicking a folder card).
 	targetFolder.value = f.name;
-	await handleFiles(files);
+	if (await _dropContainsDirectory(dt)) {
+		const collected = await collectFromDataTransfer(dt);
+		stageFolderUpload(collected, f.name);
+		return;
+	}
+	await handleFiles(dt.files);
 }
 
-function onDrop(e) {
+async function onDrop(e) {
 	dragOver.value = false;
-	handleFiles(e.dataTransfer?.files);
+	const dt = e.dataTransfer;
+	if (!dt) return;
+	if (await _dropContainsDirectory(dt)) {
+		const collected = await collectFromDataTransfer(dt);
+		stageFolderUpload(collected);
+		return;
+	}
+	handleFiles(dt.files);
 }
 
 async function createShareLinkForFolder(folderPath) {
@@ -1566,6 +1811,15 @@ async function deleteProjectFile(f) {
 							Share
 						</button>
 						<button
+							class="portal-btn"
+							:disabled="!targetFolder || uploadBusy"
+							title="Upload an entire folder (structure preserved)"
+							@click="folderInput?.click()"
+						>
+							<FeatherIcon name="folder-plus" class="h-4 w-4" />
+							Upload folder
+						</button>
+						<button
 							class="portal-btn portal-btn-primary"
 							:disabled="!targetFolder || uploadBusy"
 							@click="fileInput?.click()"
@@ -1594,11 +1848,12 @@ async function deleteProjectFile(f) {
 					>
 						<FeatherIcon name="upload-cloud" class="h-5 w-5" />
 					</div>
-					<p class="font-medium text-[color:var(--portal-text)]">Drop files here or click to upload</p>
+					<p class="font-medium text-[color:var(--portal-text)]">Drop files or a folder here, or click to upload</p>
 					<p class="text-xs text-[color:var(--portal-muted)]">
 						Goes into <strong class="text-[color:var(--portal-text)]">{{ folderLabelByName[targetFolder] || targetFolder || "—" }}</strong>
 					</p>
 					<input ref="fileInput" type="file" class="hidden" multiple @change="onFileInput" />
+					<input ref="folderInput" type="file" class="hidden" webkitdirectory directory multiple @change="onFolderInput" />
 				</div>
 
 				<div class="flex flex-wrap items-center gap-3">
@@ -2168,8 +2423,9 @@ async function deleteProjectFile(f) {
 								<FeatherIcon name="upload-cloud" class="h-4 w-4" />
 							</div>
 							<div>
-								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Confirm upload</h2>
-								<p class="text-xs text-[color:var(--portal-muted)]">Review {{ pendingUploads.length }} file{{ pendingUploads.length === 1 ? "" : "s" }} before sending. Names are auto-generated with today's date.</p>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">{{ isFolderMode ? "Confirm folder upload" : "Confirm upload" }}</h2>
+								<p v-if="isFolderMode" class="text-xs text-[color:var(--portal-muted)]">Folder structure preserved. Wrapper auto-named <strong>{{ pendingFolderWrapperName }}</strong>; same-day repeats become <strong>_v2</strong>, <strong>_v3</strong> …</p>
+								<p v-else class="text-xs text-[color:var(--portal-muted)]">Files will be wrapped in a dated folder. Same-day repeats become <strong>_v2</strong>, <strong>_v3</strong> …</p>
 							</div>
 						</div>
 						<button type="button" class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)] disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">
@@ -2182,10 +2438,44 @@ async function deleteProjectFile(f) {
 							<span class="font-semibold">Destination:</span>
 							<span class="truncate">{{ project }}</span>
 							<span class="text-[color:var(--portal-subtle)]">/</span>
-							<span class="truncate">{{ folderLabelByName[targetFolder] || targetFolder || "—" }}</span>
-							<span class="ml-auto text-[10px] font-medium uppercase tracking-wide text-[color:var(--portal-muted)]">Editable per file below</span>
+							<span class="truncate">{{ folderLabelByName[(isFolderMode ? pendingFolder.category : targetFolder)] || (isFolderMode ? pendingFolder.category : targetFolder) || "—" }}</span>
+							<span class="text-[color:var(--portal-subtle)]">/</span>
+							<span class="truncate font-semibold">{{ isFolderMode ? pendingFolderWrapperName : buildWrapperName(targetFolder, todayIso()) }}</span>
+							<span class="ml-auto text-[10px] font-medium uppercase tracking-wide text-[color:var(--portal-muted)]">{{ isFolderMode ? "Folder upload" : "Editable per file below" }}</span>
 						</div>
-						<div v-for="(row, idx) in pendingUploads" :key="`pending-${idx}`" class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-3">
+						<template v-if="isFolderMode">
+							<div class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-3">
+								<p class="mb-2 flex items-center gap-2 text-xs text-[color:var(--portal-muted)]">
+									<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0" />
+									<span class="min-w-0 truncate">Source folder: {{ pendingFolder.sourceName }}</span>
+									<span class="ml-auto shrink-0">{{ pendingFolder.entries.length }} file{{ pendingFolder.entries.length === 1 ? "" : "s" }}</span>
+								</p>
+								<div class="grid gap-2 sm:grid-cols-2">
+									<label class="block">
+										<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Category (folder)</span>
+										<select v-model="pendingFolder.category" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy">
+											<option v-if="projectRootPath" :value="projectRootPath">Project folder (all files)</option>
+											<option v-for="f in folders" :key="`fcat-${f.name}`" :value="f.name">{{ folderOptionLabel(f.label) }}</option>
+										</select>
+									</label>
+									<label class="block">
+										<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Date</span>
+										<input v-model="pendingFolder.date" type="date" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" />
+									</label>
+								</div>
+							</div>
+							<div class="rounded-xl border border-[color:var(--portal-border)] bg-white">
+								<p class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)] border-b border-[color:var(--portal-border)]">Files inside (structure preserved)</p>
+								<ul class="max-h-48 overflow-auto divide-y divide-[color:var(--portal-border)] text-xs">
+									<li v-for="(e, i) in pendingFolder.entries" :key="`fent-${i}`" class="flex items-center gap-2 px-3 py-1.5">
+										<FeatherIcon name="file" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
+										<span class="min-w-0 truncate">{{ e.relativeDir ? e.relativeDir + "/" : "" }}{{ e.file.name }}</span>
+										<span class="ml-auto shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
+									</li>
+								</ul>
+							</div>
+						</template>
+						<div v-else v-for="(row, idx) in pendingUploads" :key="`pending-${idx}`" class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-3">
 							<p class="mb-2 flex items-center gap-2 text-xs text-[color:var(--portal-muted)]">
 								<FeatherIcon name="file" class="h-3.5 w-3.5 shrink-0" />
 								<span class="min-w-0 truncate">Original: {{ row.originalFile.name }}</span>
@@ -2207,15 +2497,27 @@ async function deleteProjectFile(f) {
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Date</span>
 									<input v-model="row.date" type="date" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingDateChange(row)" />
 								</label>
+								<label v-if="fileTypes.length" class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">File type</span>
+									<select v-model="row.fileType" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy">
+										<option value="">— Not set —</option>
+										<option v-for="t in fileTypes" :key="`ft-${idx}-${t.name}`" :value="t.name">{{ t.label }}</option>
+									</select>
+								</label>
 							</div>
 						</div>
 						<p v-if="uploadError" class="text-sm text-red-600">{{ uploadError }}</p>
 					</div>
 					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
 						<button type="button" class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">Cancel</button>
-						<button type="button" class="flex items-center gap-2 rounded-lg bg-[color:var(--portal-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50" :disabled="uploadBusy" @click="confirmUploadAndRun">
+						<button type="button" class="flex items-center gap-2 rounded-lg bg-[color:var(--portal-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50" :disabled="uploadBusy" @click="runConfirm">
 							<FeatherIcon name="upload" class="h-4 w-4" />
-							{{ uploadBusy ? "Uploading…" : `Upload ${pendingUploads.length} file${pendingUploads.length === 1 ? "" : "s"}` }}
+							<template v-if="isFolderMode">
+								{{ uploadBusy ? "Uploading…" : `Upload folder (${pendingFolder.entries.length} file${pendingFolder.entries.length === 1 ? "" : "s"})` }}
+							</template>
+							<template v-else>
+								{{ uploadBusy ? "Uploading…" : `Upload ${pendingUploads.length} file${pendingUploads.length === 1 ? "" : "s"}` }}
+							</template>
 						</button>
 					</div>
 				</div>

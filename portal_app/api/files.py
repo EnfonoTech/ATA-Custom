@@ -1866,6 +1866,20 @@ def upload_project_file():
 	if destination in {"external", "both"}:
 		external_result = _send_external()
 
+	# Optional portal file type tag (e.g. "AutoCAD", "PDF Document"). The frontend picks
+	# this from the Portal File Type DocType list; we validate it matches an existing row
+	# before stamping it on the saved File doc.
+	portal_file_type = cstr(frappe.form_dict.get("file_type") or "").strip()
+	if portal_file_type and not frappe.db.exists("Portal File Type", portal_file_type):
+		portal_file_type = ""
+
+	# Folder uploads put files into nested subfolders inside the chosen `target_folder`.
+	# `relative_path` is the path inside the wrapping root (e.g. "sub1/sub2"); intermediate
+	# subfolders are created on demand. File uploads through the new "wrap each session in
+	# a dated folder" flow reuse the same plumbing — the wrapper is created via
+	# `prepare_folder_upload` and `relative_path` is left empty.
+	relative_dir = _normalize_template_path(cstr(frappe.form_dict.get("relative_path") or ""))
+
 	doc = None
 	folder_label_resolved = None
 	if destination in {"erpnext", "both"}:
@@ -1876,15 +1890,50 @@ def upload_project_file():
 			valid_folders[folder_ctx["project_root"]] = _("Project folder (all files)")
 		if not target_folder:
 			frappe.throw(_("Select a target project folder before upload."))
-		if target_folder not in valid_folders:
-			frappe.throw(_("Invalid target folder selected."))
+		# `target_folder` may be either a known category root or a wrapping folder created by
+		# `prepare_folder_upload` that lives under one of those roots. Walk parents up to validate.
+		resolved_target = target_folder
+		if resolved_target not in valid_folders:
+			project_root = folder_ctx.get("project_root")
+			cur = resolved_target
+			belongs = False
+			for _i in range(20):
+				parent = frappe.db.get_value("File", cur, "folder") if cur else None
+				if not parent:
+					break
+				if parent == project_root or parent in valid_folders:
+					belongs = True
+					break
+				cur = parent
+			if not belongs:
+				frappe.throw(_("Invalid target folder selected."))
+		# Drill into per-file relative subdirs (folder upload structure preservation).
+		if relative_dir:
+			resolved_target = _ensure_folder_path(resolved_target, relative_dir)
+
 		folder_label_resolved = valid_folders.get(target_folder)
+		if folder_label_resolved is None:
+			# Wrapping folder — use the leaf folder's display name.
+			leaf_name = frappe.db.get_value("File", target_folder, "file_name") or ""
+			folder_label_resolved = leaf_name
+		if relative_dir:
+			folder_label_resolved = (
+				f"{folder_label_resolved}/{relative_dir}" if folder_label_resolved else relative_dir
+			)
 		with _bypass_max_attachments():
-			doc = save_file(fname, content, "Project", project, folder=target_folder, is_private=is_private)
+			doc = save_file(fname, content, "Project", project, folder=resolved_target, is_private=is_private)
 		# Belt-and-braces: if some hook reset the folder, force it back.
-		if doc and doc.folder != target_folder:
-			frappe.db.set_value("File", doc.name, "folder", target_folder, update_modified=False)
-			doc.folder = target_folder
+		if doc and doc.folder != resolved_target:
+			frappe.db.set_value("File", doc.name, "folder", resolved_target, update_modified=False)
+			doc.folder = resolved_target
+		# Stamp the file-type tag without re-saving the doc (avoids hooks).
+		if doc and portal_file_type:
+			try:
+				frappe.db.set_value("File", doc.name, "portal_file_type", portal_file_type, update_modified=False)
+				doc.portal_file_type = portal_file_type
+			except Exception:
+				# Custom field not yet migrated — fail soft so uploads still work.
+				pass
 
 	return {
 		"name": doc.name if doc else None,
@@ -1892,10 +1941,78 @@ def upload_project_file():
 		"file_name": doc.file_name if doc else fname,
 		"folder": doc.folder if doc else None,
 		"folder_label": folder_label_resolved,
+		"file_type": portal_file_type or None,
 		"destination": destination,
 		"external_provider": external_provider or None,
 		"external_result": external_result,
 	}
+
+
+@frappe.whitelist()
+def prepare_folder_upload():
+	"""Reserve a wrapping folder under `target_folder` and return its File doc name.
+
+	Used by both folder uploads (preserves source structure inside the wrapper) and the
+	new "wrap every upload session in a dated folder" file-upload flow. Resolves naming
+	collisions with `_v2`, `_v3`, … so multiple uploads on the same day each get a
+	distinct sibling.
+	"""
+	project = cstr(frappe.form_dict.get("project") or "").strip()
+	target_folder = cstr(frappe.form_dict.get("target_folder") or "").strip()
+	folder_name = cstr(frappe.form_dict.get("folder_name") or "").strip()
+	if not project:
+		frappe.throw(_("project is required"))
+	if not target_folder:
+		frappe.throw(_("target_folder is required"))
+	if not folder_name:
+		frappe.throw(_("folder_name is required"))
+	helper.assert_customer_portal_can_upload(project)
+
+	folder_ctx = ensure_project_folders(project)
+	valid_folders = {x["name"]: x.get("label") for x in folder_ctx["subfolders"]}
+	if folder_ctx.get("project_root"):
+		valid_folders[folder_ctx["project_root"]] = _("Project folder (all files)")
+	if target_folder not in valid_folders:
+		frappe.throw(_("Invalid target folder selected."))
+
+	base = folder_name
+	candidate = base
+	suffix = 1
+	while frappe.db.get_value(
+		"File",
+		{"folder": target_folder, "is_folder": 1, "file_name": candidate},
+		"name",
+	):
+		suffix += 1
+		candidate = f"{base}_v{suffix}"
+
+	new_folder = _ensure_folder(target_folder, candidate)
+	parent_label = valid_folders.get(target_folder) or ""
+	folder_label = f"{parent_label}/{candidate}" if parent_label else candidate
+	return {
+		"folder_name": new_folder,
+		"file_name": candidate,
+		"base_name": base,
+		"folder_label": folder_label,
+		"parent_target_folder": target_folder,
+	}
+
+
+@frappe.whitelist()
+def list_portal_file_types():
+	"""Return the configured Portal File Type list (display name + extension hints).
+
+	The frontend uses `extensions` to auto-pre-select a type based on the picked file's
+	extension, but the user can override it in the confirm modal.
+	"""
+	if not frappe.db.exists("DocType", "Portal File Type"):
+		return {"types": []}
+	rows = frappe.get_all(
+		"Portal File Type",
+		fields=["name", "type_name", "extensions"],
+		order_by="type_name asc",
+	)
+	return {"types": rows}
 
 
 @frappe.whitelist()

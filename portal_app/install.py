@@ -94,10 +94,65 @@ def lift_project_attachment_limit():
 	frappe.clear_cache(doctype="Project")
 
 
+DEFAULT_PORTAL_FILE_TYPES = [
+	{"type_name": "AutoCAD", "extensions": ".dwg,.dxf"},
+	{"type_name": "PDF Document", "extensions": ".pdf"},
+	{"type_name": "GAD File", "extensions": ".gad"},
+	{"type_name": "Document", "extensions": ".doc,.docx,.odt,.rtf,.txt"},
+	{"type_name": "Spreadsheet", "extensions": ".xls,.xlsx,.csv,.ods"},
+	{"type_name": "Presentation", "extensions": ".ppt,.pptx,.odp"},
+	{"type_name": "Image", "extensions": ".jpg,.jpeg,.png,.gif,.webp,.bmp,.tiff"},
+	{"type_name": "3D Model", "extensions": ".skp,.obj,.stl,.fbx,.3ds,.blend"},
+	{"type_name": "Archive", "extensions": ".zip,.rar,.7z,.tar,.gz"},
+	{"type_name": "Other", "extensions": ""},
+]
+
+
+def ensure_portal_file_type_field():
+	"""Add `portal_file_type` link field on File so uploads can be tagged by type."""
+	if not frappe.db.exists("DocType", "File"):
+		return
+	create_custom_fields(
+		{
+			"File": [
+				{
+					"fieldname": "portal_file_type",
+					"label": "Portal File Type",
+					"fieldtype": "Link",
+					"options": "Portal File Type",
+					"insert_after": "folder",
+					"description": "File type tag set by the portal upload UI (AutoCAD, PDF, GAD, etc.).",
+				},
+			]
+		},
+		update=True,
+	)
+	frappe.clear_cache(doctype="File")
+
+
+def seed_default_portal_file_types():
+	"""Seed the default file-type list. Idempotent — only inserts missing rows; never edits user-modified entries."""
+	if not frappe.db.exists("DocType", "Portal File Type"):
+		return
+	for entry in DEFAULT_PORTAL_FILE_TYPES:
+		if frappe.db.exists("Portal File Type", entry["type_name"]):
+			continue
+		doc = frappe.get_doc(
+			{
+				"doctype": "Portal File Type",
+				"type_name": entry["type_name"],
+				"extensions": entry.get("extensions", ""),
+			}
+		)
+		doc.insert(ignore_permissions=True)
+
+
 def after_install():
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
+	ensure_portal_file_type_field()
+	seed_default_portal_file_types()
 
 
 def after_migrate():
@@ -105,3 +160,5 @@ def after_migrate():
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
+	ensure_portal_file_type_field()
+	seed_default_portal_file_types()
