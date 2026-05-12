@@ -39,6 +39,7 @@ def get_portal_admin_capabilities():
 	return {
 		"can_create_users": _can_create_users(),
 		"can_run_demo_seed": _can_run_seed_via_portal(),
+		"can_edit_folder_template": helper.can_edit_portal_folder_template(),
 	}
 
 
@@ -226,33 +227,77 @@ def parse_project_list_docx():
 	uploaded = frappe.request.files.get("file")
 	if not uploaded:
 		frappe.throw(_("No file uploaded."))
-	try:
-		import zipfile
-		import xml.etree.ElementTree as ET
-		import io
-		content = uploaded.read()
-		with zipfile.ZipFile(io.BytesIO(content)) as z:
-			with z.open("word/document.xml") as f:
-				tree = ET.parse(f)
-	except Exception as e:
-		frappe.throw(_(f"Could not read .docx file: {e}"))
 
-	ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-	root = tree.getroot()
-	projects = []
-	import re
-	for para in root.findall(".//w:p", ns):
+	import zipfile
+	import xml.etree.ElementTree as ET
+	import io
+	import re as _re
+
+	content = uploaded.read()
+	if not content:
+		frappe.throw(_("Uploaded file is empty."))
+
+	try:
+		zf = zipfile.ZipFile(io.BytesIO(content))
+	except Exception as e:
+		frappe.throw(_(f"Could not open file as ZIP/DOCX: {e}"))
+
+	# Support both .docx (word/document.xml) and plain XML files.
+	xml_bytes = None
+	try:
+		if "word/document.xml" in zf.namelist():
+			xml_bytes = zf.open("word/document.xml").read()
+		else:
+			# Try any XML entry
+			for name in zf.namelist():
+				if name.endswith(".xml") and "document" in name.lower():
+					xml_bytes = zf.open(name).read()
+					break
+	except Exception as e:
+		frappe.throw(_(f"Could not read document XML: {e}"))
+
+	if not xml_bytes:
+		frappe.throw(_("No document XML found inside the file. Make sure it is a valid .docx."))
+
+	try:
+		root = ET.fromstring(xml_bytes)
+	except Exception as e:
+		frappe.throw(_(f"Could not parse document XML: {e}"))
+
+	# Word XML namespace — try to detect it from the root tag.
+	ns_uri = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+	if root.tag.startswith("{"):
+		ns_uri = root.tag.split("}")[0][1:]
+	ns = {"w": ns_uri}
+
+	# Collect all paragraph text (including inside tables).
+	def _para_text(para):
 		parts = []
 		for r in para.findall(".//w:r", ns):
 			t = r.find("w:t", ns)
-			if t is not None and t.text:
-				parts.append(t.text)
-		line = "".join(parts).strip()
-		# Match: 2201 – NAME  or  CDB-01 – NAME
-		m = re.match(r"^((?:CDB-\d+|\d{4}))\s*[–—-]\s*(.+)$", line)
+			if t is not None:
+				parts.append(t.text or "")
+		return "".join(parts).strip()
+
+	# Separator: en-dash, em-dash, figure-dash, minus-sign, or plain hyphen followed by space
+	_SEP = r"[‒–—―−\-]"
+	_CODE = r"(?:CDB-\d+|\d{3,4})"
+	pattern = _re.compile(rf"^({_CODE})\s*{_SEP}+\s*(.+)$")
+
+	projects = []
+	seen_codes = set()
+	for para in root.findall(".//w:p", ns):
+		line = _para_text(para)
+		if not line:
+			continue
+		m = pattern.match(line)
 		if m:
-			code, name = m.group(1).strip(), m.group(2).strip()
-			projects.append({"code": code, "name": name})
+			code = m.group(1).strip()
+			name = m.group(2).strip()
+			if code not in seen_codes:
+				seen_codes.add(code)
+				projects.append({"code": code, "name": name})
+
 	return {"projects": projects, "count": len(projects)}
 
 

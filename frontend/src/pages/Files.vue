@@ -1235,6 +1235,43 @@ async function onFolderButtonClick() {
 	folderInput.value?.click();
 }
 
+// ── ZIP upload ──────────────────────────────────────────────────────────────
+const zipInput = ref(null);
+const zipBusy = ref(false);
+const zipMsg = ref("");
+
+async function onZipInput(e) {
+	const file = e.target.files?.[0];
+	if (e.target) e.target.value = "";
+	if (!file) return;
+	if (!targetFolder.value) {
+		uploadError.value = "Select a destination subfolder first.";
+		return;
+	}
+	const destLabel = folderLabelByName.value[targetFolder.value] || targetFolder.value;
+	if (!confirm(`Upload and extract "${file.name}" into:\n  ${destLabel}\n\nAll files inside the ZIP will be created there, preserving the folder structure.`)) return;
+	zipBusy.value = true;
+	uploadError.value = "";
+	zipMsg.value = "";
+	try {
+		const res = await uploadFile(
+			"portal_app.api.files.upload_project_files_zip",
+			file,
+			{ project: project.value, target_folder: targetFolder.value },
+		);
+		zipMsg.value = `ZIP extracted: ${res?.uploaded ?? 0} file(s) uploaded${res?.failed ? `, ${res.failed} failed` : ""}.`;
+		await loadFilesAndFolders();
+		setTimeout(() => (zipMsg.value = ""), 6000);
+	} catch (err) {
+		const body = err?.responseBody;
+		uploadError.value = body?._server_messages
+			? (() => { try { return JSON.parse(JSON.parse(body._server_messages)[0]).message; } catch { return body._server_messages; } })()
+			: body?.message || String(err?.message || "ZIP upload failed.");
+	} finally {
+		zipBusy.value = false;
+	}
+}
+
 async function createShareLinkForFolder(folderPath) {
 	if (!project.value || !folderPath) return;
 	if (!canShareFolder.value) {
@@ -2018,7 +2055,7 @@ async function deleteProjectFile(f) {
 						</button>
 						<button
 							class="portal-btn"
-							:disabled="uploadBusy"
+							:disabled="uploadBusy || zipBusy"
 							title="Upload a folder — all contents preserved"
 							@click="onFolderButtonClick"
 						>
@@ -2026,8 +2063,17 @@ async function deleteProjectFile(f) {
 							Upload folder
 						</button>
 						<button
+							class="portal-btn"
+							:disabled="!targetFolder || uploadBusy || zipBusy"
+							title="Upload a ZIP file — extracts folder structure into the selected destination"
+							@click="zipInput?.click()"
+						>
+							<FeatherIcon name="archive" class="h-4 w-4" />
+							{{ zipBusy ? "Extracting…" : "Upload ZIP" }}
+						</button>
+						<button
 							class="portal-btn portal-btn-primary"
-							:disabled="!targetFolder || uploadBusy"
+							:disabled="!targetFolder || uploadBusy || zipBusy"
 							@click="fileInput?.click()"
 						>
 							<FeatherIcon name="upload" class="h-4 w-4" />
@@ -2061,6 +2107,7 @@ async function deleteProjectFile(f) {
 					<p class="text-[11px] text-[color:var(--portal-subtle)]">To upload a whole folder, use <strong>Upload folder</strong> button above or drag-and-drop the folder here</p>
 					<input ref="fileInput" type="file" class="hidden" multiple @change="onFileInput" />
 					<input ref="folderInput" type="file" class="hidden" webkitdirectory directory multiple @change="onFolderInput" />
+					<input ref="zipInput" type="file" class="hidden" accept=".zip,application/zip" @change="onZipInput" />
 				</div>
 
 				<div class="flex flex-wrap items-center gap-3">
@@ -2104,6 +2151,7 @@ async function deleteProjectFile(f) {
 				</div>
 				<p v-if="uploadError" class="text-sm text-red-600">{{ uploadError }}</p>
 				<p v-if="!uploadBusy && uploadInfo" class="text-sm text-green-700">{{ uploadInfo }}</p>
+				<p v-if="zipMsg" class="text-sm text-green-700">{{ zipMsg }}</p>
 			</div>
 			<p v-if="project && isCustomerPortalUser" class="rounded-xl border bg-gray-50 p-3 text-sm text-gray-600">
 				Customer portal users can open files below; uploading is disabled.

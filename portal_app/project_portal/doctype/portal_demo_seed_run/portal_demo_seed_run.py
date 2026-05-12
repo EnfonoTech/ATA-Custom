@@ -238,11 +238,18 @@ DEMO_PROJECTS: list[dict] = [
 
 
 def _ensure_company():
-	from erpnext import get_default_company
-
-	company = get_default_company()
-	if not company:
-		frappe.throw(_("Set a default Company before running the demo seed (ERPNext)."))
+	"""Return default company name, or any company, or None (caller handles gracefully)."""
+	company = None
+	try:
+		from erpnext import get_default_company
+		company = get_default_company()
+	except Exception:
+		pass
+	if not company and frappe.db.exists("DocType", "Company"):
+		try:
+			company = frappe.db.get_value("Company", {}, "name", order_by="creation asc")
+		except Exception:
+			pass
 	return company
 
 
@@ -362,19 +369,18 @@ class PortalDemoSeedRun(Document):
 				continue
 
 			year = pj.get("year") or _year_from_code(pj["code"].replace("ATA-", ""))
-			doc = frappe.get_doc(
-				{
-					"doctype": "Project",
-					"project_name": pj["project_name"],
-					"company": company,
-					"naming_series": "PROJ-.####",
-					"status": _STAGE_STATUS.get(pj["stage"], "Open"),
-					"expected_start_date": f"{year}-01-01",
-					"expected_end_date": f"{year}-12-31",
-					"estimated_costing": pj.get("cost") or 0,
-					"percent_complete": _STAGE_PCT.get(pj["stage"], 20),
-				}
-			)
+			proj_dict = {
+				"doctype": "Project",
+				"project_name": pj["project_name"],
+				"status": _STAGE_STATUS.get(pj["stage"], "Open"),
+				"expected_start_date": f"{year}-01-01",
+				"expected_end_date": f"{year}-12-31",
+				"estimated_costing": pj.get("cost") or 0,
+				"percent_complete": _STAGE_PCT.get(pj["stage"], 20),
+			}
+			if company and meta.has_field("company"):
+				proj_dict["company"] = company
+			doc = frappe.get_doc(proj_dict)
 			if meta.has_field("portal_project_code"):
 				doc.portal_project_code = code
 			if meta.has_field("portal_kanban_stage"):

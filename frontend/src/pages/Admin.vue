@@ -1,9 +1,9 @@
 <script setup>
 import { ref, onMounted, computed } from "vue";
-import { call } from "@/api";
+import { call, uploadFile } from "@/api";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
 
-const caps = ref({ can_create_users: false, can_run_demo_seed: false });
+const caps = ref({ can_create_users: false, can_run_demo_seed: false, can_edit_folder_template: false });
 const loadingCaps = ref(true);
 
 const email = ref("");
@@ -31,26 +31,25 @@ const docxInput      = ref(null);
 async function onDocxChange(e) {
 	const file = e.target.files?.[0];
 	if (!file) return;
-	docxFile.value  = file;
+	docxFile.value   = file;
 	docxParsed.value = false;
 	docxProjects.value = [];
-	docxErr.value   = "";
-	docxMsg.value   = "";
-	docxBusy.value  = true;
+	docxErr.value    = "";
+	docxMsg.value    = "";
+	docxBusy.value   = true;
 	try {
-		const fd = new FormData();
-		fd.append("file", file, file.name);
-		const resp = await fetch("/api/method/portal_app.api.portal_admin.parse_project_list_docx", {
-			method: "POST", body: fd,
-			headers: { "X-Frappe-CSRF-Token": window.csrf_token || "" },
-		});
-		const data = await resp.json();
-		if (data.exc) throw new Error(data.exc);
-		docxProjects.value = data.message?.projects || [];
+		const res = await uploadFile(
+			"portal_app.api.portal_admin.parse_project_list_docx",
+			file,
+		);
+		docxProjects.value = res?.projects || [];
 		docxParsed.value   = true;
 		docxMsg.value      = `Parsed ${docxProjects.value.length} projects from ${file.name}.`;
-	} catch (e) {
-		docxErr.value = String(e?.message || e);
+		if (!docxProjects.value.length) {
+			docxErr.value = "No projects recognised in the file. Check it matches the ATA format (NNNN – NAME or CDB-NN – NAME).";
+		}
+	} catch (err) {
+		docxErr.value = apiErr(err) || String(err?.message || err);
 	} finally {
 		docxBusy.value = false;
 	}
@@ -105,7 +104,44 @@ const newRunOpts = ref({
 const cleanupBusyName = ref("");
 const clearAllBusy = ref(false);
 
-const canShow = computed(() => caps.value.can_create_users || caps.value.can_run_demo_seed);
+const canShow = computed(() => caps.value.can_create_users || caps.value.can_run_demo_seed || caps.value.can_edit_folder_template);
+
+// Folder template ZIP upload
+const tplZipInput    = ref(null);
+const tplZipBusy     = ref(false);
+const tplZipMsg      = ref("");
+const tplZipErr      = ref("");
+const tplZipRows     = ref([]);
+const tplZipParsed   = ref(false);
+const tplApplyProject = ref("");
+const tplApplyBusy   = ref(false);
+
+async function onTplZipChange(e) {
+	const file = e.target.files?.[0];
+	if (e.target) e.target.value = "";
+	if (!file) return;
+	tplZipBusy.value   = true;
+	tplZipMsg.value    = "";
+	tplZipErr.value    = "";
+	tplZipRows.value   = [];
+	tplZipParsed.value = false;
+	try {
+		const res = await uploadFile(
+			"portal_app.api.projects.import_portal_folder_template_zip",
+			file,
+			tplApplyProject.value ? { project: tplApplyProject.value } : {},
+		);
+		tplZipRows.value   = res?.rows || [];
+		tplZipParsed.value = true;
+		tplZipMsg.value = `Template updated — ${res?.count ?? tplZipRows.value.length} folder path(s) imported from ${file.name}.`;
+		if (tplApplyProject.value) tplZipMsg.value += ` Folders applied to project ${tplApplyProject.value}.`;
+		setTimeout(() => (tplZipMsg.value = ""), 7000);
+	} catch (err) {
+		tplZipErr.value = apiErr(err) || String(err?.message || err);
+	} finally {
+		tplZipBusy.value = false;
+	}
+}
 
 onMounted(async () => {
 	try {
@@ -620,6 +656,71 @@ const totalCreated = computed(() =>
 					<p class="text-[11px] text-[color:var(--portal-subtle)]">
 						Demo password: <code class="rounded bg-[color:var(--portal-bg-dim)] px-1 py-0.5 font-mono">ChangeMe-Demo#1</code>
 					</p>
+				</div>
+
+				<!-- Project folder structure template -->
+				<div class="portal-card-strong space-y-4 p-5">
+					<div class="flex items-center gap-2">
+						<div
+							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
+							style="background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);"
+						>
+							<FeatherIcon name="folder-tree" class="h-4 w-4" />
+						</div>
+						<div>
+							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Project folder structure</h2>
+							<p class="text-xs text-[color:var(--portal-muted)]">
+								Import a ZIP to set the company-wide subfolder template (e.g. <strong>00 PROJ FOLDER STANDARD.zip</strong>).
+								Every new project will get this structure automatically.
+							</p>
+						</div>
+					</div>
+
+					<div class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-4 space-y-3">
+						<p class="text-xs text-[color:var(--portal-muted)]">
+							Create a ZIP whose folder hierarchy represents your standard project structure — the folder names become the subfolder paths.
+							Only leaf folders are kept; intermediate parents are created automatically.
+							<strong class="text-[color:var(--portal-text)]">This replaces the current template.</strong>
+						</p>
+						<div class="flex flex-wrap items-center gap-3">
+							<button
+								class="portal-btn portal-btn-ghost text-xs"
+								:disabled="tplZipBusy"
+								@click="tplZipInput?.click()"
+							>
+								<FeatherIcon name="upload" class="h-3.5 w-3.5" />
+								{{ tplZipBusy ? "Importing…" : "Import folder structure ZIP…" }}
+							</button>
+							<input
+								ref="tplZipInput"
+								type="file"
+								accept=".zip,application/zip"
+								class="hidden"
+								@change="onTplZipChange"
+							/>
+							<span class="text-xs text-[color:var(--portal-muted)]">
+								Optionally apply to a specific project now:
+							</span>
+							<input
+								v-model="tplApplyProject"
+								type="text"
+								class="portal-input w-44 text-xs"
+								placeholder="Project ID (optional)"
+							/>
+						</div>
+						<p v-if="tplZipErr" class="text-sm text-red-600">{{ tplZipErr }}</p>
+						<p v-if="tplZipMsg" class="text-sm text-green-700">{{ tplZipMsg }}</p>
+						<div v-if="tplZipParsed && tplZipRows.length" class="max-h-48 overflow-y-auto rounded-lg border border-[color:var(--portal-border)] bg-white text-xs">
+							<div
+								v-for="(row, i) in tplZipRows"
+								:key="i"
+								class="flex items-center gap-2 border-b border-[color:var(--portal-border)] px-3 py-1.5 last:border-b-0"
+							>
+								<FeatherIcon name="folder" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
+								<span class="truncate font-mono text-[11px] text-[color:var(--portal-text)]">{{ row.folder_name }}</span>
+							</div>
+						</div>
+					</div>
 				</div>
 			</template>
 		</div>

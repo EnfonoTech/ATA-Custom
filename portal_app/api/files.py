@@ -458,6 +458,129 @@ def download_files_zip(project, file_names=None, folder_path=None):
 	frappe.local.response.type = "binary"
 
 
+@frappe.whitelist()
+def upload_project_files_zip(project, target_folder):
+	"""Upload a ZIP file and extract its contents into target_folder under the project.
+
+	Folder structure inside the ZIP is preserved. A single top-level directory inside
+	the ZIP is stripped (same behaviour as most ZIP tools when you zip a folder).
+	Files starting with '.' or '~' are skipped (macOS metadata, temp files).
+	"""
+	import zipfile as _zipfile
+	import io
+
+	project = cstr(project or "").strip()
+	target_folder = cstr(target_folder or "").strip()
+	if not project:
+		frappe.throw(_("project is required"))
+	if not target_folder:
+		frappe.throw(_("target_folder is required"))
+
+	helper.assert_customer_portal_can_upload(project)
+
+	uploaded = frappe.request.files.get("file")
+	if not uploaded:
+		frappe.throw(_("No file uploaded."))
+
+	content = uploaded.read()
+	if not content:
+		frappe.throw(_("Uploaded ZIP file is empty."))
+
+	try:
+		zf = _zipfile.ZipFile(io.BytesIO(content))
+	except Exception as e:
+		frappe.throw(_(f"Could not open ZIP file: {e}"))
+
+	# Validate target_folder belongs to this project.
+	folder_ctx = ensure_project_folders(project)
+	valid_folders = {x["name"] for x in folder_ctx.get("subfolders", [])}
+	if folder_ctx.get("project_root"):
+		valid_folders.add(folder_ctx["project_root"])
+	if target_folder not in valid_folders:
+		frappe.throw(_("Invalid target folder selected."))
+
+	# All non-directory entries, excluding macOS garbage and hidden files.
+	entries = [
+		e for e in zf.infolist()
+		if not e.is_dir()
+		and not e.filename.startswith("__MACOSX")
+		and not e.filename.startswith(".")
+	]
+	if not entries:
+		frappe.throw(_("ZIP contains no uploadable files."))
+
+	# Strip a common single top-level directory prefix (e.g. "MyFolder/a.pdf" → "a.pdf").
+	filenames = [e.filename for e in entries]
+	tops = {fn.split("/")[0] for fn in filenames}
+	strip_prefix = ""
+	if len(tops) == 1:
+		candidate = list(tops)[0] + "/"
+		if all(fn.startswith(candidate) for fn in filenames):
+			strip_prefix = candidate
+
+	folder_cache: dict = {}
+	uploaded_files = []
+	failed = []
+
+	with _bypass_max_attachments():
+		for entry in entries:
+			rel = entry.filename
+			if strip_prefix and rel.startswith(strip_prefix):
+				rel = rel[len(strip_prefix):]
+
+			# Split into directory path and file name.
+			parts = rel.rsplit("/", 1)
+			rel_dir = parts[0] if len(parts) == 2 else ""
+			file_name = parts[-1]
+
+			if not file_name or file_name.startswith(".") or file_name.startswith("~"):
+				continue
+
+			dest_folder = _zip_resolve_folder(target_folder, rel_dir, folder_cache)
+
+			try:
+				data = zf.read(entry.filename)
+				fdoc = save_file(file_name, data, "Project", project, folder=dest_folder, is_private=0)
+				if fdoc:
+					uploaded_files.append({"name": fdoc.name, "file_name": file_name})
+			except Exception as e:
+				failed.append({"file": file_name, "error": str(e)})
+				frappe.log_error(frappe.get_traceback(), f"Portal ZIP upload: {file_name}")
+
+	frappe.db.commit()
+	return {
+		"ok": True,
+		"uploaded": len(uploaded_files),
+		"failed": len(failed),
+		"errors": failed,
+	}
+
+
+def _zip_resolve_folder(base_folder: str, rel_dir: str, cache: dict) -> str:
+	"""Recursively get-or-create subfolder path under base_folder, caching results."""
+	if not rel_dir:
+		return base_folder
+	key = (base_folder, rel_dir)
+	if key in cache:
+		return cache[key]
+	current = base_folder
+	for part in rel_dir.strip("/").split("/"):
+		if not part:
+			continue
+		child_key = (current, part)
+		if child_key in cache:
+			current = cache[child_key]
+			continue
+		existing = frappe.db.get_value(
+			"File", {"folder": current, "is_folder": 1, "file_name": part}, "name"
+		)
+		folder_doc_name = existing if existing else _ensure_folder(current, part)
+		cache[child_key] = folder_doc_name
+		current = folder_doc_name
+	cache[key] = current
+	return current
+
+
 def cron_revoke_expired_shares():
 	"""Hourly scheduler: revoke every Portal Folder Share whose expiry has passed.
 

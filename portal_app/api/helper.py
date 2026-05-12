@@ -140,14 +140,17 @@ def can_edit_portal_folder_template(user=None) -> bool:
 	The template controls the standard project folder structure and is treated as
 	an audit/governance artifact, so non-auditor staff cannot change it."""
 	user = user or frappe.session.user
-	if user == "Guest" or not user_can_use_portal(user):
+	if user == "Guest":
+		return False
+	roles = set(frappe.get_roles(user))
+	# System Manager is a super-user; bypass the portal-user gate entirely.
+	if "System Manager" in roles:
+		return True
+	if not user_can_use_portal(user):
 		return False
 	if user_is_customer_portal_user(user):
 		return False
-	roles = set(frappe.get_roles(user))
 	if "Auditor" in roles:
-		return True
-	if "System Manager" in roles:
 		return True
 	return False
 
