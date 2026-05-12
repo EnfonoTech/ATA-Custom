@@ -20,12 +20,10 @@ def _can_create_users() -> bool:
 def _can_run_seed_via_portal() -> bool:
 	if frappe.session.user == "Guest":
 		return False
-	if "System Manager" not in frappe.get_roles():
-		return False
-	if frappe.conf.get("developer_mode"):
+	# System Managers can always run the demo seed — no dev-mode or settings flag needed.
+	if "System Manager" in frappe.get_roles():
 		return True
-
-	return bool(helper.get_portal_settings_dict().get("allow_portal_demo_seed"))
+	return False
 
 
 ALLOWED_PORTAL_USER_ROLES = frozenset({"Projects User", "Projects Manager", "Portal Customer"})
