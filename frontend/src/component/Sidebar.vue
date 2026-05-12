@@ -35,6 +35,7 @@ const groups = computed(() => {
 		title: "Files",
 		items: [
 			{ name: "Files", path: "/files", icon: "paperclip" },
+			{ name: "File Browser", path: "/file-browser", icon: "database" },
 			{ name: "Shared with me", path: "/shared-with-me", icon: "share-2" },
 		],
 	};

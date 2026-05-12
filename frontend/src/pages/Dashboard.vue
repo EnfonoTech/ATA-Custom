@@ -46,7 +46,9 @@ onMounted(async () => {
 });
 
 function fmt(n) {
-	return n == null ? "—" : Number(n).toLocaleString();
+	if (n == null) return "—";
+	const x = Number(n);
+	return Number.isFinite(x) ? `SAR ${x.toLocaleString()}` : "—";
 }
 
 function startNewProject() {

@@ -12,6 +12,7 @@ const Kanban        = () => import("@/pages/Kanban.vue");
 const Calendar      = () => import("@/pages/Calendar.vue");
 const Tasks         = () => import("@/pages/Tasks.vue");
 const Files         = () => import("@/pages/Files.vue");
+const AllFiles      = () => import("@/pages/AllFiles.vue");
 const FileTools     = () => import("@/pages/FileTools.vue");
 const SharedFolder  = () => import("@/pages/SharedFolder.vue");
 const SharedWithMe  = () => import("@/pages/SharedWithMe.vue");
@@ -42,6 +43,7 @@ const routes = [
 			{ path: "tasks", name: "Tasks", component: Tasks },
 			{ path: "calendar", name: "Calendar", component: Calendar },
 			{ path: "files", name: "Files", component: Files },
+			{ path: "file-browser", name: "FileBrowser", component: AllFiles },
 			{ path: "shared-with-me", name: "SharedWithMe", component: SharedWithMe },
 			{
 				path: "manage-shares",

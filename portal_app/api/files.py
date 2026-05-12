@@ -1935,6 +1935,44 @@ def upload_project_file():
 				# Custom field not yet migrated — fail soft so uploads still work.
 				pass
 
+		# Create a Project File classification record when classification data is provided.
+		file_classification = cstr(frappe.form_dict.get("file_classification") or "").strip()
+		if doc and file_classification and frappe.db.exists("DocType", "Project File"):
+			try:
+				import os as _os
+				file_sub_category = cstr(frappe.form_dict.get("file_sub_category") or "").strip()
+				document_type = cstr(frappe.form_dict.get("document_type") or "").strip()
+				_base, ext = _os.path.splitext(fname)
+
+				# Resolve the ATA project code and human name from the ERPNext Project record
+				proj_data = frappe.db.get_value(
+					"Project", project,
+					["portal_project_code", "project_name", "portal_kanban_stage"],
+					as_dict=True,
+				) or {}
+				ata_code = proj_data.get("portal_project_code") or project
+				proj_name = proj_data.get("project_name") or project
+				stage = proj_data.get("portal_kanban_stage") or ""
+
+				pf = frappe.get_doc({
+					"doctype": "Project File",
+					"project_code": ata_code,
+					"project_name": proj_name,
+					"project_stage": stage,
+					"file_attachment": doc.file_url,
+					"file_name": fname,
+					"file_extension": ext.lower(),
+					"file_category": file_classification,
+					"file_sub_category": file_sub_category,
+					"document_type": document_type,
+					"uploaded_by": frappe.session.user,
+					"upload_date": frappe.utils.today(),
+				})
+				pf.insert(ignore_permissions=True)
+			except Exception:
+				# Fail soft — classification record is supplementary; upload must succeed.
+				frappe.log_error(frappe.get_traceback(), "Project File classification failed")
+
 	return {
 		"name": doc.name if doc else None,
 		"file_url": doc.file_url if doc else None,
@@ -1975,16 +2013,29 @@ def prepare_folder_upload():
 	if target_folder not in valid_folders:
 		frappe.throw(_("Invalid target folder selected."))
 
-	base = folder_name
+	# Count existing immediate child folders to assign the next sequential series number.
+	existing_count = frappe.db.count("File", {"folder": target_folder, "is_folder": 1})
+	series = str(existing_count + 1).zfill(2)
+
+	# Build base name: series_foldername.
+	# If the caller already included a numeric prefix (legacy), strip it first.
+	name_part = folder_name
+	import re as _re
+	if _re.match(r"^\d{2}_", name_part):
+		name_part = name_part[3:]  # strip old "NN_" prefix so backend controls it
+
+	base = f"{series}_{name_part}"
+
+	# Versioning: if that exact name already exists, append _v2, _v3, …
 	candidate = base
-	suffix = 1
+	v = 1
 	while frappe.db.get_value(
 		"File",
 		{"folder": target_folder, "is_folder": 1, "file_name": candidate},
 		"name",
 	):
-		suffix += 1
-		candidate = f"{base}_v{suffix}"
+		v += 1
+		candidate = f"{base}_v{v}"
 
 	new_folder = _ensure_folder(target_folder, candidate)
 	parent_label = valid_folders.get(target_folder) or ""
@@ -1995,6 +2046,8 @@ def prepare_folder_upload():
 		"base_name": base,
 		"folder_label": folder_label,
 		"parent_target_folder": target_folder,
+		"series": series,
+		"version": v,
 	}
 
 
@@ -2027,3 +2080,197 @@ def get_file_download_url(file_name):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	return {"url": f.file_url, "file_name": f.file_name}
+
+
+@frappe.whitelist()
+def list_all_files(
+	project=None, category=None, sub_category=None,
+	document_type=None, tags=None, search=None,
+	folder_search=None, page=1, per_page=50,
+):
+	"""List project files with filters.
+
+	Primary source: Frappe File records attached to Project documents (always available).
+	Enrichment: Project File doctype records (dsi_erp) when installed, providing
+	classification, tags, and document-type metadata.
+	"""
+	import os as _os
+
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	from portal_app.api.helper import get_allowed_project_names
+	allowed = get_allowed_project_names()
+	if not allowed:
+		return {"files": [], "total": 0, "categories": _DEFAULT_CATS, "sub_categories": [], "doc_types": []}
+
+	# ── Project filter ───────────────────────────────────────────────────────
+	# Search by portal_project_code OR project_name (both fields on Project doc).
+	if project:
+		proj_filter = [
+			["name", "in", allowed],
+			{
+				"portal_project_code": ["like", f"%{project}%"],
+				"project_name":        ["like", f"%{project}%"],
+			},
+		]
+		by_code = frappe.get_all("Project",
+			filters=[["name", "in", allowed], ["portal_project_code", "like", f"%{project}%"]],
+			pluck="name")
+		by_name = frappe.get_all("Project",
+			filters=[["name", "in", allowed], ["project_name", "like", f"%{project}%"]],
+			pluck="name")
+		allowed = list(set(by_code + by_name))
+		if not allowed:
+			return {"files": [], "total": 0, "categories": _DEFAULT_CATS, "sub_categories": [], "doc_types": []}
+
+	# ── Project metadata lookup ──────────────────────────────────────────────
+	proj_meta = {
+		r["name"]: r for r in frappe.get_all(
+			"Project",
+			filters=[["name", "in", allowed]],
+			fields=["name", "portal_project_code", "project_name", "portal_kanban_stage"],
+		)
+	}
+
+	# ── Build Frappe File filters ────────────────────────────────────────────
+	file_filters = [
+		["attached_to_doctype", "=", "Project"],
+		["attached_to_name", "in", allowed],
+		["is_folder", "=", 0],
+	]
+	if search:
+		file_filters.append(["file_name", "like", f"%{search}%"])
+	if folder_search:
+		file_filters.append(["folder", "like", f"%{folder_search}%"])
+
+	page     = max(1, int(page or 1))
+	per_page = min(200, max(10, int(per_page or 50)))
+
+	# Count all (before category post-filter) for accurate total when no category filter
+	total_raw = frappe.db.count("File", file_filters)
+
+	raw_files = frappe.get_all(
+		"File",
+		filters=file_filters,
+		fields=["name", "file_name", "file_url", "file_size", "attached_to_name", "creation", "folder"],
+		order_by="folder asc, file_name asc",
+		# Fetch more if we need to post-filter by category; otherwise paginate directly
+		start=0 if category else (page - 1) * per_page,
+		page_length=(total_raw if category else per_page),
+	)
+
+	# ── Enrich with Project File metadata (optional dsi_erp doctype) ────────
+	pf_map: dict = {}
+	has_pf = frappe.db.exists("DocType", "Project File")
+	if has_pf and raw_files:
+		urls = [f["file_url"] for f in raw_files if f.get("file_url")]
+		if urls:
+			for pf in frappe.get_all(
+				"Project File",
+				filters=[["file_attachment", "in", urls]],
+				fields=["file_attachment", "file_category", "file_sub_category",
+				        "tags_field", "document_type", "project_stage"],
+			):
+				pf_map[pf["file_attachment"]] = pf
+
+	# ── Build rows with auto-classification fallback ─────────────────────────
+	rows = []
+	for f in raw_files:
+		proj  = proj_meta.get(f["attached_to_name"], {})
+		pf    = pf_map.get(f.get("file_url") or "", {})
+		fname = f.get("file_name") or ""
+		_, ext = _os.path.splitext(fname)
+		ext = ext.lower()
+
+		# Derive relative folder path inside the project
+		raw_folder = f.get("folder") or ""
+		proj_root  = f"Home/Attachments/{f['attached_to_name']}"
+		if raw_folder == proj_root:
+			rel_folder = ""
+		elif raw_folder.startswith(proj_root + "/"):
+			rel_folder = raw_folder[len(proj_root) + 1:]
+		else:
+			rel_folder = raw_folder
+
+		auto_cat = _classify_ext(ext)
+		file_cat = pf.get("file_category") or auto_cat
+
+		rows.append({
+			"name":              f["name"],
+			"file_name":         fname,
+			"file_attachment":   f.get("file_url") or "",
+			"file_size":         _fmt_size(f.get("file_size") or 0),
+			"file_extension":    ext,
+			"project_code":      proj.get("portal_project_code") or f["attached_to_name"],
+			"project_name":      proj.get("project_name") or "",
+			"project_stage":     pf.get("project_stage") or proj.get("portal_kanban_stage") or "",
+			"file_category":     file_cat,
+			"file_sub_category": pf.get("file_sub_category") or "",
+			"tags_field":        pf.get("tags_field") or "",
+			"document_type":     pf.get("document_type") or "",
+			"upload_date":       str(f["creation"].date()) if f.get("creation") else "",
+			"folder_path":       rel_folder,
+		})
+
+	# ── Category post-filter (applied after enrichment) ─────────────────────
+	if category:
+		rows = [r for r in rows if r["file_category"] == category]
+		total_raw = len(rows)
+		# Apply pagination manually
+		start = (page - 1) * per_page
+		rows  = rows[start : start + per_page]
+
+	# ── Distinct categories for filter dropdown ───────────────────────────────
+	cats = set(_DEFAULT_CATS)
+	if has_pf:
+		cats.update(
+			v for v in frappe.db.get_all("Project File", fields=["file_category"], distinct=True, pluck="file_category") if v
+		)
+
+	return {
+		"files":          rows,
+		"total":          total_raw,
+		"categories":     sorted(cats),
+		"sub_categories": sorted(
+			v for v in frappe.db.get_all("Project File", fields=["file_sub_category"], distinct=True, pluck="file_sub_category") if v
+		) if has_pf else [],
+		"doc_types": sorted(
+			v for v in frappe.db.get_all("Project File", fields=["document_type"], distinct=True, pluck="document_type") if v
+		) if has_pf else [],
+	}
+
+
+_DEFAULT_CATS = [
+	"Presentation Files",
+	"Drawing / Layout Files",
+	"3D Model Files",
+	"Feasibility / Area Calculation Files",
+	"Editable Design Source Files",
+	"Rendering / Image Files",
+	"Submission Files",
+]
+
+
+def _classify_ext(ext: str) -> str:
+	"""Auto-classify a file extension into a Project File category."""
+	ext = (ext or "").lower()
+	if ext in (".ppt", ".pptx"):                                       return "Presentation Files"
+	if ext in (".dwg", ".dxf"):                                        return "Drawing / Layout Files"
+	if ext in (".skp", ".rvt", ".rfa", ".max", ".ls", ".ls12", ".ls13",
+	           ".ls14", ".ls15", ".3dm", ".fbx", ".obj", ".dae", ".exe"): return "3D Model Files"
+	if ext in (".xls", ".xlsx", ".xlsm", ".csv"):                      return "Feasibility / Area Calculation Files"
+	if ext in (".psd", ".psb", ".ai", ".indd", ".idml"):               return "Editable Design Source Files"
+	if ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):              return "Rendering / Image Files"
+	if ext == ".pdf":                                                   return "Presentation Files"
+	return ""
+
+
+def _fmt_size(size_bytes: int) -> str:
+	if not size_bytes:
+		return ""
+	if size_bytes >= 1_048_576:
+		return f"{size_bytes / 1_048_576:.1f} MB"
+	if size_bytes >= 1024:
+		return f"{size_bytes / 1024:.1f} KB"
+	return f"{size_bytes} B"

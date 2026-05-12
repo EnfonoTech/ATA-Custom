@@ -633,11 +633,11 @@ async function submitNewCustomer() {
 						</div>
 					</div>
 					<div class="portal-kpi">
-						<div class="portal-kpi-icon"><FeatherIcon name="dollar-sign" class="h-4 w-4" /></div>
+						<div class="portal-kpi-icon"><FeatherIcon name="credit-card" class="h-4 w-4" /></div>
 						<div class="min-w-0">
 							<p class="portal-section-title">Estimated cost</p>
 							<p class="mt-1 truncate text-base font-semibold text-[color:var(--portal-text)]">
-								{{ project.estimated_costing ?? "—" }}
+								{{ project.estimated_costing ? `SAR ${Number(project.estimated_costing).toLocaleString()}` : "—" }}
 							</p>
 						</div>
 					</div>

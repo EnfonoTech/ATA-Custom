@@ -144,7 +144,7 @@ async function submitCreate() {
 function fmtMoney(n) {
 	if (n == null || n === "") return "—";
 	const x = Number(n);
-	return Number.isFinite(x) ? x.toLocaleString() : String(n);
+	return Number.isFinite(x) ? `SAR ${x.toLocaleString()}` : String(n);
 }
 
 function statusClass(s) {

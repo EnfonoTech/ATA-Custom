@@ -215,6 +215,143 @@ def delete_demo_seed_run(name: str):
 	return {"ok": True, "name": name}
 
 
+@frappe.whitelist()
+def parse_project_list_docx():
+	"""Parse an uploaded .docx file and return the project list it contains.
+	Expects the same format as ATA project list.docx:
+	  NNNN – PROJECT NAME  (lines starting with a 4-digit code)
+	  CDB-NN – PROJECT NAME
+	"""
+	_assert_can_run_demo_seed()
+	uploaded = frappe.request.files.get("file")
+	if not uploaded:
+		frappe.throw(_("No file uploaded."))
+	try:
+		import zipfile
+		import xml.etree.ElementTree as ET
+		import io
+		content = uploaded.read()
+		with zipfile.ZipFile(io.BytesIO(content)) as z:
+			with z.open("word/document.xml") as f:
+				tree = ET.parse(f)
+	except Exception as e:
+		frappe.throw(_(f"Could not read .docx file: {e}"))
+
+	ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+	root = tree.getroot()
+	projects = []
+	import re
+	for para in root.findall(".//w:p", ns):
+		parts = []
+		for r in para.findall(".//w:r", ns):
+			t = r.find("w:t", ns)
+			if t is not None and t.text:
+				parts.append(t.text)
+		line = "".join(parts).strip()
+		# Match: 2201 – NAME  or  CDB-01 – NAME
+		m = re.match(r"^((?:CDB-\d+|\d{4}))\s*[–—-]\s*(.+)$", line)
+		if m:
+			code, name = m.group(1).strip(), m.group(2).strip()
+			projects.append({"code": code, "name": name})
+	return {"projects": projects, "count": len(projects)}
+
+
+@frappe.whitelist()
+def create_demo_seed_run_from_docx(
+	run_label: str = "Portal demo run",
+	projects_json: str = "[]",
+	include_users: int = 1,
+	include_files: int = 1,
+):
+	"""Create a seed run using a project list parsed from a .docx file."""
+	_assert_can_run_demo_seed()
+	if not frappe.db.exists("DocType", "Portal Demo Seed Run"):
+		frappe.throw(_("Run `bench migrate` to install the Portal Demo Seed Run doctype."))
+
+	import json as _json
+	try:
+		raw_projects = _json.loads(projects_json or "[]")
+	except Exception:
+		frappe.throw(_("Invalid projects_json"))
+
+	# Patch the DEMO_PROJECTS on the seed run doctype module temporarily
+	from portal_app.project_portal.doctype.portal_demo_seed_run import portal_demo_seed_run as _mod
+	from frappe.utils import add_days, today as _today
+
+	_STAGE_PCT  = _mod._STAGE_PCT
+	_STAGE_STATUS = _mod._STAGE_STATUS
+	_MANAGERS   = _mod._MANAGERS
+	_TEAMS      = _mod._TEAMS
+
+	def _year_from_code(code):
+		if code.startswith("CDB-"):
+			return 2026
+		try:
+			return 2000 + int(code[:2])
+		except Exception:
+			return 2024
+
+	def _stage_for_year(year):
+		if year <= 2022: return "Done"
+		if year == 2023: return "On Hold"
+		if year == 2024: return "Review"
+		if year == 2025: return "Active"
+		return "Planning"
+
+	generated = []
+	for i, p in enumerate(raw_projects):
+		code = str(p.get("code") or "").strip()
+		name = str(p.get("name") or "").strip()
+		if not code or not name:
+			continue
+		year  = _year_from_code(code)
+		stage = _stage_for_year(year)
+		generated.append({
+			"project_name": f"{code} – {name}",
+			"code":         f"ATA-{code}",
+			"stage":        stage,
+			"year":         year,
+			"manager":      _MANAGERS[i % len(_MANAGERS)],
+			"team":         _TEAMS[i % len(_TEAMS)],
+			"cost":         0,
+			"tasks":        [],
+			"attach_readme": False,
+		})
+
+	# Temporarily override DEMO_PROJECTS
+	original = _mod.DEMO_PROJECTS
+	_mod.DEMO_PROJECTS = generated
+	try:
+		doc = frappe.get_doc({
+			"doctype": "Portal Demo Seed Run",
+			"run_label": (run_label or "Portal demo run").strip()[:140] or "Portal demo run",
+			"include_users":     int(include_users or 0),
+			"include_customers": 0,
+			"include_projects":  1,
+			"include_tasks":     0,
+			"include_files":     int(include_files or 0),
+		})
+		doc.insert(ignore_permissions=True)
+		frappe.db.commit()
+	finally:
+		_mod.DEMO_PROJECTS = original
+
+	return _serialize_run(doc)
+
+
+@frappe.whitelist()
+def clear_all_demo_data():
+	"""Delete every Active Portal Demo Seed Run (and the records they created)."""
+	_assert_can_run_demo_seed()
+	if not frappe.db.exists("DocType", "Portal Demo Seed Run"):
+		frappe.throw(_("Portal Demo Seed Run doctype is not installed."))
+	names = frappe.get_all("Portal Demo Seed Run", filters={"status": "Active"}, pluck="name")
+	for name in names:
+		frappe.delete_doc("Portal Demo Seed Run", name, ignore_permissions=True, force=1)
+	frappe.db.commit()
+	return {"ok": True, "deleted": len(names)}
+
+
 def _serialize_run(doc) -> dict:
 	out = {
 		"name": doc.name,

@@ -18,6 +18,76 @@ const userBusy = ref(false);
 const userMsg = ref("");
 const userErr = ref("");
 
+// .docx upload seed
+const docxFile       = ref(null);
+const docxProjects   = ref([]);
+const docxParsed     = ref(false);
+const docxBusy       = ref(false);
+const docxErr        = ref("");
+const docxMsg        = ref("");
+const docxLabel      = ref("ATA project list");
+const docxInput      = ref(null);
+
+async function onDocxChange(e) {
+	const file = e.target.files?.[0];
+	if (!file) return;
+	docxFile.value  = file;
+	docxParsed.value = false;
+	docxProjects.value = [];
+	docxErr.value   = "";
+	docxMsg.value   = "";
+	docxBusy.value  = true;
+	try {
+		const fd = new FormData();
+		fd.append("file", file, file.name);
+		const resp = await fetch("/api/method/portal_app.api.portal_admin.parse_project_list_docx", {
+			method: "POST", body: fd,
+			headers: { "X-Frappe-CSRF-Token": window.csrf_token || "" },
+		});
+		const data = await resp.json();
+		if (data.exc) throw new Error(data.exc);
+		docxProjects.value = data.message?.projects || [];
+		docxParsed.value   = true;
+		docxMsg.value      = `Parsed ${docxProjects.value.length} projects from ${file.name}.`;
+	} catch (e) {
+		docxErr.value = String(e?.message || e);
+	} finally {
+		docxBusy.value = false;
+	}
+}
+
+async function seedFromDocx() {
+	if (!docxProjects.value.length) return;
+	if (!confirm(`Seed ${docxProjects.value.length} projects from the uploaded file?\n\nThey will be tracked as a demo run and can be wiped later.`)) return;
+	docxBusy.value = true;
+	docxErr.value  = "";
+	docxMsg.value  = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.portal_admin.create_demo_seed_run_from_docx",
+			type: "POST",
+			args: {
+				run_label:      docxLabel.value || "ATA project list",
+				projects_json:  JSON.stringify(docxProjects.value),
+				include_users:  1,
+				include_files:  0,
+			},
+		});
+		const c = res?.counts || {};
+		docxMsg.value = `Run ${res?.name || ""} created — ${c.projects || 0} projects seeded.`;
+		await loadSeedRuns();
+		docxParsed.value   = false;
+		docxProjects.value = [];
+		docxFile.value     = null;
+		if (docxInput.value) docxInput.value.value = "";
+		setTimeout(() => (docxMsg.value = ""), 6000);
+	} catch (e) {
+		docxErr.value = apiErr(e);
+	} finally {
+		docxBusy.value = false;
+	}
+}
+
 // New tracked seed runs
 const seedRuns = ref([]);
 const seedRunsLoading = ref(false);
@@ -33,6 +103,7 @@ const newRunOpts = ref({
 	include_files: true,
 });
 const cleanupBusyName = ref("");
+const clearAllBusy = ref(false);
 
 const canShow = computed(() => caps.value.can_create_users || caps.value.can_run_demo_seed);
 
@@ -153,6 +224,38 @@ async function createSeedRun() {
 		seedRunErr.value = apiErr(e);
 	} finally {
 		seedRunBusy.value = false;
+	}
+}
+
+async function clearAllDemoData() {
+	const activeRuns = seedRuns.value.filter((r) => r.status === "Active");
+	if (!activeRuns.length) {
+		seedRunMsg.value = "No active demo runs to clear.";
+		setTimeout(() => (seedRunMsg.value = ""), 3000);
+		return;
+	}
+	if (
+		!confirm(
+			`Clear ALL demo data?\n\nThis will permanently delete ${activeRuns.length} active run(s) and every record they created (users, customers, projects, tasks, files).`,
+		)
+	) {
+		return;
+	}
+	clearAllBusy.value = true;
+	seedRunErr.value = "";
+	seedRunMsg.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.portal_admin.clear_all_demo_data",
+			type: "POST",
+		});
+		seedRunMsg.value = `Cleared ${res?.deleted || 0} demo run(s).`;
+		await loadSeedRuns();
+		setTimeout(() => (seedRunMsg.value = ""), 4000);
+	} catch (e) {
+		seedRunErr.value = apiErr(e);
+	} finally {
+		clearAllBusy.value = false;
 	}
 }
 
@@ -336,6 +439,63 @@ const totalCreated = computed(() =>
 						</button>
 					</div>
 
+					<!-- Seed from .docx -->
+					<div class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-4">
+						<p class="portal-section-title mb-2">Seed from project list (.docx)</p>
+						<p class="mb-3 text-xs text-[color:var(--portal-muted)]">
+							Upload a .docx file in the same format as <strong>ATA project list.docx</strong>
+							(lines like <code class="rounded bg-gray-100 px-1">2201 – AL BASSAM</code>).
+							Projects are auto-assigned stage by year.
+						</p>
+						<div class="flex flex-wrap items-center gap-3">
+							<input
+								ref="docxInput"
+								type="file"
+								accept=".docx"
+								class="hidden"
+								@change="onDocxChange"
+							/>
+							<button
+								class="portal-btn portal-btn-ghost text-xs"
+								:disabled="docxBusy"
+								@click="docxInput?.click()"
+							>
+								<FeatherIcon name="upload" class="h-3.5 w-3.5" />
+								{{ docxFile ? docxFile.name : "Choose .docx file…" }}
+							</button>
+							<template v-if="docxParsed">
+								<TextInput v-model="docxLabel" class="w-52 rounded-xl" placeholder="Run label" />
+								<button
+									class="portal-btn portal-btn-primary text-xs"
+									:disabled="docxBusy || !docxProjects.length"
+									@click="seedFromDocx"
+								>
+									<FeatherIcon name="play" class="h-3.5 w-3.5" />
+									{{ docxBusy ? "Seeding…" : `Seed ${docxProjects.value?.length ?? docxProjects.length} projects` }}
+								</button>
+							</template>
+							<span v-if="docxBusy" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[color:var(--portal-accent)] border-t-transparent"></span>
+						</div>
+						<div v-if="docxParsed && docxProjects.length" class="mt-3 max-h-36 overflow-auto rounded-lg border border-[color:var(--portal-border)] bg-white">
+							<table class="w-full text-xs">
+								<thead class="sticky top-0 bg-gray-50">
+									<tr>
+										<th class="px-3 py-1.5 text-left font-semibold text-gray-500">Code</th>
+										<th class="px-3 py-1.5 text-left font-semibold text-gray-500">Project name</th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-gray-100">
+									<tr v-for="p in docxProjects" :key="p.code">
+										<td class="px-3 py-1 font-mono text-gray-500">{{ p.code }}</td>
+										<td class="px-3 py-1 text-gray-700">{{ p.name }}</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<p v-if="docxMsg" class="mt-2 text-xs text-green-700">{{ docxMsg }}</p>
+						<p v-if="docxErr" class="mt-2 text-xs text-red-600">{{ docxErr }}</p>
+					</div>
+
 					<!-- Create new run -->
 					<div class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] p-4">
 						<p class="portal-section-title mb-2">Create a new run</p>
@@ -383,11 +543,22 @@ const totalCreated = computed(() =>
 
 					<!-- Existing runs -->
 					<div>
-						<div class="mb-2 flex items-center justify-between">
+						<div class="mb-2 flex flex-wrap items-center justify-between gap-2">
 							<p class="portal-section-title">Past runs</p>
-							<span class="text-xs text-[color:var(--portal-subtle)]">
-								{{ seedRuns.length }} run{{ seedRuns.length === 1 ? "" : "s" }} · {{ totalCreated }} tracked records
-							</span>
+							<div class="flex items-center gap-2">
+								<span class="text-xs text-[color:var(--portal-subtle)]">
+									{{ seedRuns.length }} run{{ seedRuns.length === 1 ? "" : "s" }} · {{ totalCreated }} tracked records
+								</span>
+								<button
+									v-if="seedRuns.some((r) => r.status === 'Active')"
+									class="portal-btn portal-btn-danger text-xs"
+									:disabled="clearAllBusy || !!cleanupBusyName"
+									@click="clearAllDemoData"
+								>
+									<FeatherIcon name="trash-2" class="h-3.5 w-3.5" />
+									{{ clearAllBusy ? "Clearing…" : "Clear all demo data" }}
+								</button>
+							</div>
 						</div>
 						<div v-if="seedRunsLoading" class="rounded-xl border border-dashed border-[color:var(--portal-border-strong)] py-6 text-center text-xs text-[color:var(--portal-muted)]">
 							Loading…
