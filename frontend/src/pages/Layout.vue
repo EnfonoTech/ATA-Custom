@@ -15,6 +15,12 @@ function toggleSidebar() {
 	localStorage.setItem("portal_sidebar_collapsed", sidebarCollapsed.value ? "1" : "0");
 }
 
+const portalSettings = ref({
+	company_logo: "",
+	company_name: "",
+	company_tagline: "",
+});
+
 const portalCapabilities = ref({
 	can_create_project: false,
 	manageable_project_names: [],
@@ -51,6 +57,7 @@ async function loadPortalAdmin() {
 
 provide("sidebarCollapsed", sidebarCollapsed);
 provide("toggleSidebar", toggleSidebar);
+provide("portalSettings", portalSettings);
 provide("portalCapabilities", portalCapabilities);
 provide("refreshPortalCapabilities", loadPortalCapabilities);
 provide("portalAdmin", portalAdmin);
@@ -63,9 +70,16 @@ onErrorCaptured((err) => {
 
 onMounted(async () => {
 	try {
-		await call({
+		const ws = await call({
 			method: "portal_app.api.helper.get_portal_workspace_settings",
 		});
+		if (ws) {
+			portalSettings.value = {
+				company_logo: ws.company_logo || "",
+				company_name: ws.company_name || "",
+				company_tagline: ws.company_tagline || "",
+			};
+		}
 		setCurrencyLocale(navigator.language || "en-US");
 	} catch (err) {
 		console.error("Failed to load portal settings:", err);

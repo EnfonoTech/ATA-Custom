@@ -5,6 +5,11 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "branding_section",
+  "company_logo",
+  "column_break_branding",
+  "company_name",
+  "company_tagline",
   "portal_access_section",
   "allow_any_portal_user_to_create_project",
   "allow_portal_demo_seed",
@@ -27,6 +32,35 @@
   "client_portal_intro"
  ],
  "fields": [
+  {
+   "fieldname": "branding_section",
+   "fieldtype": "Section Break",
+   "label": "Branding"
+  },
+  {
+   "fieldname": "company_logo",
+   "fieldtype": "Attach Image",
+   "label": "Company Logo",
+   "description": "Upload your company logo. Displayed in the portal sidebar. Recommended: PNG or SVG, square or landscape, transparent background."
+  },
+  {
+   "fieldname": "column_break_branding",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "company_name",
+   "fieldtype": "Data",
+   "label": "Company Name",
+   "description": "Shown below the logo in the sidebar.",
+   "length": 140
+  },
+  {
+   "fieldname": "company_tagline",
+   "fieldtype": "Data",
+   "label": "Company Tagline",
+   "description": "Optional subtitle / tagline shown below the company name.",
+   "length": 140
+  },
   {
    "collapsible": 1,
    "fieldname": "portal_access_section",

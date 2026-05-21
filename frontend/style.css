@@ -283,3 +283,30 @@ body {
   padding: 0.85rem 1rem;
   color: var(--portal-text);
 }
+
+/* ─── Color Themes ────────────────────────────────────────────────────────── */
+[data-theme="sky"] {
+  --portal-accent: #0ea5e9;
+  --portal-accent-soft: #e0f2fe;
+  --portal-accent-strong: #0284c7;
+}
+[data-theme="emerald"] {
+  --portal-accent: #059669;
+  --portal-accent-soft: #ecfdf5;
+  --portal-accent-strong: #047857;
+}
+[data-theme="rose"] {
+  --portal-accent: #e11d48;
+  --portal-accent-soft: #fff1f2;
+  --portal-accent-strong: #be123c;
+}
+[data-theme="amber"] {
+  --portal-accent: #d97706;
+  --portal-accent-soft: #fffbeb;
+  --portal-accent-strong: #b45309;
+}
+[data-theme="brown"] {
+  --portal-accent: #92400e;
+  --portal-accent-soft: #fef3c7;
+  --portal-accent-strong: #78350f;
+}

@@ -1635,7 +1635,7 @@ async function deleteProjectFile(f) {
 					<span class="flex items-center gap-3">
 						<span
 							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="sliders" class="h-4 w-4" />
 						</span>
@@ -1744,7 +1744,7 @@ async function deleteProjectFile(f) {
 							type="button"
 							class="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition"
 							:class="folderView === 'grid' ? 'text-white' : 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'"
-							:style="folderView === 'grid' ? 'background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);' : ''"
+							:style="folderView === 'grid' ? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);' : ''"
 							@click="folderView = 'grid'"
 						>
 							<FeatherIcon name="grid" class="h-3 w-3" /> Grid
@@ -1753,7 +1753,7 @@ async function deleteProjectFile(f) {
 							type="button"
 							class="flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition"
 							:class="folderView === 'list' ? 'text-white' : 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'"
-							:style="folderView === 'list' ? 'background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);' : ''"
+							:style="folderView === 'list' ? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);' : ''"
 							@click="folderView = 'list'"
 						>
 							<FeatherIcon name="list" class="h-3 w-3" /> Tree
@@ -2026,7 +2026,7 @@ async function deleteProjectFile(f) {
 					>
 						<span
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="folder" class="h-4 w-4" />
 						</span>
@@ -2096,7 +2096,7 @@ async function deleteProjectFile(f) {
 				>
 					<div
 						class="flex h-10 w-10 items-center justify-center rounded-xl"
-						style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%); color: #fff;"
+						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 					>
 						<FeatherIcon name="upload-cloud" class="h-5 w-5" />
 					</div>
@@ -2354,7 +2354,7 @@ async function deleteProjectFile(f) {
 						<div class="flex items-center gap-2">
 							<div
 								class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 							>
 								<FeatherIcon name="folder" class="h-4 w-4" />
 							</div>
@@ -2458,7 +2458,7 @@ async function deleteProjectFile(f) {
 							<div class="flex items-center gap-2">
 								<div
 									class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-									style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+									style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 								>
 									<FeatherIcon :name="shareModalKind === 'file' ? 'file' : 'share-2'" class="h-4 w-4" />
 								</div>
@@ -2576,7 +2576,7 @@ async function deleteProjectFile(f) {
 								>
 									<div
 										class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-										style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);"
+										style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 									>
 										{{ (s.user_full_name || s.user_email || s.user || '?').charAt(0).toUpperCase() }}
 									</div>
@@ -2678,7 +2678,7 @@ async function deleteProjectFile(f) {
 				<div class="relative z-10 w-full max-w-2xl rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in" @click.stop>
 					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
 						<div class="flex items-center gap-2">
-							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);">
+							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
 								<FeatherIcon name="upload-cloud" class="h-4 w-4" />
 							</div>
 							<div>

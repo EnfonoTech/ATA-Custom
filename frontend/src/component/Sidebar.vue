@@ -1,109 +1,138 @@
 <script setup>
 import { ref, inject, computed } from "vue";
 import { FeatherIcon } from "frappe-ui";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
-const route = useRoute();
+const route  = useRoute();
+const router = useRouter();
+
 const sidebarCollapsed = inject("sidebarCollapsed", ref(false));
-const toggleSidebar = inject("toggleSidebar", () => {});
+const toggleSidebar    = inject("toggleSidebar", () => {});
+const collapsed        = computed(() => !!sidebarCollapsed.value);
 
-const collapsed = computed(() => !!sidebarCollapsed.value);
-
-const portalAdmin = inject(
-	"portalAdmin",
-	ref({ can_create_users: false, can_run_demo_seed: false }),
-);
-
+const portalAdmin        = inject("portalAdmin", ref({ can_create_users: false, can_run_demo_seed: false }));
 const portalCapabilities = inject("portalCapabilities", ref({}));
+const portalSettings     = inject("portalSettings", ref({ company_logo: "", company_name: "", company_tagline: "" }));
+
+// Items in "Modules" group — link to Coming Soon
+const CS = (m) => `/coming-soon?m=${m}`;
 
 const groups = computed(() => {
-	const a = portalAdmin.value;
+	const a     = portalAdmin.value;
 	const isCust = !!portalCapabilities.value?.is_customer_portal_user;
 
-	const main = {
+	const workspace = {
 		title: "Workspace",
 		items: [
-			{ name: "Dashboard", path: "/dashboard", icon: "layout" },
-			{ name: "Projects", path: "/projects", icon: "folder" },
-			{ name: "Tasks", path: "/tasks", icon: "check-square" },
-			{ name: "Kanban", path: "/kanban", icon: "columns" },
-			{ name: "Calendar", path: "/calendar", icon: "calendar" },
+			{ name: "Dashboard", path: "/dashboard",  icon: "layout"       },
+			{ name: "Projects",  path: "/projects",   icon: "folder"       },
+			{ name: "Tasks",     path: "/tasks",       icon: "check-square" },
+			{ name: "Kanban",    path: "/kanban",      icon: "columns"      },
+			{ name: "Calendar",  path: "/calendar",    icon: "calendar"     },
 		],
 	};
 
-	const work = {
-		title: "Files",
+	const modules = {
+		title: "Modules",
 		items: [
-			{ name: "Files", path: "/files", icon: "paperclip" },
-			{ name: "File Browser", path: "/file-browser", icon: "database" },
-			{ name: "Shared with me", path: "/shared-with-me", icon: "share-2" },
+			{ name: "CRM",           path: CS("CRM"),           icon: "users",         comingSoon: true },
+			{ name: "HR",            path: CS("HR"),            icon: "user",           comingSoon: true },
+			{ name: "Finance",       path: CS("Finance"),       icon: "dollar-sign",    comingSoon: true },
+			{ name: "Accounts",      path: CS("Accounts"),      icon: "book-open",      comingSoon: true },
+			{ name: "Purchases",     path: CS("Purchases"),     icon: "shopping-cart",  comingSoon: true },
+			{ name: "Stock",         path: CS("Stock"),         icon: "package",        comingSoon: true },
+			{ name: "Manufacturing", path: CS("Manufacturing"), icon: "tool",           comingSoon: true },
+			{ name: "Assets",        path: CS("Assets"),        icon: "server",         comingSoon: true },
+			{ name: "Helpdesk",      path: CS("Helpdesk"),      icon: "headphones",     comingSoon: true },
+			{ name: "Reports",       path: CS("Reports"),       icon: "bar-chart-2",    comingSoon: true },
 		],
 	};
-	// "Manage shares" is the project admin's audit + revoke console — only visible
-	// to users who can manage at least one project (not regular members).
+
+	const filesItems = [
+		{ name: "Files",        path: "/files",        icon: "paperclip" },
+		{ name: "File Browser", path: "/file-browser", icon: "database"  },
+		{ name: "Shared",       path: "/shared-with-me", icon: "share-2" },
+	];
 	if (!isCust && (portalCapabilities.value?.manageable_project_names || []).length) {
-		work.items.push({
-			name: "Manage shares",
-			path: "/manage-shares",
-			icon: "shield",
-		});
+		filesItems.push({ name: "Shares",     path: "/manage-shares", icon: "shield" });
 	}
 	if (!isCust && portalCapabilities.value?.can_edit_portal_folder_template) {
-		work.items.push({
-			name: "File tools",
-			path: "/file-tools",
-			icon: "sliders",
-		});
+		filesItems.push({ name: "File tools", path: "/file-tools",    icon: "sliders" });
 	}
+	const files = { title: "Files", items: filesItems };
 
-	const account = {
-		title: "Account",
-		items: [{ name: "Profile", path: "/profile", icon: "user" }],
-	};
+	const accountItems = [{ name: "Profile", path: "/profile", icon: "user" }];
 	if (a?.can_create_users || a?.can_run_demo_seed) {
-		account.items.push({ name: "Admin", path: "/admin", icon: "settings" });
+		accountItems.push({ name: "Admin", path: "/admin", icon: "settings" });
 	}
+	const account = { title: "Account", items: accountItems };
 
-	return [main, work, account];
+	return [workspace, modules, files, account];
 });
 
-function isActiveItem(item) {
+function isActive(item) {
+	if (item.comingSoon) {
+		return route.path === "/coming-soon" && route.query.m === item.path.split("=")[1];
+	}
 	const target = item.path.split("?")[0];
 	if (route.path === target) return true;
 	if (target !== "/" && route.path.startsWith(target + "/")) return true;
 	return false;
+}
+
+function navigate(item) {
+	router.push(item.path);
 }
 </script>
 
 <template>
 	<aside
 		class="relative flex h-screen shrink-0 flex-col border-r border-[color:var(--portal-border)] transition-[width] duration-200 ease-out"
-		:class="collapsed ? 'w-[4.5rem]' : 'w-64'"
+		:class="collapsed ? 'w-[4.5rem]' : 'w-56'"
 		style="background: linear-gradient(180deg, #ffffff 0%, #f7f8fb 100%);"
 	>
-		<!-- Brand -->
+		<!-- Brand / Logo -->
 		<div
-			class="flex items-center gap-3 border-b border-[color:var(--portal-border)] px-4 py-4"
+			class="flex items-center gap-3 border-b border-[color:var(--portal-border)] px-4 py-3"
 			:class="collapsed ? 'justify-center px-2' : 'justify-between'"
 		>
-			<div class="flex min-w-0 items-center gap-3" :class="collapsed ? 'flex-col' : ''">
-				<div
-					class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-white shadow-md"
-					style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+			<div class="flex min-w-0 items-center gap-2.5" :class="collapsed ? 'flex-col' : ''">
+				<img
+					v-if="portalSettings.company_logo"
+					:src="portalSettings.company_logo"
+					class="shrink-0 object-contain"
+					:class="collapsed ? 'h-9 w-9 rounded-xl' : 'h-11 w-auto max-w-[3rem] rounded-xl'"
+					:title="portalSettings.company_name || 'Portal'"
+				/>
+				<!-- AMA lettermark fallback -->
+				<svg
+					v-else
+					viewBox="0 0 74 62"
+					fill="currentColor"
+					class="shrink-0 text-[color:var(--portal-text)]"
+					:class="collapsed ? 'h-8 w-auto' : 'h-10 w-auto'"
+					aria-hidden="true"
 				>
-					<FeatherIcon name="briefcase" class="h-5 w-5" />
-				</div>
+					<polygon points="0,4 11,4 19,58 8,58"/>
+					<polygon points="23,27 30,27 35,58 28,58"/>
+					<polygon points="36,30 41,30 45,58 40,58"/>
+					<polygon points="46,22 54,22 59,58 51,58"/>
+					<circle cx="65" cy="9" r="4.8" fill="none" stroke="currentColor" stroke-width="1"/>
+					<text x="65" y="11.8" font-size="4.6" text-anchor="middle" font-weight="700" font-family="sans-serif">TM</text>
+				</svg>
 				<div v-if="!collapsed" class="min-w-0">
-					<h2 class="truncate text-base font-semibold text-[color:var(--portal-text)]">Portal</h2>
-					<p class="text-[11px] uppercase tracking-wider text-[color:var(--portal-muted)]">
-						Projects · Files
+					<h2 class="truncate text-xs font-bold leading-tight tracking-wide text-[color:var(--portal-text)]" style="letter-spacing:0.06em;">
+						{{ portalSettings.company_name || "ABDULMOHSIN ALTHEYAB" }}
+					</h2>
+					<p class="truncate text-[9px] uppercase tracking-wider text-[color:var(--portal-muted)]">
+						{{ portalSettings.company_tagline || "ARCHITECTS | معماريون" }}
 					</p>
 				</div>
 			</div>
 			<button
 				v-if="!collapsed"
 				type="button"
-				class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)]"
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[color:var(--portal-muted)] transition hover:bg-gray-100"
 				title="Collapse sidebar"
 				@click="toggleSidebar"
 			>
@@ -111,11 +140,11 @@ function isActiveItem(item) {
 			</button>
 		</div>
 
-		<!-- Collapse arrow when collapsed -->
+		<!-- Expand arrow when collapsed -->
 		<button
 			v-if="collapsed"
 			type="button"
-			class="mx-auto mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)]"
+			class="mx-auto mt-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[color:var(--portal-muted)] transition hover:bg-gray-100"
 			title="Expand sidebar"
 			@click="toggleSidebar"
 		>
@@ -123,69 +152,68 @@ function isActiveItem(item) {
 		</button>
 
 		<!-- Nav -->
-		<nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4" :class="collapsed ? 'px-1.5' : 'px-3'">
-			<div v-for="group in groups" :key="group.title" class="space-y-1">
+		<nav class="flex-1 space-y-4 overflow-y-auto py-3" :class="collapsed ? 'px-1.5' : 'px-2'">
+			<div v-for="group in groups" :key="group.title" class="space-y-0.5">
 				<p
 					v-if="!collapsed"
-					class="px-3 pb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--portal-subtle)]"
+					class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--portal-subtle)]"
 				>
 					{{ group.title }}
 				</p>
-				<router-link
+				<div
 					v-for="item in group.items"
 					:key="item.path"
-					:to="item.path"
-					custom
-					v-slot="{ navigate }"
+					role="link"
+					tabindex="0"
+					class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl py-2 text-[13px] font-medium transition"
+					:class="[
+						isActive(item)
+							? 'text-[color:var(--portal-accent-strong)]'
+							: 'text-[color:var(--portal-text)] hover:bg-gray-50',
+						collapsed ? 'justify-center px-2' : 'px-3',
+					]"
+					:style="
+						isActive(item)
+							? 'background: var(--portal-accent-soft); box-shadow: inset 0 0 0 1px rgba(79,70,229,0.15);'
+							: ''
+					"
+					:title="collapsed ? item.name : undefined"
+					@click="navigate(item)"
+					@keydown.enter="navigate(item)"
 				>
-					<div
-						role="link"
-						tabindex="0"
-						class="group relative flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition"
-						:class="[
-							isActiveItem(item)
-								? 'text-[color:var(--portal-accent-strong)]'
-								: 'text-[color:var(--portal-text)] hover:bg-white',
-							collapsed ? 'justify-center px-2' : '',
-						]"
-						:style="
-							isActiveItem(item)
-								? 'background: linear-gradient(135deg, rgba(79,70,229,0.10) 0%, rgba(99,102,241,0.06) 100%); box-shadow: inset 0 0 0 1px rgba(79,70,229,0.2);'
-								: ''
-						"
-						:title="collapsed ? item.name : undefined"
-						@click="navigate"
-						@keydown.enter="navigate"
-					>
-						<span
-							v-if="isActiveItem(item) && !collapsed"
-							class="absolute -left-3 top-1.5 bottom-1.5 w-1 rounded-r-full"
-							style="background: linear-gradient(180deg, #4f46e5, #38bdf8);"
-						></span>
-						<FeatherIcon
-							:name="item.icon"
-							class="h-[18px] w-[18px] shrink-0 transition"
-							:class="isActiveItem(item) ? 'text-[color:var(--portal-accent-strong)]' : 'text-[color:var(--portal-muted)] group-hover:text-[color:var(--portal-text)]'"
-						/>
-						<span v-if="!collapsed" class="truncate">{{ item.name }}</span>
-					</div>
-				</router-link>
+					<!-- Active indicator bar -->
+					<span
+						v-if="isActive(item) && !collapsed"
+						class="absolute -left-2 top-1.5 bottom-1.5 w-1 rounded-r-full"
+						style="background: linear-gradient(180deg, var(--portal-accent), var(--portal-accent-strong));"
+					></span>
+
+					<FeatherIcon
+						:name="item.icon"
+						class="h-[17px] w-[17px] shrink-0"
+						:class="isActive(item) ? 'text-[color:var(--portal-accent-strong)]' : 'text-[color:var(--portal-muted)] group-hover:text-[color:var(--portal-text)]'"
+					/>
+					<span v-if="!collapsed" class="truncate">{{ item.name }}</span>
+
+					<!-- Coming soon dot -->
+					<span
+						v-if="!collapsed && item.comingSoon"
+						class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full opacity-50"
+						style="background: var(--portal-accent);"
+					></span>
+				</div>
 			</div>
 		</nav>
 
+		<!-- Bottom hint -->
 		<div
 			v-if="!collapsed"
-			class="m-3 rounded-xl border border-[color:var(--portal-border)] bg-white/70 px-3 py-3 text-[11px] leading-relaxed text-[color:var(--portal-muted)] backdrop-blur"
+			class="m-2 rounded-xl border border-[color:var(--portal-border)] bg-white/70 px-3 py-2.5 text-[11px] leading-relaxed text-[color:var(--portal-muted)]"
 		>
-			<div class="mb-1 flex items-center gap-1.5 text-[color:var(--portal-text)]">
-				<FeatherIcon name="zap" class="h-3.5 w-3.5 text-[color:var(--portal-accent)]" />
-				<span class="text-xs font-semibold">Quick tip</span>
-			</div>
-			Press
 			<kbd class="rounded border border-gray-200 bg-gray-50 px-1 text-[10px]">Ctrl</kbd>
 			+
 			<kbd class="rounded border border-gray-200 bg-gray-50 px-1 text-[10px]">B</kbd>
-			to toggle this sidebar.
+			to toggle sidebar
 		</div>
 	</aside>
 </template>

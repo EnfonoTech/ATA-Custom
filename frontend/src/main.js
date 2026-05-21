@@ -6,7 +6,10 @@ import router from "./router";
 
 document.documentElement.classList.remove("dark");
 try {
-	localStorage.removeItem("portal_theme");
+	const savedTheme = localStorage.getItem("portal_theme") || "indigo";
+	if (savedTheme && savedTheme !== "indigo") {
+		document.documentElement.setAttribute("data-theme", savedTheme);
+	}
 } catch {
 	/* ignore */
 }

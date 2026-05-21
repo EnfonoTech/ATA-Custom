@@ -19,6 +19,7 @@ const SharedWithMe  = () => import("@/pages/SharedWithMe.vue");
 const ManageShares  = () => import("@/pages/ManageShares.vue");
 const Profile       = () => import("@/pages/Profile.vue");
 const Admin         = () => import("@/pages/Admin.vue");
+const ComingSoon    = () => import("@/pages/ComingSoon.vue");
 
 const routes = [
 	{
@@ -64,6 +65,7 @@ const routes = [
 				component: Admin,
 				meta: { requiresPortalAdmin: true },
 			},
+			{ path: "coming-soon", name: "ComingSoon", component: ComingSoon },
 		],
 	},
 ];

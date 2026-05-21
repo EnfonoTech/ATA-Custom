@@ -201,7 +201,7 @@ onMounted(loadSharedFolder);
 	height: 700px;
 	left: -200px;
 	top: -180px;
-	background: radial-gradient(circle, #6366f1 0%, transparent 70%);
+	background: radial-gradient(circle, var(--portal-accent) 0%, transparent 70%);
 }
 .orb-2 {
 	width: 600px;

@@ -13,7 +13,46 @@
 				</h1>
 			</div>
 
-			<div class="flex items-center gap-3">
+			<div class="flex items-center gap-2">
+				<!-- Color theme picker -->
+				<div class="relative" @click.stop>
+					<button
+						type="button"
+						class="relative flex h-9 w-9 items-center justify-center rounded-xl border border-[color:var(--portal-border)] bg-white transition hover:bg-gray-50"
+						:title="'Theme: ' + activeTheme.label"
+						@click="themeOpen = !themeOpen"
+					>
+						<span class="h-4 w-4 rounded-full border-2 border-white shadow" :style="{ background: activeTheme.color }"></span>
+					</button>
+					<div
+						v-if="themeOpen"
+						class="absolute left-0 top-full z-50 mt-2 w-52 origin-top-left overflow-hidden rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl"
+					>
+						<div class="border-b border-[color:var(--portal-border)] px-3 py-2">
+							<p class="text-xs font-semibold text-[color:var(--portal-text)]">Color Theme</p>
+						</div>
+						<div class="grid grid-cols-3 gap-1.5 p-2">
+							<button
+								v-for="t in THEMES"
+								:key="t.key"
+								type="button"
+								class="flex flex-col items-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-medium transition hover:bg-gray-50"
+								:class="currentTheme === t.key ? 'bg-gray-50' : ''"
+								@click="applyTheme(t.key)"
+							>
+								<span
+									class="h-7 w-7 rounded-full border-2 border-white shadow-md flex items-center justify-center"
+									:style="{ background: t.color }"
+								>
+									<svg v-if="currentTheme === t.key" viewBox="0 0 16 16" class="h-3 w-3 fill-white"><path d="M13 4L6.5 11 3 7.5"/><path fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M13 4l-6.5 7L3 7.5"/></svg>
+								</span>
+								<span class="text-center leading-tight text-[color:var(--portal-text)]">{{ t.label }}</span>
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Notification bell -->
 				<div class="relative" @click.stop>
 					<button
 						type="button"
@@ -131,6 +170,39 @@ import { call } from "@/api";
 const router = useRouter();
 const route = useRoute();
 
+// ── Color Themes ────────────────────────────────────────────────────────────
+const THEMES = [
+	{ key: "indigo", label: "Indigo",   color: "#4f46e5" },
+	{ key: "sky",    label: "Sky",      color: "#0ea5e9" },
+	{ key: "emerald",label: "Emerald",  color: "#059669" },
+	{ key: "rose",   label: "Rose",     color: "#e11d48" },
+	{ key: "amber",  label: "Amber",    color: "#d97706" },
+	{ key: "brown",  label: "Brown",    color: "#92400e" },
+];
+
+const currentTheme = ref(
+	(() => { try { return localStorage.getItem("portal_theme") || "indigo"; } catch { return "indigo"; } })()
+);
+const themeOpen = ref(false);
+const activeTheme = computed(() => THEMES.find(t => t.key === currentTheme.value) || THEMES[0]);
+
+function applyTheme(key) {
+	currentTheme.value = key;
+	try { localStorage.setItem("portal_theme", key); } catch { /**/ }
+	if (key === "indigo") {
+		document.documentElement.removeAttribute("data-theme");
+	} else {
+		document.documentElement.setAttribute("data-theme", key);
+	}
+	themeOpen.value = false;
+}
+
+function onDocClickTheme(e) {
+	if (!themeOpen.value) return;
+	if (e.target instanceof Element && e.target.closest(".relative")) return;
+	themeOpen.value = false;
+}
+
 const fullName = ref(localStorage.getItem("full_name") || "User");
 const profileImage = ref(localStorage.getItem("profile_image") || "");
 const userEmail = ref(localStorage.getItem("user_email") || "");
@@ -226,10 +298,17 @@ function fmtRelative(s) {
 }
 
 function onDocClick(e) {
-	if (!bellOpen.value) return;
 	const target = e.target;
-	if (target instanceof Element && target.closest(".relative")) return; // bell wrapper has class relative
-	bellOpen.value = false;
+	if (bellOpen.value) {
+		if (!(target instanceof Element && target.closest(".relative"))) {
+			bellOpen.value = false;
+		}
+	}
+	if (themeOpen.value) {
+		if (!(target instanceof Element && target.closest(".relative"))) {
+			themeOpen.value = false;
+		}
+	}
 }
 
 onMounted(async () => {

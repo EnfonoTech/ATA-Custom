@@ -109,7 +109,7 @@ function extractErr(e) {
 				<div class="portal-card-strong overflow-hidden p-0">
 					<div
 						class="relative h-24"
-						style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #38bdf8 100%);"
+						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 					>
 						<div
 							aria-hidden="true"
@@ -127,7 +127,7 @@ function extractErr(e) {
 						<div
 							v-else
 							class="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-semibold text-white shadow-md ring-4 ring-white"
-							style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							{{ (form.full_name || profile?.name || "?").slice(0, 1).toUpperCase() }}
 						</div>
@@ -234,7 +234,7 @@ function extractErr(e) {
 						<Button
 							variant="solid"
 							class="rounded-xl"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 							:loading="saving"
 							@click="save"
 						>

@@ -391,7 +391,7 @@ const totalCreated = computed(() =>
 					<div class="flex items-center gap-2">
 						<div
 							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="user-plus" class="h-4 w-4" />
 						</div>
@@ -443,7 +443,7 @@ const totalCreated = computed(() =>
 					<Button
 						variant="solid"
 						class="rounded-xl"
-						style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 						:loading="userBusy"
 						@click="createUser"
 					>
@@ -663,7 +663,7 @@ const totalCreated = computed(() =>
 					<div class="flex items-center gap-2">
 						<div
 							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="folder-tree" class="h-4 w-4" />
 						</div>

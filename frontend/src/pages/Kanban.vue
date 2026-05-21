@@ -42,7 +42,7 @@ function stageRailColor(stage) {
 	if (s.includes("done") || s.includes("completed")) return "linear-gradient(180deg, #10b981, #059669)";
 	if (s.includes("review")) return "linear-gradient(180deg, #f59e0b, #d97706)";
 	if (s.includes("hold")) return "linear-gradient(180deg, #fb923c, #ea580c)";
-	if (s.includes("active") || s.includes("working") || s.includes("open")) return "linear-gradient(180deg, #4f46e5, #38bdf8)";
+	if (s.includes("active") || s.includes("working") || s.includes("open")) return "linear-gradient(180deg, var(--portal-accent), var(--portal-accent-strong))";
 	if (s.includes("cancel")) return "linear-gradient(180deg, #ef4444, #dc2626)";
 	return "linear-gradient(180deg, #94a3b8, #64748b)";
 }

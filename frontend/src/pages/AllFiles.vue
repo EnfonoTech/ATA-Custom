@@ -309,7 +309,7 @@ import { reactive } from "vue";
 				<div class="mb-3 flex items-center gap-2.5">
 					<div
 						class="flex h-8 w-8 items-center justify-center rounded-xl text-white shadow-md"
-						style="background: linear-gradient(135deg,#4f46e5 0%,#6366f1 50%,#38bdf8 100%);"
+						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 					>
 						<FeatherIcon name="folder-open" class="h-4 w-4" />
 					</div>
@@ -370,7 +370,7 @@ import { reactive } from "vue";
 								"
 								:style="
 									activeProj?.name === p.name
-										? 'background: linear-gradient(135deg,#4f46e5 0%,#6366f1 60%,#38bdf8 100%); color:#fff;'
+										? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color:#fff;'
 										: ''
 								"
 								@click="openProject(p)"
@@ -380,7 +380,7 @@ import { reactive } from "vue";
 									:style="
 										activeProj?.name === p.name
 											? 'background:rgba(255,255,255,0.25); color:#fff;'
-											: 'background:#e0e7ff; color:#6366f1;'
+											: 'background:#e0e7ff; color:var(--portal-accent);'
 									"
 								>
 									<FeatherIcon :name="activeProj?.name === p.name ? 'folder-open' : 'folder'" class="h-3.5 w-3.5" />

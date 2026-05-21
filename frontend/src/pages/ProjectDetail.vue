@@ -653,7 +653,7 @@ async function submitNewCustomer() {
 									class="h-full rounded-full transition-all"
 									:style="{
 										width: Math.min(100, Math.max(0, Number(project.percent_complete) || 0)) + '%',
-										background: 'linear-gradient(90deg, #4f46e5, #38bdf8)',
+										background: 'linear-gradient(90deg, var(--portal-accent), var(--portal-accent-strong))',
 									}"
 								></div>
 							</div>

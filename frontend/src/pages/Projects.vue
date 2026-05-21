@@ -234,7 +234,7 @@ function toggleYear(y) {
 								:class="viewMode === 'year' ? 'text-white' : 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'"
 								:style="
 									viewMode === 'year'
-										? 'background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);'
+										? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);'
 										: ''
 								"
 								@click="viewMode = 'year'"
@@ -247,7 +247,7 @@ function toggleYear(y) {
 								:class="viewMode === 'cards' ? 'text-white' : 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'"
 								:style="
 									viewMode === 'cards'
-										? 'background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);'
+										? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);'
 										: ''
 								"
 								@click="viewMode = 'cards'"
@@ -260,7 +260,7 @@ function toggleYear(y) {
 								:class="viewMode === 'table' ? 'text-white' : 'text-[color:var(--portal-muted)] hover:text-[color:var(--portal-text)]'"
 								:style="
 									viewMode === 'table'
-										? 'background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);'
+										? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);'
 										: ''
 								"
 								@click="viewMode = 'table'"
@@ -444,7 +444,7 @@ function toggleYear(y) {
 						<div class="flex items-center gap-3">
 							<span
 								class="rounded-lg px-2.5 py-1 text-xs font-semibold text-white"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 							>{{ year }}</span>
 							<span class="text-sm text-[color:var(--portal-muted)]">{{ yearProjects.length }} projects</span>
 						</div>
@@ -500,7 +500,7 @@ function toggleYear(y) {
 						<div class="flex items-center gap-2">
 							<div
 								class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 							>
 								<FeatherIcon name="plus" class="h-4 w-4" />
 							</div>
@@ -555,7 +555,7 @@ function toggleYear(y) {
 							<Button
 								variant="solid"
 								class="rounded-xl"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 								:loading="creating"
 								@click="submitCreate"
 							>

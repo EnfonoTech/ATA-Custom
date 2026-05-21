@@ -363,7 +363,7 @@ function openFolderInFiles(project, folderPath) {
 			<!-- KPIs -->
 			<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="briefcase" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -381,7 +381,7 @@ function openFolderInFiles(project, folderPath) {
 					</div>
 				</div>
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="file" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -496,7 +496,7 @@ function openFolderInFiles(project, folderPath) {
 			>
 				<div
 					class="flex h-12 w-12 items-center justify-center rounded-2xl text-white"
-					style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+					style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 				>
 					<FeatherIcon name="inbox" class="h-5 w-5" />
 				</div>
@@ -536,7 +536,7 @@ function openFolderInFiles(project, folderPath) {
 						/>
 						<div
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="folder" class="h-4 w-4" />
 						</div>
@@ -624,7 +624,7 @@ function openFolderInFiles(project, folderPath) {
 								>
 									<div
 										class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white"
-										style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);"
+										style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 									>
 										{{ (s.user_full_name || s.user_email || s.user || '?').charAt(0).toUpperCase() }}
 									</div>
@@ -718,7 +718,7 @@ function openFolderInFiles(project, folderPath) {
 												class="inline-flex items-center gap-1 rounded-full border border-[color:var(--portal-border)] bg-[color:var(--portal-accent-soft)] px-2 py-0.5 text-[11px] text-[color:var(--portal-accent-strong)]"
 												:title="(s.user_full_name || s.user) + (s.expires_at ? ' · expires ' + fmtDate(s.expires_at) : '')"
 											>
-												<span class="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-white" style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);">
+												<span class="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
 													{{ (s.user_full_name || s.user_email || s.user || '?').charAt(0).toUpperCase() }}
 												</span>
 												<span class="truncate max-w-[120px]">{{ s.user_full_name || s.user || s.user_email }}</span>
@@ -769,7 +769,7 @@ function openFolderInFiles(project, folderPath) {
 							:style="
 								u.isLinks
 									? 'background: linear-gradient(135deg, #db2777, #f472b6);'
-									: 'background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);'
+									: 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);'
 							"
 						>
 							{{ u.avatar_letter }}
@@ -798,7 +798,7 @@ function openFolderInFiles(project, folderPath) {
 								:style="
 									u.isLinks
 										? 'background: linear-gradient(135deg, #db2777, #f472b6);'
-										: 'background: linear-gradient(135deg, #4f46e5, #6366f1);'
+										: 'background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong));'
 								"
 							>
 								<FeatherIcon :name="u.isLinks ? 'link' : 'folder'" class="h-3.5 w-3.5" />

@@ -7,7 +7,7 @@ defineProps({
 	message: { type: String, default: "" },
 	gradient: {
 		type: String,
-		default: "linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%)",
+		default: "linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%)",
 	},
 });
 </script>

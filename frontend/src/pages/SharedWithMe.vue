@@ -179,7 +179,7 @@ function openFolderInFiles(project, folderPath) {
 			<!-- KPIs -->
 			<div class="grid gap-3 sm:grid-cols-3">
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="folder" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -188,7 +188,7 @@ function openFolderInFiles(project, folderPath) {
 					</div>
 				</div>
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="folder-plus" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -240,7 +240,7 @@ function openFolderInFiles(project, folderPath) {
 			>
 				<div
 					class="flex h-12 w-12 items-center justify-center rounded-2xl text-white"
-					style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+					style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 				>
 					<FeatherIcon name="inbox" class="h-5 w-5" />
 				</div>
@@ -274,7 +274,7 @@ function openFolderInFiles(project, folderPath) {
 						/>
 						<div
 							class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 						>
 							<FeatherIcon name="folder" class="h-4 w-4" />
 						</div>

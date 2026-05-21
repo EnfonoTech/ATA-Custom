@@ -705,7 +705,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 			>
 				<span
 					class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white"
-					style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+					style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 				>
 					<FeatherIcon name="folder" class="h-4 w-4" />
 				</span>
@@ -766,7 +766,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 		>
 			<div
 				class="flex h-10 w-10 items-center justify-center rounded-xl"
-				style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%); color: #fff;"
+				style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 			>
 				<FeatherIcon name="upload-cloud" class="h-5 w-5" />
 			</div>
@@ -835,7 +835,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 						<div class="flex items-center gap-2">
 							<div
 								class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
 							>
 								<FeatherIcon name="folder" class="h-4 w-4" />
 							</div>
@@ -936,7 +936,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 				<div class="relative z-10 w-full max-w-2xl rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in" @click.stop>
 					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
 						<div class="flex items-center gap-2">
-							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);">
+							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
 								<FeatherIcon name="upload-cloud" class="h-4 w-4" />
 							</div>
 							<div>

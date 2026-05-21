@@ -293,7 +293,7 @@ onMounted(async () => {
 						<Button
 							variant="solid"
 							class="rounded-xl"
-							style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 							:loading="newTaskBusy"
 							@click="createNewTask"
 						>
@@ -305,7 +305,7 @@ onMounted(async () => {
 
 			<div class="grid gap-3 sm:grid-cols-3">
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="layers" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -314,7 +314,7 @@ onMounted(async () => {
 					</div>
 				</div>
 				<div class="portal-kpi">
-					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, #0ea5e9, #38bdf8); color: #fff;">
+					<div class="portal-kpi-icon" style="background: linear-gradient(135deg, var(--portal-accent), var(--portal-accent-strong)); color: #fff;">
 						<FeatherIcon name="circle" class="h-4 w-4" />
 					</div>
 					<div class="min-w-0">
@@ -491,7 +491,7 @@ onMounted(async () => {
 									size="sm"
 									variant="solid"
 									class="rounded-lg"
-									style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+									style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 									:loading="savingTask === t.name"
 									@click="saveTask(t)"
 								>
@@ -526,7 +526,7 @@ onMounted(async () => {
 					<div class="flex items-start justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-2">
-								<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 60%, #38bdf8 100%);">
+								<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
 									<FeatherIcon name="message-circle" class="h-4 w-4" />
 								</div>
 								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Comments</h2>
@@ -546,7 +546,7 @@ onMounted(async () => {
 						</div>
 						<ul v-else class="space-y-3">
 							<li v-for="c in commentsList" :key="c.name" class="flex gap-3">
-								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white" style="background: linear-gradient(135deg, #6366f1 0%, #38bdf8 100%);">
+								<div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
 									{{ (c.author_full_name || c.owner || "?").charAt(0).toUpperCase() }}
 								</div>
 								<div class="min-w-0 flex-1">
@@ -572,7 +572,7 @@ onMounted(async () => {
 							<Button
 								variant="solid"
 								class="rounded-xl"
-								style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); color: #fff;"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 								:loading="commentsBusy"
 								:disabled="!commentsDraft.trim()"
 								@click="postComment"
