@@ -12,6 +12,8 @@ const search = ref("");
 const status = ref("");
 const viewMode = ref("year");
 const expandedYears = ref({});
+// Year-drill-down: null = show year grid, string = show cards for that year
+const selectedYear = ref(null);
 // Membership filter: "all" (default), "team" (I'm a team member), "manage" (I manage)
 const membershipFilter = ref("all");
 
@@ -63,7 +65,14 @@ watch(projects, (list) => {
 		next[y] = expandedYears.value[y] ?? true;
 	}
 	expandedYears.value = next;
+	// If the selected year no longer exists after a filter, go back to the grid
+	if (selectedYear.value && !groupedProjectsByYear.value[selectedYear.value]) {
+		selectedYear.value = null;
+	}
 });
+
+// Reset year drill-down when switching away from year view
+watch(viewMode, () => { selectedYear.value = null; });
 
 watch(
 	[() => route.query.create, canCreate],
@@ -430,60 +439,194 @@ function toggleYear(y) {
 					No projects match your filters.
 				</div>
 			</div>
-			<div v-else class="space-y-4">
-				<div
-					v-for="(yearProjects, year) in groupedProjectsByYear"
-					:key="year"
-					class="portal-card-strong overflow-hidden"
-				>
-					<button
-						type="button"
-						class="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-[color:var(--portal-accent-soft)]"
-						@click="toggleYear(year)"
+			<div v-else class="space-y-5">
+
+				<!-- ── Level 1: Year grid (no year selected) ───────────── -->
+				<template v-if="!selectedYear">
+					<div class="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+						<button
+							v-for="(yearProjects, year) in groupedProjectsByYear"
+							:key="year"
+							type="button"
+							class="group relative flex min-h-[220px] cursor-pointer flex-col overflow-hidden rounded-3xl border border-[color:var(--portal-border)] bg-white text-left shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl"
+							@click="selectedYear = year"
+						>
+							<!-- Blueprint grid background -->
+							<div
+								class="pointer-events-none absolute inset-0"
+								style="background-image: repeating-linear-gradient(0deg,rgba(99,102,241,.06) 0,rgba(99,102,241,.06) 1px,transparent 1px,transparent 28px),repeating-linear-gradient(90deg,rgba(99,102,241,.06) 0,rgba(99,102,241,.06) 1px,transparent 1px,transparent 28px);"
+							></div>
+
+							<!-- Ghost watermark year -->
+							<div class="pointer-events-none absolute inset-0 flex items-center justify-end overflow-hidden pr-3 select-none">
+								<span
+									class="text-[7.5rem] font-black leading-none tracking-[-0.08em] text-[color:var(--portal-accent)] transition-opacity duration-300"
+									style="opacity:0.045;"
+								>{{ year }}</span>
+							</div>
+
+							<!-- Gradient accent strip — top -->
+							<div
+								class="absolute left-0 right-0 top-0 h-1 rounded-t-3xl"
+								style="background:linear-gradient(90deg,var(--portal-accent),var(--portal-accent-strong));"
+							></div>
+
+							<!-- Content -->
+							<div class="relative z-10 flex flex-1 flex-col gap-4 px-6 py-5">
+
+								<!-- Row 1: year + SVG ring -->
+								<div class="flex items-start justify-between gap-3">
+									<div>
+										<p class="text-[9px] font-bold uppercase tracking-[0.18em] text-[color:var(--portal-muted)]">Portfolio Year</p>
+										<p class="mt-0.5 text-4xl font-black tracking-tight text-[color:var(--portal-text)]">{{ year }}</p>
+										<p class="mt-1 text-[11px] font-semibold text-[color:var(--portal-muted)]">
+											{{ yearProjects.length }} project{{ yearProjects.length === 1 ? '' : 's' }}
+										</p>
+									</div>
+
+									<!-- Ring chart -->
+									<div class="relative shrink-0" style="width:54px;height:54px;">
+										<svg viewBox="0 0 54 54" class="h-full w-full -rotate-90" aria-hidden="true">
+											<circle cx="27" cy="27" r="22" fill="none" stroke="#e0e7ff" stroke-width="5"/>
+											<circle
+												cx="27" cy="27" r="22" fill="none"
+												:style="`stroke:url(#rg-${String(year).replace(/[^a-z0-9]/gi,'-')});stroke-width:5;stroke-linecap:round;transition:stroke-dasharray .6s ease;`"
+												:stroke-dasharray="`${yearProjects.length ? (yearProjects.filter(p=>p.status==='Completed').length/yearProjects.length)*138.23 : 0} 138.23`"
+											/>
+											<defs>
+												<linearGradient :id="`rg-${String(year).replace(/[^a-z0-9]/gi,'-')}`" x1="0%" y1="0%" x2="100%" y2="0%">
+													<stop offset="0%" stop-color="var(--portal-accent)"/>
+													<stop offset="100%" stop-color="var(--portal-accent-strong)"/>
+												</linearGradient>
+											</defs>
+										</svg>
+										<div class="absolute inset-0 flex flex-col items-center justify-center">
+											<span class="text-[13px] font-black leading-none text-[color:var(--portal-accent-strong)]">
+												{{ yearProjects.length ? Math.round(yearProjects.filter(p=>p.status==='Completed').length/yearProjects.length*100) : 0 }}
+											</span>
+											<span class="text-[8px] font-semibold text-[color:var(--portal-muted)]">%</span>
+										</div>
+									</div>
+								</div>
+
+								<!-- Row 2: segmented status bar -->
+								<div class="flex h-2 w-full overflow-hidden rounded-full">
+									<div
+										class="h-full bg-emerald-500 transition-all duration-700"
+										:style="{width: yearProjects.length ? (yearProjects.filter(p=>p.status==='Completed').length/yearProjects.length*100)+'%' : '0%'}"
+									></div>
+									<div class="w-px bg-white/60"></div>
+									<div
+										class="h-full bg-blue-400 transition-all duration-700"
+										:style="{width: yearProjects.length ? (yearProjects.filter(p=>p.status==='Open').length/yearProjects.length*100)+'%' : '100%'}"
+									></div>
+									<div v-if="yearProjects.filter(p=>p.status==='Cancelled').length" class="w-px bg-white/60"></div>
+									<div
+										v-if="yearProjects.filter(p=>p.status==='Cancelled').length"
+										class="h-full bg-red-300 transition-all duration-700"
+										:style="{width: (yearProjects.filter(p=>p.status==='Cancelled').length/yearProjects.length*100)+'%'}"
+									></div>
+								</div>
+
+								<!-- Row 3: stat dots -->
+								<div class="flex items-center gap-3 text-[11px] font-semibold">
+									<span class="flex items-center gap-1.5 text-emerald-600">
+										<span class="h-2 w-2 rounded-full bg-emerald-500"></span>
+										{{ yearProjects.filter(p=>p.status==='Completed').length }} done
+									</span>
+									<span class="flex items-center gap-1.5 text-blue-600">
+										<span class="h-2 w-2 rounded-full bg-blue-400"></span>
+										{{ yearProjects.filter(p=>p.status==='Open').length }} open
+									</span>
+									<span v-if="yearProjects.filter(p=>p.status==='Cancelled').length" class="flex items-center gap-1.5 text-red-500">
+										<span class="h-2 w-2 rounded-full bg-red-300"></span>
+										{{ yearProjects.filter(p=>p.status==='Cancelled').length }} off
+									</span>
+								</div>
+
+								<!-- CTA -->
+								<div class="mt-auto flex items-center justify-between border-t border-[color:var(--portal-border)] pt-3 text-xs font-semibold text-[color:var(--portal-muted)] transition-colors group-hover:text-[color:var(--portal-accent-strong)]">
+									<span>Open {{ year }} projects</span>
+									<FeatherIcon name="arrow-right" class="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+								</div>
+							</div>
+						</button>
+					</div>
+					<div
+						v-if="!visibleProjects.length"
+						class="rounded-2xl border border-dashed border-[color:var(--portal-border-strong)] bg-white p-10 text-center text-[color:var(--portal-muted)]"
 					>
-						<div class="flex items-center gap-3">
-							<span
-								class="rounded-lg px-2.5 py-1 text-xs font-semibold text-white"
-								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
-							>{{ year }}</span>
-							<span class="text-sm text-[color:var(--portal-muted)]">{{ yearProjects.length }} projects</span>
-						</div>
-						<FeatherIcon
-							:name="expandedYears[year] ? 'chevron-up' : 'chevron-down'"
-							class="h-4 w-4 text-[color:var(--portal-muted)]"
-						/>
-					</button>
-					<div v-if="expandedYears[year]" class="grid gap-3 border-t border-[color:var(--portal-border)] p-4 sm:grid-cols-2 xl:grid-cols-3">
+						No projects match your filters.
+					</div>
+				</template>
+
+				<!-- ── Level 2: Project cards for selected year ─────────── -->
+				<template v-else>
+					<!-- Back bar -->
+					<div class="flex items-center gap-3">
+						<button
+							type="button"
+							class="portal-btn"
+							@click="selectedYear = null"
+						>
+							<FeatherIcon name="arrow-left" class="h-4 w-4" />
+							All years
+						</button>
+						<span
+							class="rounded-xl px-3 py-1 text-sm font-bold text-white"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+						>{{ selectedYear }}</span>
+						<span class="text-sm text-[color:var(--portal-muted)]">
+							{{ (groupedProjectsByYear[selectedYear] || []).length }} projects
+						</span>
+					</div>
+
+					<!-- Project cards grid -->
+					<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
 						<div
-							v-for="p in yearProjects"
+							v-for="p in (groupedProjectsByYear[selectedYear] || [])"
 							:key="p.name"
-							class="portal-card cursor-pointer p-4 transition hover:-translate-y-0.5"
+							class="portal-card cursor-pointer p-5 transition hover:-translate-y-0.5"
 							@click="router.push('/projects/' + encodeURIComponent(p.name))"
 						>
-							<div class="mb-2 flex items-start justify-between gap-2">
+							<div class="mb-3 flex items-start justify-between gap-2">
 								<div class="min-w-0">
-									<div class="text-[10px] font-semibold uppercase tracking-wider text-[color:var(--portal-subtle)]">
-										{{ p.portal_project_code || p.name }}
+									<div class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--portal-subtle)]">
+										<FeatherIcon name="folder" class="h-3 w-3" />
+										<span class="truncate">{{ p.portal_project_code || p.name }}</span>
 									</div>
-									<p class="mt-1 truncate text-sm font-semibold text-[color:var(--portal-text)]">{{ p.project_name || p.name }}</p>
+									<p class="mt-1 truncate text-base font-semibold text-[color:var(--portal-text)]">{{ p.project_name || p.name }}</p>
 								</div>
 								<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 							</div>
-							<div class="space-y-1 text-xs text-[color:var(--portal-muted)]">
-								<p class="flex justify-between gap-2"><span>Client</span><span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.customer || "—" }}</span></p>
-								<p class="flex justify-between gap-2"><span>Stage</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.portal_kanban_stage || "—" }}</span></p>
-								<p class="flex justify-between gap-2"><span>Timeline</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.expected_start_date || "—" }} → {{ p.expected_end_date || "—" }}</span></p>
-								<p class="flex justify-between gap-2"><span>Est. cost</span><span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span></p>
+							<div class="space-y-2 text-sm text-[color:var(--portal-muted)]">
+								<p class="flex items-center justify-between gap-2">
+									<span class="flex items-center gap-1.5"><FeatherIcon name="user" class="h-3.5 w-3.5" />Client</span>
+									<span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.customer || "—" }}</span>
+								</p>
+								<p class="flex items-center justify-between gap-2">
+									<span class="flex items-center gap-1.5"><FeatherIcon name="trello" class="h-3.5 w-3.5" />Stage</span>
+									<span class="font-medium text-[color:var(--portal-text)]">{{ p.portal_kanban_stage || "—" }}</span>
+								</p>
+								<p class="flex items-center justify-between gap-2">
+									<span class="flex items-center gap-1.5"><FeatherIcon name="calendar" class="h-3.5 w-3.5" />Timeline</span>
+									<span class="font-medium text-[color:var(--portal-text)]">{{ p.expected_start_date || "—" }} → {{ p.expected_end_date || "—" }}</span>
+								</p>
+								<p class="flex items-center justify-between gap-2">
+									<span class="flex items-center gap-1.5"><FeatherIcon name="dollar-sign" class="h-3.5 w-3.5" />Cost</span>
+									<span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span>
+								</p>
 							</div>
 						</div>
+						<div
+							v-if="!(groupedProjectsByYear[selectedYear] || []).length"
+							class="sm:col-span-2 xl:col-span-3 rounded-2xl border border-dashed border-[color:var(--portal-border-strong)] bg-white p-10 text-center text-[color:var(--portal-muted)]"
+						>
+							No projects match your filters for {{ selectedYear }}.
+						</div>
 					</div>
-				</div>
-				<div
-					v-if="!visibleProjects.length"
-					class="rounded-2xl border border-dashed border-[color:var(--portal-border-strong)] bg-white p-10 text-center text-[color:var(--portal-muted)]"
-				>
-					No projects match your filters.
-				</div>
+				</template>
+
 			</div>
 		</div>
 

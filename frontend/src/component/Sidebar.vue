@@ -12,7 +12,7 @@ const collapsed        = computed(() => !!sidebarCollapsed.value);
 
 const portalAdmin        = inject("portalAdmin", ref({ can_create_users: false, can_run_demo_seed: false }));
 const portalCapabilities = inject("portalCapabilities", ref({}));
-const portalSettings     = inject("portalSettings", ref({ company_logo: "", company_name: "", company_tagline: "" }));
+const portalSettings     = inject("portalSettings", ref({ company_logo: "", company_name: "", company_tagline: "", logo_width: 0, logo_height: 0 }));
 
 // Items in "Modules" group — link to Coming Soon
 const CS = (m) => `/coming-soon?m=${m}`;
@@ -57,7 +57,8 @@ const groups = computed(() => {
 		filesItems.push({ name: "Shares",     path: "/manage-shares", icon: "shield" });
 	}
 	if (!isCust && portalCapabilities.value?.can_edit_portal_folder_template) {
-		filesItems.push({ name: "File tools", path: "/file-tools",    icon: "sliders" });
+		filesItems.push({ name: "File tools",     path: "/file-tools",    icon: "sliders"   });
+		filesItems.push({ name: "Routing rules",  path: "/folder-rules",  icon: "git-merge" });
 	}
 	const files = { title: "Files", items: filesItems };
 
@@ -100,8 +101,13 @@ function navigate(item) {
 				<img
 					v-if="portalSettings.company_logo"
 					:src="portalSettings.company_logo"
-					class="shrink-0 object-contain"
-					:class="collapsed ? 'h-9 w-9 rounded-xl' : 'h-11 w-auto max-w-[3rem] rounded-xl'"
+					class="shrink-0 rounded-xl object-contain"
+					:class="collapsed ? 'h-9 w-9' : ''"
+					:style="!collapsed ? {
+						maxHeight: portalSettings.logo_height ? portalSettings.logo_height + 'px' : '44px',
+						maxWidth:  portalSettings.logo_width  ? portalSettings.logo_width  + 'px' : '120px',
+						width: 'auto', height: 'auto',
+					} : {}"
 					:title="portalSettings.company_name || 'Portal'"
 				/>
 				<!-- AMA lettermark fallback -->

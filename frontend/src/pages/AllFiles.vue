@@ -272,6 +272,64 @@ const folderLabel = computed(() => {
 	return allFolders.value.find(f => f.name === activeFolder.value)?.label || "";
 });
 
+// ── Submit to Client Submittal ───────────────────────────────────────────────
+const submitModalOpen = ref(false);
+const submitFile      = ref(null);
+const submitBusy      = ref(false);
+const submitError     = ref("");
+const submitOk        = ref("");
+
+function todayIso() {
+	const d  = new Date();
+	const mm = String(d.getMonth() + 1).padStart(2, "0");
+	const dd = String(d.getDate()).padStart(2, "0");
+	return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function openSubmitModal(f) {
+	submitFile.value  = f;
+	submitError.value = "";
+	submitOk.value    = "";
+	submitModalOpen.value = true;
+}
+function closeSubmitModal() {
+	if (submitBusy.value) return;
+	submitModalOpen.value = false;
+	submitFile.value = null;
+}
+function previewSubmitName() {
+	const f = submitFile.value;
+	if (!f) return "";
+	return `NN_${todayIso()}_${f.file_name || ""}`;
+}
+async function confirmSubmitToClient() {
+	const f    = submitFile.value;
+	const proj = activeProj.value?.name;
+	if (!f || !proj) return;
+	submitBusy.value  = true;
+	submitError.value = "";
+	submitOk.value    = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.files.submit_to_client_submittal",
+			type: "POST",
+			args: { file_name: f.name, project: proj },
+		});
+		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to Client Submittal.`;
+		// Invalidate cache so next open shows fresh file list
+		if (projCache[proj]) delete projCache[proj];
+		setTimeout(() => { submitOk.value = ""; closeSubmitModal(); }, 3000);
+	} catch (e) {
+		const body = e?.responseBody;
+		submitError.value = body?._server_messages
+			? (() => { try { return JSON.parse(JSON.parse(body._server_messages)[0]).message; } catch { return body._server_messages; } })()
+			: body?.message || e?.message || "Submission failed.";
+	} finally {
+		submitBusy.value = false;
+	}
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 onMounted(async () => {
 	loadingProj.value = true;
 	try {
@@ -362,77 +420,100 @@ import { reactive } from "vue";
 							<!-- Project row -->
 							<button
 								type="button"
-								class="ml-2 mt-0.5 flex w-[calc(100%-0.5rem)] items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition"
-								:class="
-									activeProj?.name === p.name
-										? 'font-semibold shadow-sm'
-										: 'text-gray-700 hover:bg-white hover:shadow-sm'
-								"
-								:style="
-									activeProj?.name === p.name
-										? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color:#fff;'
-										: ''
-								"
+								class="ml-1 mt-0.5 flex w-[calc(100%-0.25rem)] items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition"
+								:class="activeProj?.name === p.name ? 'shadow-lg' : 'hover:bg-white hover:shadow-md'"
+								:style="activeProj?.name === p.name
+									? 'background:linear-gradient(135deg,var(--portal-accent) 0%,var(--portal-accent-strong) 100%);color:#fff;'
+									: ''"
 								@click="openProject(p)"
 							>
+								<!-- Folder icon -->
 								<span
-									class="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg"
-									:style="
-										activeProj?.name === p.name
-											? 'background:rgba(255,255,255,0.25); color:#fff;'
-											: 'background:#e0e7ff; color:var(--portal-accent);'
-									"
+									class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl shadow-sm"
+									:style="activeProj?.name === p.name
+										? 'background:rgba(255,255,255,0.2);'
+										: 'background:linear-gradient(135deg,#e0e7ff,#c7d2fe);'"
 								>
-									<FeatherIcon :name="activeProj?.name === p.name ? 'folder-open' : 'folder'" class="h-3.5 w-3.5" />
+									<FeatherIcon
+										:name="activeProj?.name === p.name ? 'folder-open' : 'folder'"
+										class="h-4 w-4"
+										:class="activeProj?.name === p.name ? 'text-white' : 'text-indigo-600'"
+									/>
 								</span>
-								<span class="min-w-0 flex-1 truncate leading-snug" :title="p.project_name">{{ p.project_name }}</span>
+								<!-- Name + code stack -->
+								<span class="min-w-0 flex-1" :title="p.project_name">
+									<span
+										class="block truncate text-sm font-bold leading-snug"
+										:class="activeProj?.name === p.name ? 'text-white' : 'text-gray-800'"
+									>{{ p.project_name }}</span>
+									<span
+										v-if="p.portal_project_code"
+										class="block truncate text-[10px] font-semibold tracking-wide"
+										:class="activeProj?.name === p.name ? 'text-white/70' : 'text-indigo-400'"
+									>{{ p.portal_project_code }}</span>
+								</span>
+								<!-- File count badge -->
 								<span
 									v-if="projCache[p.name]"
-									class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold" :class="activeProj?.name === p.name ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'"
+									class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold"
+									:class="activeProj?.name === p.name ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-600'"
 								>{{ projCache[p.name].files.length }}</span>
 								<FeatherIcon
 									v-if="activeProj?.name === p.name"
 									name="chevron-down"
-									class="h-3 w-3 shrink-0 text-indigo-400"
+									class="h-3.5 w-3.5 shrink-0 text-white/70"
 								/>
 							</button>
 
 							<!-- Folder tree (inline under project) -->
 							<template v-if="activeProj?.name === p.name && !loadingFiles && cacheEntry">
-								<div class="ml-8 mt-0.5 space-y-0.5">
+								<div class="ml-6 mt-1 space-y-0.5 border-l-2 border-indigo-100 pl-2">
 									<button
 										v-for="node in flatTree"
 										:key="node.key"
 										type="button"
-										class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-xs transition"
-										:style="{ paddingLeft: `${0.5 + node.depth * 0.65}rem` }"
-										:class="
+										class="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left transition"
+										:style="{ paddingLeft: `${0.25 + (node.depth - 1) * 0.75}rem` }"
+										:class="[
+											node.isRoot ? 'text-xs font-bold' : node.depth <= 2 ? 'text-xs font-semibold' : 'text-[11px] font-medium',
 											activeFolder === node.name
-												? 'font-bold text-indigo-800 bg-indigo-100'
-												: 'text-gray-600 hover:bg-indigo-50/70 hover:text-gray-900'
-										"
-										
+												? 'bg-indigo-600 text-white shadow-sm'
+												: node.isRoot
+													? 'text-gray-700 hover:bg-indigo-50 hover:text-indigo-700'
+													: 'text-gray-600 hover:bg-indigo-50/70 hover:text-gray-900'
+										]"
 										@click="activeFolder = node.name; activeCategory = ''"
 									>
+										<!-- Expand/collapse toggle -->
 										<button
 											v-if="hasFolderChildren(node.key)"
 											type="button"
-											class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-200"
+											class="flex h-4 w-4 shrink-0 items-center justify-center rounded transition"
+											:class="activeFolder === node.name ? 'text-white/70 hover:bg-white/20' : 'text-gray-400 hover:bg-gray-200'"
 											@click.stop="toggleFolder(node.key)"
 										>
 											<FeatherIcon :name="expandedFolders.has(node.key) || node.isRoot ? 'chevron-down' : 'chevron-right'" class="h-2.5 w-2.5" />
 										</button>
 										<span v-else class="h-4 w-4 shrink-0"></span>
+										<!-- Folder icon — color by depth -->
 										<FeatherIcon
 											:name="activeFolder === node.name ? 'folder-open' : 'folder'"
-											class="h-3.5 w-3.5 shrink-0"
-											:class="activeFolder === node.name ? 'text-indigo-700' : 'text-gray-400'"
+											class="h-3.5 w-3.5 shrink-0 transition"
+											:class="activeFolder === node.name
+												? 'text-white'
+												: node.isRoot ? 'text-indigo-500'
+												: node.depth <= 2 ? 'text-indigo-400'
+												: 'text-gray-400'"
 										/>
-										<span class="min-w-0 flex-1 truncate">{{ node.label }}</span>
+										<!-- Label -->
+										<span class="min-w-0 flex-1 truncate" :class="activeFolder === node.name ? 'text-white' : ''">
+											{{ node.label }}
+										</span>
+										<!-- File count -->
 										<span
 											v-if="folderFileCount(node)"
-											class="ml-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px]"
-											:class="activeFolder === node.name ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-500'"
+											class="ml-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+											:class="activeFolder === node.name ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-600'"
 										>{{ folderFileCount(node) }}</span>
 									</button>
 								</div>
@@ -594,6 +675,12 @@ import { reactive } from "vue";
 									Date <FeatherIcon :name="sortIcon('date')" class="h-3 w-3" />
 								</button>
 							</th>
+							<th class="w-28 px-3 py-3 text-center">
+								<span class="inline-flex items-center gap-1 rounded-lg bg-amber-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-700">
+									<FeatherIcon name="send" class="h-3 w-3" />
+									To Client
+								</span>
+							</th>
 							<th class="px-5 py-3 text-right">
 								<button class="flex items-center gap-1 justify-end transition hover:text-indigo-600" @click="setSort('size')">
 									Size <FeatherIcon :name="sortIcon('size')" class="h-3 w-3" />
@@ -656,13 +743,119 @@ import { reactive } from "vue";
 								<span v-else class="text-[11px] text-gray-300">—</span>
 							</td>
 							<!-- Date -->
-							<td class="whitespace-nowrap px-5 py-3 text-xs text-gray-400">{{ fmtDate(f.creation) }}</td>
-							<!-- Size -->
+							<td class="whitespace-nowrap px-5 py-3 text-xs font-bold text-gray-700">{{ fmtDate(f.creation) }}</td>
+							<!-- Submit to Client Submittal (now where Size was) -->
+							<td class="px-3 py-3 text-center">
+								<button
+									type="button"
+									class="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700 shadow-sm transition hover:bg-amber-100 hover:border-amber-400 hover:shadow-md active:scale-95"
+									title="Submit to 06-CLIENT SUBMITTAL with SL.NO + date naming"
+									@click.stop="openSubmitModal(f)"
+								>
+									<FeatherIcon name="send" class="h-3.5 w-3.5" />
+									Submit
+								</button>
+							</td>
+							<!-- Size (moved to last) -->
 							<td class="whitespace-nowrap px-5 py-3 text-right text-xs text-gray-400">{{ fmtSize(f.file_size) }}</td>
 						</tr>
 					</tbody>
 				</table>
 			</div>
 		</main>
+
+		<!-- ── Submit to Client Submittal modal ───────────────────────────── -->
+		<Teleport to="body">
+			<div
+				v-if="submitModalOpen"
+				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+				@click.self="closeSubmitModal"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+				<div class="relative z-10 w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-2xl" @click.stop>
+					<!-- Header -->
+					<div class="flex items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+						<div class="flex items-center gap-3">
+							<div
+								class="flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-md"
+								style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);"
+							>
+								<FeatherIcon name="send" class="h-5 w-5" />
+							</div>
+							<div>
+								<h2 class="text-base font-bold text-gray-900">Submit to Client</h2>
+								<p class="text-xs text-gray-400">Copies to <strong>06-CLIENT SUBMITTAL</strong> with serial + date naming</p>
+							</div>
+						</div>
+						<button type="button" class="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100" :disabled="submitBusy" @click="closeSubmitModal">
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+
+					<!-- Body -->
+					<div class="space-y-4 px-5 py-5">
+						<!-- Source file -->
+						<div class="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+							<span
+								class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-sm"
+								style="background:linear-gradient(135deg,rgba(79,70,229,.08),rgba(56,189,248,.08));"
+							>
+								<FeatherIcon :name="extIcon(submitFile?.file_name || '')" class="h-5 w-5 text-indigo-500" />
+							</span>
+							<div class="min-w-0">
+								<p class="truncate text-sm font-semibold text-gray-800">{{ submitFile?.file_name }}</p>
+								<p class="text-[11px] text-gray-400">{{ relFolder(submitFile) || activeProj?.project_name || "Project root" }}</p>
+							</div>
+						</div>
+
+						<!-- Generated name preview -->
+						<div class="rounded-xl border border-amber-200 bg-gradient-to-br from-amber-50 to-orange-50 px-4 py-3">
+							<p class="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+								<FeatherIcon name="tag" class="h-3 w-3" />
+								Will be saved as
+							</p>
+							<p class="font-mono text-sm font-bold text-amber-900 break-all">{{ previewSubmitName() }}</p>
+							<div class="mt-2 flex flex-wrap gap-3 text-[11px] text-amber-700">
+								<span class="flex items-center gap-1"><span class="font-bold">NN</span> = auto serial (01, 02…)</span>
+								<span class="flex items-center gap-1"><span class="font-bold">Date</span> = today ({{ todayIso() }})</span>
+							</div>
+						</div>
+
+						<p v-if="submitError" class="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{{ submitError }}</p>
+						<p v-if="submitOk"    class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+							<FeatherIcon name="check-circle" class="mr-1 inline h-4 w-4" />{{ submitOk }}
+						</p>
+					</div>
+
+					<!-- Footer -->
+					<div class="flex items-center justify-end gap-2 border-t border-gray-100 bg-gray-50/60 px-5 py-4">
+						<button
+							type="button"
+							class="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:opacity-50"
+							:disabled="submitBusy"
+							@click="closeSubmitModal"
+						>Cancel</button>
+						<button
+							type="button"
+							class="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:opacity-50"
+							style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);"
+							:disabled="submitBusy || !!submitOk"
+							@click="confirmSubmitToClient"
+						>
+							<span v-if="submitBusy" class="flex items-center gap-2">
+								<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+								Submitting…
+							</span>
+							<span v-else class="flex items-center gap-2">
+								<FeatherIcon name="send" class="h-4 w-4" />
+								Confirm &amp; Submit to Client
+							</span>
+						</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
 	</div>
 </template>

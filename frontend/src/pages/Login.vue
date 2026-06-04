@@ -113,7 +113,17 @@
 
 				<!-- Logo -->
 				<div class="brand-top">
-					<img v-if="brandLogo" :src="brandLogo" class="h-11 w-auto object-contain" :alt="brandName || 'Logo'"/>
+					<img
+						v-if="brandLogo"
+						:src="brandLogo"
+						class="object-contain"
+						:style="{
+							maxHeight: brandLogoH ? brandLogoH + 'px' : '56px',
+							maxWidth:  brandLogoW ? brandLogoW + 'px' : '180px',
+							width: 'auto', height: 'auto',
+						}"
+						:alt="brandName || 'Logo'"
+					/>
 					<div v-else class="brand-mark" aria-hidden="true">
 						<!-- Geometric lettermark inspired by AMA logo -->
 						<svg viewBox="0 0 52 44" fill="currentColor" class="h-9 w-auto">
@@ -256,6 +266,8 @@ const rememberMe   = ref(false);
 const brandLogo    = ref("");
 const brandName    = ref("");
 const brandTagline = ref("");
+const brandLogoW   = ref(0);
+const brandLogoH   = ref(0);
 
 onMounted(async () => {
 	try {
@@ -263,6 +275,8 @@ onMounted(async () => {
 		if (b?.company_logo)    brandLogo.value    = b.company_logo;
 		if (b?.company_name)    brandName.value    = b.company_name;
 		if (b?.company_tagline) brandTagline.value = b.company_tagline;
+		if (b?.logo_width)      brandLogoW.value   = Number(b.logo_width)  || 0;
+		if (b?.logo_height)     brandLogoH.value   = Number(b.logo_height) || 0;
 	} catch { /* ignore */ }
 });
 

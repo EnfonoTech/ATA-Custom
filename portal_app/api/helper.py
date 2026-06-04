@@ -235,6 +235,8 @@ def get_portal_settings_dict():
 		"company_logo": doc.get("company_logo") or "",
 		"company_name": doc.get("company_name") or "",
 		"company_tagline": doc.get("company_tagline") or "",
+		"logo_width": int(doc.get("logo_width") or 0),
+		"logo_height": int(doc.get("logo_height") or 0),
 		"allow_portal_demo_seed": int(doc.get("allow_portal_demo_seed") or 0),
 		"allow_any_portal_user_to_create_project": int(doc.get("allow_any_portal_user_to_create_project") or 0),
 		"use_frappe_drive": int(doc.get("use_frappe_drive") or 0),

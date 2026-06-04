@@ -14,6 +14,7 @@ const Tasks         = () => import("@/pages/Tasks.vue");
 const Files         = () => import("@/pages/Files.vue");
 const AllFiles      = () => import("@/pages/AllFiles.vue");
 const FileTools     = () => import("@/pages/FileTools.vue");
+const FolderRules   = () => import("@/pages/FolderRules.vue");
 const SharedFolder  = () => import("@/pages/SharedFolder.vue");
 const SharedWithMe  = () => import("@/pages/SharedWithMe.vue");
 const ManageShares  = () => import("@/pages/ManageShares.vue");
@@ -56,6 +57,12 @@ const routes = [
 				path: "file-tools",
 				name: "FileTools",
 				component: FileTools,
+				meta: { requiresAuditor: true },
+			},
+			{
+				path: "folder-rules",
+				name: "FolderRules",
+				component: FolderRules,
 				meta: { requiresAuditor: true },
 			},
 			{ path: "profile", name: "Profile", component: Profile },

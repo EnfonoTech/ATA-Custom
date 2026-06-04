@@ -157,6 +157,63 @@ function classifyFile(name, docType) {
 	return ["Uncategorized", ext ? ext.substring(1).toUpperCase() : "", ext];
 }
 const PDF_DOC_TYPE_OPTIONS = ["", "Presentation", "Drawing Sheet", "Feasibility Report", "Submission", "General"];
+
+const FILE_CLASSIFICATION_OPTIONS = [
+	"Presentation Files",
+	"Drawing / Layout Files",
+	"3D Model Files",
+	"Feasibility / Area Calculation Files",
+	"Editable Design Source Files",
+	"Rendering / Image Files",
+	"Submission Files",
+	"Uncategorized",
+];
+
+// ─── Dynamic folder routing rules (loaded from Portal Folder Route Rule) ─────
+const folderRouteRules = ref([]);
+async function loadFolderRouteRules() {
+	try {
+		const res = await call({ method: "portal_app.api.files.list_folder_route_rules" });
+		folderRouteRules.value = res?.rules || [];
+	} catch {
+		folderRouteRules.value = [];
+	}
+}
+
+function _labelMatches(label, pattern, mode) {
+	const l = (label || "").toLowerCase();
+	const p = (pattern || "").toLowerCase();
+	if (!p) return false;
+	if (mode === "exact") return l === p;
+	if (mode === "starts_with") return l.startsWith(p);
+	return l.includes(p); // "contains" (default)
+}
+
+function isSourceMatchedByAnyRule(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	return folderRouteRules.value.some((r) =>
+		_labelMatches(label, r.source_folder_pattern, r.source_match_mode),
+	);
+}
+
+function getConceptCrossRoutes(classification, subCategory) {
+	const matchingRules = folderRouteRules.value.filter(
+		(r) => r.file_classification === classification,
+	);
+	const targets = [];
+	for (const rule of matchingRules) {
+		const match = folders.value.find((f) =>
+			_labelMatches(f.label || "", rule.target_folder_pattern, rule.target_match_mode),
+		);
+		if (match && !targets.includes(match.name)) targets.push(match.name);
+	}
+	return targets;
+}
+
+// Keep the old name as an alias so all call-sites (isInConceptStudies) still work
+function isInConceptStudies(folderName) {
+	return isSourceMatchedByAnyRule(folderName);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function todayIso() {
@@ -271,6 +328,44 @@ function onPendingDateChange(row) {
 }
 
 function onPendingCategoryChange(row) {
+	if (!row.nameEdited) regenerateAutoName(row);
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
+}
+
+function onPendingClassificationChange(row) {
+	if (!row.nameEdited) regenerateAutoName(row);
+	// Re-derive sub-category from classification label when changed manually
+	row.fileSubCategory = "";
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
+	// Suggest matching folder if not already matching
+	const suggested = suggestFolderForCategory(row.fileClassification);
+	if (suggested && suggested !== row.category) row.category = suggested;
+	if (!row.nameEdited) regenerateAutoName(row);
+}
+
+function onPendingDocTypeChange(row) {
+	const [c, s] = classifyFile(row.originalFile.name, row.documentType);
+	row.fileClassification = c;
+	row.fileSubCategory = s;
+	// Auto-route PDF to the correct folder based on chosen document type
+	const routeMap = {
+		"Presentation":       "Presentation Files",
+		"Drawing Sheet":      "Drawing / Layout Files",
+		"Feasibility Report": "Feasibility / Area Calculation Files",
+		"Submission":         "Submission Files",
+	};
+	const classHint = routeMap[row.documentType];
+	if (classHint) {
+		const suggested = suggestFolderForCategory(classHint);
+		if (suggested) row.category = suggested;
+	}
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
@@ -490,7 +585,7 @@ const folderLabelByName = computed(() => {
 const visibleFiles = computed(() => {
 	const q = fileSearch.value.trim().toLowerCase();
 	const root = projectRootPath.value;
-	return (files.value || []).filter((f) => {
+	const filtered = (files.value || []).filter((f) => {
 		if (folderFilter.value) {
 			if (root && folderFilter.value === root) {
 				const fp = String(f.folder || "");
@@ -501,6 +596,17 @@ const visibleFiles = computed(() => {
 		}
 		if (q && !String(f.file_name || "").toLowerCase().includes(q)) return false;
 		return true;
+	});
+	// Sort: folders (wrapper dirs) first by name numerically ascending (01→NN, latest last),
+	// then files numerically ascending by file_name.
+	return [...filtered].sort((a, b) => {
+		if (a.is_folder && !b.is_folder) return -1;
+		if (!a.is_folder && b.is_folder) return 1;
+		return String(a.file_name || "").localeCompare(
+			String(b.file_name || ""),
+			undefined,
+			{ numeric: true, sensitivity: "base" },
+		);
 	});
 });
 const folderEntries = computed(() => {
@@ -813,6 +919,7 @@ onMounted(async () => {
 	await loadProjects();
 	await loadFiles();
 	loadFileTypes();
+	loadFolderRouteRules();
 	scrollToPortalHighlight();
 });
 
@@ -900,6 +1007,9 @@ function handleFiles(fileList) {
 		const { base, ext } = splitFileName(f.name);
 		const category = targetFolder.value;
 		const [fileClassification, fileSubCategory] = classifyFile(f.name, "");
+		const crossRouteTargets = isInConceptStudies(category)
+			? getConceptCrossRoutes(fileClassification, fileSubCategory)
+			: [];
 		return {
 			originalFile: f,
 			base,
@@ -912,6 +1022,7 @@ function handleFiles(fileList) {
 			fileClassification,
 			fileSubCategory,
 			documentType: "",
+			crossRouteTargets,
 		};
 	});
 	confirmUploadOpen.value = true;
@@ -947,6 +1058,25 @@ async function _prepareWrapper(category, isoDate, fileBase = "") {
 		series: prep.series || "01",
 		version: prep.version || 1,
 	};
+}
+
+// Return only the direct children of the same root-level parent as the given folder.
+// e.g. if folderDocName maps to "02-CONCEPT/01-CONCEPT STUDIES/01-ARCH",
+// returns folders whose label is "02-CONCEPT/<leaf>" (depth 2 only).
+// Excludes the primary category itself and already-added cross-route targets.
+function siblingFoldersFor(folderDocName, excludeNames = []) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	const rootSeg = label.split("/")[0];
+	if (!rootSeg) return folders.value;
+	return folders.value.filter((f) => {
+		const parts = (f.label || "").split("/");
+		return (
+			parts.length === 2 &&
+			parts[0] === rootSeg &&
+			f.name !== folderDocName &&
+			!excludeNames.includes(f.name)
+		);
+	});
 }
 
 async function confirmUploadAndRun() {
@@ -1018,6 +1148,43 @@ async function confirmUploadAndRun() {
 					uploadedCount += 1;
 				}
 			}
+			// Cross-upload to 02-CONCEPT category folders when source was inside 01-CONCEPT STUDIES
+			const crossRouteMap = new Map();
+			for (const r of pendingUploads.value) {
+				if (r.crossRouteTargets?.length) {
+					for (const ct of r.crossRouteTargets) {
+						if (!crossRouteMap.has(ct)) crossRouteMap.set(ct, []);
+						crossRouteMap.get(ct).push(r);
+					}
+				}
+			}
+			for (const [crossTarget, rows] of crossRouteMap) {
+				try {
+					const fileBase = rows.length === 1 ? (rows[0].base || "") : "";
+					const crossWrapper = await _prepareWrapper(crossTarget, today, fileBase);
+					for (const r of rows) {
+						const renamed = new File([r.originalFile], r.name.trim(), {
+							type: r.originalFile.type,
+							lastModified: r.originalFile.lastModified,
+						});
+						await uploadFile("portal_app.api.files.upload_project_file", renamed, {
+							project: project.value,
+							is_private: isPrivateUpload.value ? "1" : "0",
+							destination: destination.value,
+							external_provider: externalProvider.value,
+							target_folder: crossWrapper.fileDoc,
+							relative_path: "",
+							file_type: r.fileType || "",
+							file_classification: r.fileClassification || "",
+							file_sub_category: r.fileSubCategory || "",
+							document_type: r.documentType || "",
+						});
+					}
+				} catch {
+					// Cross-route failure is non-fatal; primary upload already succeeded
+				}
+			}
+
 			await loadFiles();
 			if (uploadedCount) {
 				const first = pendingUploads.value[0];
@@ -1079,6 +1246,7 @@ function doFolderUpload(entries) {
 	if (roots.size !== 1) { uploadError.value = "Select exactly one folder."; return; }
 	const sourceName = [...roots][0];
 
+	const isConceptSrc = isInConceptStudies(targetFolder.value);
 	const files = items.map((it) => {
 		const p = String(it.relativePath || it.file.webkitRelativePath || "");
 		const trimmed = p.startsWith(sourceName + "/") ? p.slice(sourceName.length + 1) : p;
@@ -1089,6 +1257,7 @@ function doFolderUpload(entries) {
 			relativeDir: slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "",
 			classification,
 			subCategory,
+			crossRouteTargets: isConceptSrc ? getConceptCrossRoutes(classification, subCategory) : [],
 		};
 	});
 
@@ -1135,6 +1304,41 @@ async function confirmFolderUploadAndRun() {
 			});
 			done++;
 		}
+		// Cross-upload per-file to concept category folders
+		const folderCrossMap = new Map();
+		for (const e of f.files) {
+			for (const ct of (e.crossRouteTargets || [])) {
+				if (!folderCrossMap.has(ct)) folderCrossMap.set(ct, []);
+				folderCrossMap.get(ct).push(e);
+			}
+		}
+		for (const [crossTarget, entries] of folderCrossMap) {
+			try {
+				uploadInfo.value = `Auto-routing to ${folderLabelByName.value[crossTarget] || crossTarget}…`;
+				const crossPrep = await call({
+					method: "portal_app.api.files.prepare_folder_upload",
+					type: "POST",
+					args: { project: project.value, target_folder: crossTarget, folder_name: f.wrapperName.trim() },
+				});
+				if (crossPrep?.folder_name) {
+					for (const e of entries) {
+						await uploadFile("portal_app.api.files.upload_project_file", e.file, {
+							project: project.value,
+							is_private: isPrivateUpload.value ? "1" : "0",
+							destination: destination.value,
+							external_provider: externalProvider.value,
+							target_folder: crossPrep.folder_name,
+							relative_path: "",
+							file_classification: e.classification || "",
+							file_sub_category: e.subCategory || "",
+						});
+					}
+				}
+			} catch {
+				// Cross-route failure is non-fatal
+			}
+		}
+
 		await loadFiles();
 		uploadInfo.value = `"${f.wrapperName}" uploaded — ${f.files.length} file${f.files.length === 1 ? "" : "s"}.`;
 		setTimeout(() => (uploadInfo.value = ""), 6000);
@@ -1561,6 +1765,59 @@ async function confirmRenameSubfolder() {
 		renameBusy.value = false;
 	}
 }
+
+// ── Submit to Client Submittal ───────────────────────────────────────────────
+const submitModalOpen  = ref(false);
+const submitFile       = ref(null);
+const submitBusy       = ref(false);
+const submitError      = ref("");
+const submitOk         = ref("");
+
+function openSubmitModal(f) {
+	submitFile.value  = f;
+	submitError.value = "";
+	submitOk.value    = "";
+	submitModalOpen.value = true;
+}
+function closeSubmitModal() {
+	if (submitBusy.value) return;
+	submitModalOpen.value = false;
+	submitFile.value = null;
+}
+
+function previewSubmitName() {
+	const f = submitFile.value;
+	if (!f) return "";
+	const today = todayIso();
+	const orig  = f.file_name || "";
+	return `NN_${today}_${orig}`;
+}
+
+async function confirmSubmitToClient() {
+	const f = submitFile.value;
+	if (!f || !project.value) return;
+	submitBusy.value  = true;
+	submitError.value = "";
+	submitOk.value    = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.files.submit_to_client_submittal",
+			type: "POST",
+			args: { file_name: f.name, project: project.value },
+		});
+		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to Client Submittal.`;
+		await loadFiles();
+		setTimeout(() => {
+			submitOk.value = "";
+			closeSubmitModal();
+		}, 3000);
+	} catch (e) {
+		submitError.value = apiErr(e);
+	} finally {
+		submitBusy.value = false;
+	}
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function deleteProjectFile(f) {
 	if (!f?.name || f.is_folder) return;
@@ -2258,6 +2515,7 @@ async function deleteProjectFile(f) {
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Upload date</th>
 							<th class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Link</th>
 							<th v-if="canShareFolder" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Share</th>
+							<th v-if="!isCustomerPortalUser && project" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Submit</th>
 							<th v-if="showFileDeleteColumn" class="px-4 py-3 text-xs font-semibold uppercase tracking-wider">Delete</th>
 						</tr>
 					</thead>
@@ -2305,6 +2563,20 @@ async function deleteProjectFile(f) {
 								>
 									<FeatherIcon name="share-2" class="h-3 w-3" />
 									Share
+								</button>
+								<span v-else class="text-xs text-[color:var(--portal-subtle)]">—</span>
+							</td>
+							<!-- Submit to Client Submittal -->
+							<td v-if="!isCustomerPortalUser && project" class="px-4 py-3">
+								<button
+									v-if="!f.is_folder"
+									type="button"
+									class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-50"
+									title="Submit to Client — copies to 06-CLIENT SUBMITTAL with SL.NO + date naming"
+									@click="openSubmitModal(f)"
+								>
+									<FeatherIcon name="send" class="h-3 w-3" />
+									Submit
 								</button>
 								<span v-else class="text-xs text-[color:var(--portal-subtle)]">—</span>
 							</td>
@@ -2737,16 +3009,59 @@ async function deleteProjectFile(f) {
 									</span>
 								</div>
 								<ul class="max-h-52 overflow-auto divide-y divide-[color:var(--portal-border)] text-xs">
-									<li v-for="(e, ei) in pendingFolder.files" :key="`fe-${ei}`" class="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-2 text-[color:var(--portal-text)]">
-										<FeatherIcon name="file" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
-										<span class="min-w-0 flex-1 truncate font-mono text-[11px]">
-											<span class="text-[color:var(--portal-subtle)]">{{ e.relativeDir ? e.relativeDir + "/" : "" }}</span>{{ e.file.name }}
-										</span>
-										<span
-											v-if="e.classification"
-											class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800"
-										>{{ e.classification }}</span>
-										<span class="shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
+									<li v-for="(e, ei) in pendingFolder.files" :key="`fe-${ei}`" class="px-4 py-2 text-[color:var(--portal-text)]">
+										<!-- Row 1: filename + classification + size -->
+										<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+											<FeatherIcon name="file" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
+											<span class="min-w-0 flex-1 truncate font-mono text-[11px]">
+												<span class="text-[color:var(--portal-subtle)]">{{ e.relativeDir ? e.relativeDir + "/" : "" }}</span>{{ e.file.name }}
+											</span>
+											<span
+												v-if="e.classification"
+												class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800"
+											>{{ e.classification }}</span>
+											<span class="shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
+										</div>
+										<!-- Row 2: editable cross-route chips -->
+										<div v-if="e.crossRouteTargets?.length || true" class="mt-1 flex flex-wrap items-center gap-1">
+											<span class="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">→</span>
+											<template v-if="e.crossRouteTargets?.length">
+												<span
+													v-for="(ct, ci) in e.crossRouteTargets"
+													:key="ct"
+													class="flex items-center gap-0.5 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
+												>
+													{{ (folderLabelByName[ct] || ct).split("/").pop() }}
+													<button
+														type="button"
+														class="ml-0.5 text-emerald-400 transition hover:text-red-500"
+														:disabled="uploadBusy"
+														@click="e.crossRouteTargets.splice(ci, 1)"
+													><FeatherIcon name="x" class="h-2.5 w-2.5" /></button>
+												</span>
+											</template>
+											<span v-else class="text-[10px] italic text-[color:var(--portal-subtle)]">no auto-route</span>
+											<!-- Per-file add destination -->
+											<select
+												class="rounded border border-dashed border-emerald-300 bg-transparent px-1.5 py-0.5 text-[10px] text-emerald-700 focus:outline-none"
+												:disabled="uploadBusy"
+												@change="(ev) => {
+													const v = ev.target.value;
+													if (v) {
+														if (!e.crossRouteTargets) e.crossRouteTargets = [];
+														if (!e.crossRouteTargets.includes(v)) e.crossRouteTargets.push(v);
+													}
+													ev.target.value = '';
+												}"
+											>
+												<option value="">＋ add</option>
+												<option
+													v-for="f in siblingFoldersFor(pendingFolder.targetFolder, e.crossRouteTargets || [])"
+													:key="`fct-${ei}-${f.name}`"
+													:value="f.name"
+												>{{ f.label.split("/").pop() }}</option>
+											</select>
+										</div>
 									</li>
 								</ul>
 							</div>
@@ -2780,27 +3095,79 @@ async function deleteProjectFile(f) {
 										<option v-for="t in fileTypes" :key="`ft-${idx}-${t.name}`" :value="t.name">{{ t.label }}</option>
 									</select>
 								</label>
-								<!-- File Classification -->
-								<div class="block sm:col-span-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
-									<p class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">File Classification (auto-detected)</p>
-									<div class="flex flex-wrap items-center gap-2">
-										<span class="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-800">
-											{{ row.fileClassification || "Uncategorized" }}
-										</span>
-										<span v-if="row.fileSubCategory" class="text-xs text-indigo-600">· {{ row.fileSubCategory }}</span>
+								<!-- File Classification (editable) -->
+								<label class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">File Classification</span>
+									<select v-model="row.fileClassification" class="w-full rounded-xl border border-indigo-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingClassificationChange(row)">
+										<option v-for="opt in FILE_CLASSIFICATION_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+									</select>
+									<span v-if="row.fileSubCategory" class="mt-0.5 block text-[11px] text-indigo-600">Sub: {{ row.fileSubCategory }}</span>
+								</label>
+								<!-- PDF-specific: Plan or Presentation -->
+								<label v-if="row.ext === '.pdf'" class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">PDF Type — Plan or Presentation?</span>
+									<select v-model="row.documentType" class="w-full rounded-xl border border-indigo-300 px-3 py-1.5 text-sm" :disabled="uploadBusy" @change="onPendingDocTypeChange(row)">
+										<option value="">— Auto-detect from filename —</option>
+										<option value="Presentation">Presentation</option>
+										<option value="Drawing Sheet">Plan / Drawing Sheet</option>
+										<option value="Feasibility Report">Feasibility Report</option>
+										<option value="Submission">Submission</option>
+										<option value="General">General PDF</option>
+									</select>
+								</label>
+								<!-- Cross-route destinations — editable chips + manual add -->
+								<div class="block sm:col-span-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5">
+									<div class="mb-2 flex items-center justify-between gap-2">
+										<p class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+											<FeatherIcon name="git-merge" class="h-3 w-3" />
+											Also auto-upload to
+										</p>
+										<!-- Add-folder dropdown -->
+										<select
+											class="max-w-[180px] rounded-lg border border-emerald-300 bg-white px-2 py-1 text-[11px] font-medium text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+											:disabled="uploadBusy"
+											@change="(ev) => {
+												const v = ev.target.value;
+												if (v && !(row.crossRouteTargets || []).includes(v)) {
+													if (!row.crossRouteTargets) row.crossRouteTargets = [];
+													row.crossRouteTargets.push(v);
+												}
+												ev.target.value = '';
+											}"
+										>
+											<option value="">＋ Add destination…</option>
+											<option
+												v-for="f in siblingFoldersFor(row.category, row.crossRouteTargets || [])"
+												:key="`add-ct-${idx}-${f.name}`"
+												:value="f.name"
+											>{{ f.label.split('/').pop() }}</option>
+										</select>
 									</div>
-									<div v-if="row.ext === '.pdf'" class="mt-2">
-										<label class="block">
-											<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">Document Type (refine PDF classification)</span>
-											<select
-												v-model="row.documentType"
-												class="w-full rounded-xl border border-indigo-300 px-3 py-1.5 text-sm"
+									<!-- Empty state -->
+									<p v-if="!row.crossRouteTargets?.length" class="text-[11px] italic text-emerald-600">
+										No auto-routing — select a destination above to add one.
+									</p>
+									<!-- Removable chips -->
+									<div v-else class="flex flex-wrap gap-1.5">
+										<span
+											v-for="(ct, ci) in row.crossRouteTargets"
+											:key="ct"
+											class="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800"
+										>
+											<FeatherIcon name="folder" class="h-2.5 w-2.5 shrink-0 text-emerald-600" />
+											<span class="max-w-[160px] truncate" :title="folderLabelByName[ct] || ct">
+												{{ (folderLabelByName[ct] || ct).split("/").pop() }}
+											</span>
+											<button
+												type="button"
+												class="ml-0.5 rounded-full p-0.5 text-emerald-500 transition hover:bg-red-100 hover:text-red-600"
 												:disabled="uploadBusy"
-												@change="() => { const [c, s] = classifyFile(row.originalFile.name, row.documentType); row.fileClassification = c; row.fileSubCategory = s; }"
+												title="Remove this auto-route"
+												@click="row.crossRouteTargets.splice(ci, 1)"
 											>
-												<option v-for="opt in PDF_DOC_TYPE_OPTIONS" :key="opt" :value="opt">{{ opt || '— Auto-detect from filename —' }}</option>
-											</select>
-										</label>
+												<FeatherIcon name="x" class="h-3 w-3" />
+											</button>
+										</span>
 									</div>
 								</div>
 							</div>
@@ -2817,6 +3184,82 @@ async function deleteProjectFile(f) {
 							<template v-else>
 								{{ uploadBusy ? "Uploading…" : `Upload ${pendingUploads.length} file${pendingUploads.length === 1 ? "" : "s"}` }}
 							</template>
+						</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<!-- ── Submit to Client Submittal modal ────────────────────────── -->
+		<Teleport to="body">
+			<div
+				v-if="submitModalOpen"
+				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+				@click.self="closeSubmitModal"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+				<div class="relative z-10 w-full max-w-lg rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in" @click.stop>
+					<!-- Header -->
+					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
+						<div class="flex items-center gap-2">
+							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);">
+								<FeatherIcon name="send" class="h-4 w-4" />
+							</div>
+							<div>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Submit to Client</h2>
+								<p class="text-xs text-[color:var(--portal-muted)]">Copy to 06-CLIENT SUBMITTAL with serial + date naming</p>
+							</div>
+						</div>
+						<button type="button" class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100" :disabled="submitBusy" @click="closeSubmitModal">
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+
+					<!-- Body -->
+					<div class="space-y-4 px-5 py-4">
+						<!-- Source file info -->
+						<div class="flex items-start gap-3 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-4 py-3">
+							<FeatherIcon name="file" class="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--portal-muted)]" />
+							<div class="min-w-0">
+								<p class="text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-muted)]">Source file</p>
+								<p class="truncate text-sm font-medium text-[color:var(--portal-text)]">{{ submitFile?.file_name }}</p>
+								<p class="text-[11px] text-[color:var(--portal-muted)]">{{ subfolderLabel(submitFile?.folder) }}</p>
+							</div>
+						</div>
+
+						<!-- Generated name preview -->
+						<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+							<p class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">Will be saved as</p>
+							<p class="font-mono text-sm font-bold text-amber-900">{{ previewSubmitName() }}</p>
+							<p class="mt-1 text-[11px] text-amber-700">
+								<strong>NN</strong> = auto serial (01, 02…) · <strong>Date</strong> = today · Destination: <strong>06-CLIENT SUBMITTAL</strong>
+							</p>
+						</div>
+
+						<p v-if="submitError" class="text-sm text-red-600">{{ submitError }}</p>
+						<p v-if="submitOk"    class="text-sm font-medium text-emerald-700">{{ submitOk }}</p>
+					</div>
+
+					<!-- Footer -->
+					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
+						<button type="button" class="portal-btn" :disabled="submitBusy" @click="closeSubmitModal">Cancel</button>
+						<button
+							type="button"
+							class="flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+							style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);"
+							:disabled="submitBusy || !!submitOk"
+							@click="confirmSubmitToClient"
+						>
+							<span v-if="submitBusy" class="flex items-center gap-2">
+								<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+								Submitting…
+							</span>
+							<span v-else class="flex items-center gap-2">
+								<FeatherIcon name="send" class="h-4 w-4" />
+								Confirm &amp; Submit
+							</span>
 						</button>
 					</div>
 				</div>

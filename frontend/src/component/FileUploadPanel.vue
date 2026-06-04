@@ -60,7 +60,7 @@ async function loadFileTypes() {
 		fileTypes.value = [];
 	}
 }
-onMounted(loadFileTypes);
+onMounted(() => { loadFileTypes(); loadFolderRouteRules(); });
 
 function detectFileType(originalName) {
 	const lower = String(originalName || "").toLowerCase();
@@ -97,17 +97,40 @@ const _PDF_KW = [
 	{kw:["feasibility","area","bua","schedule","report"],r:["Feasibility / Area Calculation Files","PDF Feasibility Report"]},
 	{kw:["submission","final","issued"],r:["Submission Files","PDF Submission"]},
 ];
-function classifyFile(name) {
+const _DOC_TYPE_MAP = {
+	"Presentation":       ["Presentation Files",                "PDF Presentation"],
+	"Drawing Sheet":      ["Drawing / Layout Files",            "PDF Drawing"],
+	"Feasibility Report": ["Feasibility / Area Calculation Files","PDF Feasibility Report"],
+	"Submission":         ["Submission Files",                  "PDF Submission"],
+};
+function _classifyPdf(name, docType) {
+	if (docType && _DOC_TYPE_MAP[docType]) return _DOC_TYPE_MAP[docType];
+	const lower = (name || "").toLowerCase();
+	for (const {kw, r} of _PDF_KW) { if (kw.some((k) => lower.includes(k))) return r; }
+	return ["Presentation Files", "PDF Presentation"];
+}
+function classifyFile(name, docType) {
 	const dot = (name||"").lastIndexOf(".");
 	const ext = dot >= 0 ? name.substring(dot).toLowerCase() : "";
-	if (ext === ".pdf") {
-		const lower = (name||"").toLowerCase();
-		for (const {kw,r} of _PDF_KW) { if (kw.some(k=>lower.includes(k))) return [...r, ext]; }
-		return ["Presentation Files","PDF Presentation",ext];
-	}
+	if (ext === ".pdf") return [..._classifyPdf(name, docType), ext];
 	const hit = _EXT_MAP[ext];
 	return hit ? [...hit, ext] : ["Uncategorized", ext ? ext.substring(1).toUpperCase() : "", ext];
 }
+function siblingFoldersFor(folderDocName, excludeNames = []) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	const rootSeg = label.split("/")[0];
+	if (!rootSeg) return props.folders;
+	return props.folders.filter((f) => {
+		const parts = (f.label || "").split("/");
+		return (
+			parts.length === 2 &&
+			parts[0] === rootSeg &&
+			f.name !== folderDocName &&
+			!excludeNames.includes(f.name)
+		);
+	});
+}
+
 function suggestFolderForCategory(classification) {
 	const lower = (classification||"").toLowerCase();
 	const HINTS = [
@@ -130,6 +153,57 @@ function suggestFolderForCategory(classification) {
 		}
 	}
 	return categoryFolders[0]?.name || props.folders[0]?.name || targetFolder.value || "";
+}
+const FILE_CLASSIFICATION_OPTIONS = [
+	"Presentation Files",
+	"Drawing / Layout Files",
+	"3D Model Files",
+	"Feasibility / Area Calculation Files",
+	"Editable Design Source Files",
+	"Rendering / Image Files",
+	"Submission Files",
+	"Uncategorized",
+];
+
+// ─── Dynamic folder routing rules ────────────────────────────────────────────
+const folderRouteRules = ref([]);
+async function loadFolderRouteRules() {
+	try {
+		const res = await call({ method: "portal_app.api.files.list_folder_route_rules" });
+		folderRouteRules.value = res?.rules || [];
+	} catch {
+		folderRouteRules.value = [];
+	}
+}
+
+function _labelMatches(label, pattern, mode) {
+	const l = (label || "").toLowerCase();
+	const p = (pattern || "").toLowerCase();
+	if (!p) return false;
+	if (mode === "exact") return l === p;
+	if (mode === "starts_with") return l.startsWith(p);
+	return l.includes(p);
+}
+
+function isInConceptStudies(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	return folderRouteRules.value.some((r) =>
+		_labelMatches(label, r.source_folder_pattern, r.source_match_mode),
+	);
+}
+
+function getConceptCrossRoutes(classification) {
+	const matchingRules = folderRouteRules.value.filter(
+		(r) => r.file_classification === classification,
+	);
+	const targets = [];
+	for (const rule of matchingRules) {
+		const match = props.folders.find((f) =>
+			_labelMatches(f.label || "", rule.target_folder_pattern, rule.target_match_mode),
+		);
+		if (match && !targets.includes(match.name)) targets.push(match.name);
+	}
+	return targets;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -249,6 +323,40 @@ function onPendingDateChange(row) {
 }
 
 function onPendingCategoryChange(row) {
+	if (!row.nameEdited) regenerateAutoName(row);
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
+}
+
+function onPendingClassificationChange(row) {
+	row.fileSubCategory = "";
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
+	const suggested = suggestFolderForCategory(row.fileClassification);
+	if (suggested && suggested !== row.category) row.category = suggested;
+	if (!row.nameEdited) regenerateAutoName(row);
+}
+
+function onPendingDocTypeChange(row) {
+	const [c, s] = classifyFile(row.originalFile.name, row.documentType);
+	row.fileClassification = c;
+	row.fileSubCategory = s;
+	const routeMap = {
+		"Presentation":       "Presentation Files",
+		"Drawing Sheet":      "Drawing / Layout Files",
+		"Feasibility Report": "Feasibility / Area Calculation Files",
+		"Submission":         "Submission Files",
+	};
+	const classHint = routeMap[row.documentType];
+	if (classHint) {
+		const suggested = suggestFolderForCategory(classHint);
+		if (suggested) row.category = suggested;
+	}
+	row.crossRouteTargets = isInConceptStudies(row.category)
+		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
+		: [];
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
@@ -436,6 +544,9 @@ function handleFiles(fileList) {
 		const { base, ext } = splitFileName(f.name);
 		const category = targetFolder.value;
 		const [fileClassification, fileSubCategory] = classifyFile(f.name);
+		const crossRouteTargets = isInConceptStudies(category)
+			? getConceptCrossRoutes(fileClassification, fileSubCategory)
+			: [];
 		return {
 			originalFile: f,
 			base,
@@ -447,6 +558,8 @@ function handleFiles(fileList) {
 			fileType: detectFileType(f.name),
 			fileClassification,
 			fileSubCategory,
+			documentType: "",
+			crossRouteTargets,
 		};
 	});
 	confirmUploadOpen.value = true;
@@ -531,6 +644,43 @@ async function confirmUploadAndRun() {
 				count += 1;
 			}
 		}
+		// Cross-upload to 02-CONCEPT category folders when source was inside 01-CONCEPT STUDIES
+		const crossRouteMap = new Map();
+		for (const r of pendingUploads.value) {
+			if (r.crossRouteTargets?.length) {
+				for (const ct of r.crossRouteTargets) {
+					if (!crossRouteMap.has(ct)) crossRouteMap.set(ct, []);
+					crossRouteMap.get(ct).push(r);
+				}
+			}
+		}
+		for (const [crossTarget, rows] of crossRouteMap) {
+			try {
+				const fileBase = rows.length === 1 ? (rows[0].base || "") : "";
+				const crossWrapper = await _prepareWrapper(crossTarget, today, fileBase);
+				for (const r of rows) {
+					const renamed = new File([r.originalFile], r.name.trim(), {
+						type: r.originalFile.type,
+						lastModified: r.originalFile.lastModified,
+					});
+					await uploadFile("portal_app.api.files.upload_project_file", renamed, {
+						project: props.project,
+						is_private: isPrivateUpload.value ? "1" : "0",
+						destination: destination.value,
+						external_provider: externalProvider.value,
+						target_folder: crossWrapper.fileDoc,
+						relative_path: "",
+						file_type: r.fileType || "",
+						file_classification: r.fileClassification || "",
+						file_sub_category: r.fileSubCategory || "",
+						document_type: r.documentType || "",
+					});
+				}
+			} catch {
+				// Cross-route failure is non-fatal
+			}
+		}
+
 		if (count) {
 			const first = pendingUploads.value[0];
 			const firstName = first?.name?.trim() || "";
@@ -564,6 +714,7 @@ function doFolderUpload(entries) {
 	if (roots.size !== 1) { uploadError.value = "Select exactly one folder."; return; }
 	const sourceName = [...roots][0];
 
+	const isConceptSrc = isInConceptStudies(targetFolder.value);
 	const files = items.map((it) => {
 		const p = String(it.relativePath || it.file.webkitRelativePath || "");
 		const trimmed = p.startsWith(sourceName + "/") ? p.slice(sourceName.length + 1) : p;
@@ -574,6 +725,7 @@ function doFolderUpload(entries) {
 			relativeDir: slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "",
 			classification,
 			subCategory,
+			crossRouteTargets: isConceptSrc ? getConceptCrossRoutes(classification, subCategory) : [],
 		};
 	});
 
@@ -619,6 +771,41 @@ async function confirmFolderUploadAndRun() {
 			});
 			done++;
 		}
+		// Cross-upload per-file to 02-CONCEPT category folders
+		const folderCrossMap = new Map();
+		for (const e of f.files) {
+			for (const ct of (e.crossRouteTargets || [])) {
+				if (!folderCrossMap.has(ct)) folderCrossMap.set(ct, []);
+				folderCrossMap.get(ct).push(e);
+			}
+		}
+		for (const [crossTarget, entries] of folderCrossMap) {
+			try {
+				uploadInfo.value = `Auto-routing to ${folderLabelByName.value[crossTarget] || crossTarget}…`;
+				const crossPrep = await call({
+					method: "portal_app.api.files.prepare_folder_upload",
+					type: "POST",
+					args: { project: props.project, target_folder: crossTarget, folder_name: f.wrapperName.trim() },
+				});
+				if (crossPrep?.folder_name) {
+					for (const e of entries) {
+						await uploadFile("portal_app.api.files.upload_project_file", e.file, {
+							project: props.project,
+							is_private: isPrivateUpload.value ? "1" : "0",
+							destination: destination.value,
+							external_provider: externalProvider.value,
+							target_folder: crossPrep.folder_name,
+							relative_path: "",
+							file_classification: e.classification || "",
+							file_sub_category: e.subCategory || "",
+						});
+					}
+				}
+			} catch {
+				// Cross-route failure is non-fatal
+			}
+		}
+
 		uploadInfo.value = `"${f.wrapperName}" uploaded — ${f.files.length} file${f.files.length === 1 ? "" : "s"}.`;
 		emit("uploaded", { count: f.files.length, folderUpload: true });
 		setTimeout(() => (uploadInfo.value = ""), 6000);
@@ -990,16 +1177,57 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 									{{ pendingFolder.files.length }} file{{ pendingFolder.files.length === 1 ? "" : "s" }} from "{{ pendingFolder.sourceName }}"
 								</div>
 								<ul class="max-h-48 overflow-auto divide-y divide-[color:var(--portal-border)] text-xs">
-									<li v-for="(e, ei) in pendingFolder.files" :key="`fe-${ei}`" class="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-4 py-2">
-										<FeatherIcon name="file" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
-										<span class="min-w-0 flex-1 truncate font-mono text-[11px]">
-											<span class="text-[color:var(--portal-subtle)]">{{ e.relativeDir ? e.relativeDir + "/" : "" }}</span>{{ e.file.name }}
-										</span>
-										<span
-											v-if="e.classification"
-											class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800"
-										>{{ e.classification }}</span>
-										<span class="shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
+									<li v-for="(e, ei) in pendingFolder.files" :key="`fe-${ei}`" class="px-4 py-2">
+										<div class="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+											<FeatherIcon name="file" class="h-3 w-3 shrink-0 text-[color:var(--portal-muted)]" />
+											<span class="min-w-0 flex-1 truncate font-mono text-[11px]">
+												<span class="text-[color:var(--portal-subtle)]">{{ e.relativeDir ? e.relativeDir + "/" : "" }}</span>{{ e.file.name }}
+											</span>
+											<span
+												v-if="e.classification"
+												class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800"
+											>{{ e.classification }}</span>
+											<span class="shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
+										</div>
+										<!-- Editable cross-routes per file -->
+										<div class="mt-1 flex flex-wrap items-center gap-1">
+											<span class="text-[10px] font-semibold uppercase tracking-wide text-emerald-600">→</span>
+											<template v-if="e.crossRouteTargets?.length">
+												<span
+													v-for="(ct, ci) in e.crossRouteTargets"
+													:key="ct"
+													class="flex items-center gap-0.5 rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800"
+												>
+													{{ (folderLabelByName[ct] || ct).split("/").pop() }}
+													<button
+														type="button"
+														class="ml-0.5 text-emerald-400 transition hover:text-red-500"
+														:disabled="uploadBusy"
+														@click="e.crossRouteTargets.splice(ci, 1)"
+													><FeatherIcon name="x" class="h-2.5 w-2.5" /></button>
+												</span>
+											</template>
+											<span v-else class="text-[10px] italic text-[color:var(--portal-subtle)]">no auto-route</span>
+											<select
+												class="rounded border border-dashed border-emerald-300 bg-transparent px-1.5 py-0.5 text-[10px] text-emerald-700 focus:outline-none"
+												:disabled="uploadBusy"
+												@change="(ev) => {
+													const v = ev.target.value;
+													if (v) {
+														if (!e.crossRouteTargets) e.crossRouteTargets = [];
+														if (!e.crossRouteTargets.includes(v)) e.crossRouteTargets.push(v);
+													}
+													ev.target.value = '';
+												}"
+											>
+												<option value="">＋ add</option>
+												<option
+													v-for="f in siblingFoldersFor(pendingFolder.targetFolder, e.crossRouteTargets || [])"
+													:key="`fct-${ei}-${f.name}`"
+													:value="f.name"
+												>{{ f.label.split("/").pop() }}</option>
+											</select>
+										</div>
 									</li>
 								</ul>
 							</div>
@@ -1035,12 +1263,77 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 										<option v-for="t in fileTypes" :key="`ft-${idx}-${t.name}`" :value="t.name">{{ t.label }}</option>
 									</select>
 								</label>
-								<div class="block sm:col-span-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
-									<p class="mb-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">File Classification (auto-detected)</p>
-									<span class="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-800">
-										{{ row.fileClassification || "Uncategorized" }}
-									</span>
-									<span v-if="row.fileSubCategory" class="ml-1 text-xs text-indigo-600">· {{ row.fileSubCategory }}</span>
+								<!-- File Classification (editable) -->
+								<label class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">File Classification</span>
+									<select v-model="row.fileClassification" class="w-full rounded-xl border border-indigo-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingClassificationChange(row)">
+										<option v-for="opt in FILE_CLASSIFICATION_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
+									</select>
+									<span v-if="row.fileSubCategory" class="mt-0.5 block text-[11px] text-indigo-600">Sub: {{ row.fileSubCategory }}</span>
+								</label>
+								<!-- PDF-specific: Plan or Presentation -->
+								<label v-if="row.ext === '.pdf'" class="block sm:col-span-3">
+									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">PDF Type — Plan or Presentation?</span>
+									<select v-model="row.documentType" class="w-full rounded-xl border border-indigo-300 px-3 py-1.5 text-sm" :disabled="uploadBusy" @change="onPendingDocTypeChange(row)">
+										<option value="">— Auto-detect from filename —</option>
+										<option value="Presentation">Presentation</option>
+										<option value="Drawing Sheet">Plan / Drawing Sheet</option>
+										<option value="Feasibility Report">Feasibility Report</option>
+										<option value="Submission">Submission</option>
+										<option value="General">General PDF</option>
+									</select>
+								</label>
+								<!-- Cross-route destinations — editable chips + manual add -->
+								<div class="block sm:col-span-3 rounded-xl border border-emerald-200 bg-emerald-50/70 px-3 py-2.5">
+									<div class="mb-2 flex items-center justify-between gap-2">
+										<p class="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+											<FeatherIcon name="git-merge" class="h-3 w-3" />
+											Also auto-upload to
+										</p>
+										<select
+											class="max-w-[180px] rounded-lg border border-emerald-300 bg-white px-2 py-1 text-[11px] font-medium text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+											:disabled="uploadBusy"
+											@change="(ev) => {
+												const v = ev.target.value;
+												if (v && !(row.crossRouteTargets || []).includes(v)) {
+													if (!row.crossRouteTargets) row.crossRouteTargets = [];
+													row.crossRouteTargets.push(v);
+												}
+												ev.target.value = '';
+											}"
+										>
+											<option value="">＋ Add destination…</option>
+											<option
+												v-for="f in siblingFoldersFor(row.category, row.crossRouteTargets || [])"
+												:key="`add-ct-${idx}-${f.name}`"
+												:value="f.name"
+											>{{ f.label.split('/').pop() }}</option>
+										</select>
+									</div>
+									<p v-if="!row.crossRouteTargets?.length" class="text-[11px] italic text-emerald-600">
+										No auto-routing — select a destination above to add one.
+									</p>
+									<div v-else class="flex flex-wrap gap-1.5">
+										<span
+											v-for="(ct, ci) in row.crossRouteTargets"
+											:key="ct"
+											class="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-800"
+										>
+											<FeatherIcon name="folder" class="h-2.5 w-2.5 shrink-0 text-emerald-600" />
+											<span class="max-w-[160px] truncate" :title="folderLabelByName[ct] || ct">
+												{{ (folderLabelByName[ct] || ct).split("/").pop() }}
+											</span>
+											<button
+												type="button"
+												class="ml-0.5 rounded-full p-0.5 text-emerald-500 transition hover:bg-red-100 hover:text-red-600"
+												:disabled="uploadBusy"
+												title="Remove this auto-route"
+												@click="row.crossRouteTargets.splice(ci, 1)"
+											>
+												<FeatherIcon name="x" class="h-3 w-3" />
+											</button>
+										</span>
+									</div>
 								</div>
 							</div>
 						</div>

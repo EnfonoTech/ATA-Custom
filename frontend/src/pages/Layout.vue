@@ -19,6 +19,8 @@ const portalSettings = ref({
 	company_logo: "",
 	company_name: "",
 	company_tagline: "",
+	logo_width: 0,
+	logo_height: 0,
 });
 
 const portalCapabilities = ref({
@@ -78,6 +80,8 @@ onMounted(async () => {
 				company_logo: ws.company_logo || "",
 				company_name: ws.company_name || "",
 				company_tagline: ws.company_tagline || "",
+				logo_width: Number(ws.logo_width) || 0,
+				logo_height: Number(ws.logo_height) || 0,
 			};
 		}
 		setCurrencyLocale(navigator.language || "en-US");
