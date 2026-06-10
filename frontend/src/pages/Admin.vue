@@ -143,6 +143,45 @@ async function onTplZipChange(e) {
 	}
 }
 
+// Folder-picker (webkitdirectory) upload
+const tplFolderInput  = ref(null);
+const tplFolderBusy   = ref(false);
+const tplFolderName   = ref("");
+
+async function onTplFolderChange(e) {
+	const files = Array.from(e.target.files || []);
+	if (e.target) e.target.value = "";
+	if (!files.length) return;
+	tplFolderBusy.value = true;
+	tplZipMsg.value     = "";
+	tplZipErr.value     = "";
+	tplZipRows.value    = [];
+	tplZipParsed.value  = false;
+	// Derive the root folder name from the first file path
+	const firstPath = files[0].webkitRelativePath || files[0].name;
+	tplFolderName.value = firstPath.split("/")[0] || "selected folder";
+	try {
+		const paths = files.map(f => f.webkitRelativePath || f.name);
+		const res = await call({
+			method: "portal_app.api.projects.import_portal_folder_template_from_paths",
+			type: "POST",
+			args: {
+				paths_json: JSON.stringify(paths),
+				project: tplApplyProject.value || undefined,
+			},
+		});
+		tplZipRows.value   = res?.rows || [];
+		tplZipParsed.value = true;
+		tplZipMsg.value = `Template updated — ${res?.count ?? tplZipRows.value.length} folder path(s) imported from "${tplFolderName.value}".`;
+		if (tplApplyProject.value) tplZipMsg.value += ` Folders applied to project ${tplApplyProject.value}.`;
+		setTimeout(() => (tplZipMsg.value = ""), 7000);
+	} catch (err) {
+		tplZipErr.value = apiErr(err) || String(err?.message || err);
+	} finally {
+		tplFolderBusy.value = false;
+	}
+}
+
 onMounted(async () => {
 	try {
 		caps.value = await call({
@@ -683,13 +722,14 @@ const totalCreated = computed(() =>
 							<strong class="text-[color:var(--portal-text)]">This replaces the current template.</strong>
 						</p>
 						<div class="flex flex-wrap items-center gap-3">
+							<!-- ZIP upload -->
 							<button
 								class="portal-btn portal-btn-ghost text-xs"
-								:disabled="tplZipBusy"
+								:disabled="tplZipBusy || tplFolderBusy"
 								@click="tplZipInput?.click()"
 							>
-								<FeatherIcon name="upload" class="h-3.5 w-3.5" />
-								{{ tplZipBusy ? "Importing…" : "Import folder structure ZIP…" }}
+								<FeatherIcon name="file-archive" class="h-3.5 w-3.5" />
+								{{ tplZipBusy ? "Importing…" : "Upload ZIP…" }}
 							</button>
 							<input
 								ref="tplZipInput"
@@ -698,9 +738,27 @@ const totalCreated = computed(() =>
 								class="hidden"
 								@change="onTplZipChange"
 							/>
-							<span class="text-xs text-[color:var(--portal-muted)]">
-								Optionally apply to a specific project now:
-							</span>
+
+							<!-- Folder picker -->
+							<button
+								class="portal-btn portal-btn-ghost text-xs"
+								:disabled="tplZipBusy || tplFolderBusy"
+								style="border-color:var(--portal-accent);color:var(--portal-accent-strong)"
+								@click="tplFolderInput?.click()"
+							>
+								<FeatherIcon name="folder-plus" class="h-3.5 w-3.5" />
+								{{ tplFolderBusy ? "Reading folder…" : "Upload Folder…" }}
+							</button>
+							<input
+								ref="tplFolderInput"
+								type="file"
+								class="hidden"
+								webkitdirectory
+								multiple
+								@change="onTplFolderChange"
+							/>
+
+							<span class="text-xs text-[color:var(--portal-muted)]">Apply to project:</span>
 							<input
 								v-model="tplApplyProject"
 								type="text"
@@ -708,6 +766,10 @@ const totalCreated = computed(() =>
 								placeholder="Project ID (optional)"
 							/>
 						</div>
+						<p class="text-[11px] text-[color:var(--portal-subtle)]">
+							<strong>ZIP</strong>: upload a .zip file whose internal hierarchy is your folder standard.
+							<strong>Folder</strong>: pick the actual folder from your computer directly — no zipping needed.
+						</p>
 						<p v-if="tplZipErr" class="text-sm text-red-600">{{ tplZipErr }}</p>
 						<p v-if="tplZipMsg" class="text-sm text-green-700">{{ tplZipMsg }}</p>
 						<div v-if="tplZipParsed && tplZipRows.length" class="max-h-48 overflow-y-auto rounded-lg border border-[color:var(--portal-border)] bg-white text-xs">

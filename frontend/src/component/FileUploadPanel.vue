@@ -118,8 +118,29 @@ function classifyFile(name, docType) {
 }
 function siblingFoldersFor(folderDocName, excludeNames = []) {
 	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return props.folders;
+
+	// 1.LAYOUT folder (depth 4): offer its depth-5 children (DWG / PLAN)
+	if (isConceptLayoutFolder(folderDocName)) {
+		return props.folders.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 5;
+		});
+	}
+
+	// Discipline folder (depth 3 under 01-CONCEPT STUDIES): offer its depth-4 children
+	if (isConceptDisciplineFolder(folderDocName)) {
+		return props.folders.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 4;
+		});
+	}
+
 	const rootSeg = label.split("/")[0];
-	if (!rootSeg) return props.folders;
 	return props.folders.filter((f) => {
 		const parts = (f.label || "").split("/");
 		return (
@@ -204,6 +225,71 @@ function getConceptCrossRoutes(classification) {
 		if (match && !targets.includes(match.name)) targets.push(match.name);
 	}
 	return targets;
+}
+function isConceptDisciplineFolder(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	const parts = label.split("/");
+	return parts.length === 3 && parts[1].toUpperCase().includes("01-CONCEPT STUDIES");
+}
+
+function getDisciplineSubfolderRoutes(folderDocName, excludeNames = []) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return [];
+	return props.folders
+		.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			const fParts = fLabel.split("/");
+			if (fParts.length !== 4) return false;
+			const leaf = fParts[3] || "";
+			if (/^1[\.\s]/i.test(leaf)) return false;
+			return true;
+		})
+		.map((f) => f.name);
+}
+
+function isConceptLayoutFolder(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	const parts = label.split("/");
+	if (parts.length !== 4) return false;
+	if (!parts[1].toUpperCase().includes("01-CONCEPT STUDIES")) return false;
+	return /^1[\.\s]/i.test(parts[3]);
+}
+
+function getLayoutSubfolderRoutes(folderDocName) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return [];
+	return props.folders
+		.filter((f) => {
+			if (f.name === folderDocName) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 5;
+		})
+		.map((f) => f.name);
+}
+
+function crossRoutesFor(folderName, classification, subCategory) {
+	if (isConceptLayoutFolder(folderName))
+		return getLayoutSubfolderRoutes(folderName);
+	if (isConceptDisciplineFolder(folderName)) {
+		return [...new Set([
+			...getDisciplineSubfolderRoutes(folderName),
+			...getConceptCrossRoutes(classification, subCategory),
+		])];
+	}
+	if (isInConceptStudies(folderName))
+		return getConceptCrossRoutes(classification, subCategory);
+	return [];
+}
+
+function getFolderUploadCrossRoutes(targetFolderName, relativeDir, classification, subCategory) {
+	if (!isConceptDisciplineFolder(targetFolderName))
+		return crossRoutesFor(targetFolderName, classification, subCategory);
+	const firstSeg = String(relativeDir || "").split("/")[0].trim();
+	if (firstSeg && /^1[\.\s]/i.test(firstSeg)) return [];
+	return getConceptCrossRoutes(classification, subCategory);
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -324,16 +410,12 @@ function onPendingDateChange(row) {
 
 function onPendingCategoryChange(row) {
 	if (!row.nameEdited) regenerateAutoName(row);
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 }
 
 function onPendingClassificationChange(row) {
 	row.fileSubCategory = "";
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	const suggested = suggestFolderForCategory(row.fileClassification);
 	if (suggested && suggested !== row.category) row.category = suggested;
 	if (!row.nameEdited) regenerateAutoName(row);
@@ -354,9 +436,7 @@ function onPendingDocTypeChange(row) {
 		const suggested = suggestFolderForCategory(classHint);
 		if (suggested) row.category = suggested;
 	}
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
@@ -544,9 +624,7 @@ function handleFiles(fileList) {
 		const { base, ext } = splitFileName(f.name);
 		const category = targetFolder.value;
 		const [fileClassification, fileSubCategory] = classifyFile(f.name);
-		const crossRouteTargets = isInConceptStudies(category)
-			? getConceptCrossRoutes(fileClassification, fileSubCategory)
-			: [];
+		const crossRouteTargets = crossRoutesFor(category, fileClassification, fileSubCategory);
 		return {
 			originalFile: f,
 			base,
@@ -714,18 +792,18 @@ function doFolderUpload(entries) {
 	if (roots.size !== 1) { uploadError.value = "Select exactly one folder."; return; }
 	const sourceName = [...roots][0];
 
-	const isConceptSrc = isInConceptStudies(targetFolder.value);
 	const files = items.map((it) => {
 		const p = String(it.relativePath || it.file.webkitRelativePath || "");
 		const trimmed = p.startsWith(sourceName + "/") ? p.slice(sourceName.length + 1) : p;
 		const slashIdx = trimmed.lastIndexOf("/");
+		const relativeDir = slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "";
 		const [classification, subCategory] = classifyFile(it.file.name);
 		return {
 			file: it.file,
-			relativeDir: slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "",
+			relativeDir,
 			classification,
 			subCategory,
-			crossRouteTargets: isConceptSrc ? getConceptCrossRoutes(classification, subCategory) : [],
+			crossRouteTargets: getFolderUploadCrossRoutes(targetFolder.value, relativeDir, classification, subCategory),
 		};
 	});
 

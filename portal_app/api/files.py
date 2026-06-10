@@ -18,21 +18,23 @@ from portal_app.api import helper
 
 @contextmanager
 def _bypass_max_attachments():
-	"""Disable Frappe's per-doctype max_attachments cap for the duration of an upload.
+	"""Disable Frappe's per-doctype max_attachments cap and file-size cap for portal uploads.
 
-	The portal stores many files per Project under the standard folder layout, far above
-	the default 4-attachment cap. The proper long-term fix is the Property Setter created
-	in install.py (max_attachments=0 on Project), but until `bench migrate` runs we also
-	monkey-patch File.validate_attachment_limit at runtime so users aren't blocked.
+	The portal handles large CAD, BIM, and render files that routinely exceed the default
+	10 MB system setting. We bypass both limits here; the admin can tighten per-project
+	rules via Portal Project Settings if needed.
 	"""
 	from frappe.core.doctype.file.file import File as _File
 
-	original = _File.validate_attachment_limit
+	orig_attachment = _File.validate_attachment_limit
+	orig_size = _File.check_max_file_size
 	_File.validate_attachment_limit = lambda self: None
+	_File.check_max_file_size = lambda self: len(self._content or b"")
 	try:
 		yield
 	finally:
-		_File.validate_attachment_limit = original
+		_File.validate_attachment_limit = orig_attachment
+		_File.check_max_file_size = orig_size
 
 PROJ_FOLD_DEFAULT = [
 	"01-DOCUMENTS/01-CLIENT DATA/01-BUSINESS CARD",
@@ -2172,6 +2174,39 @@ def prepare_folder_upload():
 		"series": series,
 		"version": v,
 	}
+
+
+@frappe.whitelist()
+def ensure_project_subfolder_path(project, parent_folder, subfolder_path):
+	"""Ensure a (possibly nested) subfolder path exists under parent_folder and return its docname.
+
+	Used when uploading to a discipline folder whose depth-4/5 subfolders may not exist yet.
+	Creates the full path (e.g. '1.LAYOUT/1. DWG') under parent_folder, reusing existing folders.
+	"""
+	helper.assert_customer_portal_can_upload(project)
+	folder_ctx = ensure_project_folders(project)
+	valid_names = {x["name"] for x in folder_ctx["subfolders"]}
+	valid_names.add(folder_ctx.get("project_root", ""))
+	# Walk parents of parent_folder to validate it belongs to this project
+	cur = parent_folder
+	found = cur in valid_names
+	if not found:
+		for _i in range(20):
+			p = frappe.db.get_value("File", cur, "folder") if cur else None
+			if not p:
+				break
+			if p in valid_names or p == folder_ctx.get("project_root"):
+				found = True
+				break
+			cur = p
+	if not found:
+		frappe.throw(_("Invalid parent folder"))
+	sub_path = cstr(subfolder_path or "").strip().strip("/")
+	if not sub_path:
+		return parent_folder
+	result = _ensure_folder_path(parent_folder, sub_path)
+	frappe.db.commit()
+	return result
 
 
 @frappe.whitelist()

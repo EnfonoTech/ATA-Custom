@@ -214,6 +214,56 @@ function getConceptCrossRoutes(classification, subCategory) {
 function isInConceptStudies(folderName) {
 	return isSourceMatchedByAnyRule(folderName);
 }
+
+// ── New discipline-folder detection (depth-3 child of 01-CONCEPT STUDIES) ────
+// e.g. "02-CONCEPT/01-CONCEPT STUDIES/01-ARCHITECTURE"
+function isConceptDisciplineFolder(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	const parts = label.split("/");
+	return parts.length === 3 && parts[1].toUpperCase().includes("01-CONCEPT STUDIES");
+}
+
+// Returns depth-4 children of the discipline folder, excluding 1.LAYOUT
+// (user manages LAYOUT/DWG/PDF manually; MODEL/PERSPECTIVES/FEASIBILITY/PRESENTATION auto-route)
+function getDisciplineSubfolderRoutes(folderDocName, excludeNames = []) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return [];
+	return folders.value
+		.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			const fParts = fLabel.split("/");
+			if (fParts.length !== 4) return false;
+			const leaf = fParts[3] || "";
+			if (/^1[\.\s]/i.test(leaf)) return false;
+			return true;
+		})
+		.map((f) => f.name);
+}
+
+// Detects depth-4 "1.LAYOUT" folder inside a discipline folder
+function isConceptLayoutFolder(folderName) {
+	const label = folderLabelByName.value[folderName] || "";
+	const parts = label.split("/");
+	if (parts.length !== 4) return false;
+	if (!parts[1].toUpperCase().includes("01-CONCEPT STUDIES")) return false;
+	return /^1[\.\s]/i.test(parts[3]);
+}
+
+// Returns depth-5 children of 1.LAYOUT (i.e. DWG and PLAN/PDF folders)
+function getLayoutSubfolderRoutes(folderDocName) {
+	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return [];
+	return folders.value
+		.filter((f) => {
+			if (f.name === folderDocName) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 5;
+		})
+		.map((f) => f.name);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function todayIso() {
@@ -327,20 +377,45 @@ function onPendingDateChange(row) {
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
+function crossRoutesFor(folderName, classification, subCategory) {
+	if (isConceptLayoutFolder(folderName))
+		return getLayoutSubfolderRoutes(folderName);
+	if (isConceptDisciplineFolder(folderName)) {
+		// Individual file drop on a discipline folder: route to all depth-4 subfolders
+		// (excl. LAYOUT) + the matching concept studies sibling for this file type
+		return [...new Set([
+			...getDisciplineSubfolderRoutes(folderName),
+			...getConceptCrossRoutes(classification, subCategory),
+		])];
+	}
+	if (isInConceptStudies(folderName))
+		return getConceptCrossRoutes(classification, subCategory);
+	return [];
+}
+
+// Used for folder uploads: routing is driven by relativeDir (which subfolder the
+// file already belongs to) rather than file classification alone.
+function getFolderUploadCrossRoutes(targetFolderName, relativeDir, classification, subCategory) {
+	if (!isConceptDisciplineFolder(targetFolderName))
+		return crossRoutesFor(targetFolderName, classification, subCategory);
+	// Files already land in the right subfolder via relativeDir/wrapper — only add concept siblings
+	const firstSeg = String(relativeDir || "").split("/")[0].trim();
+	// 1.LAYOUT files: no concept sibling routing
+	if (firstSeg && /^1[\.\s]/i.test(firstSeg)) return [];
+	// 2-5 subfolder files: concept siblings based on classification
+	return getConceptCrossRoutes(classification, subCategory);
+}
+
 function onPendingCategoryChange(row) {
 	if (!row.nameEdited) regenerateAutoName(row);
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 }
 
 function onPendingClassificationChange(row) {
 	if (!row.nameEdited) regenerateAutoName(row);
 	// Re-derive sub-category from classification label when changed manually
 	row.fileSubCategory = "";
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	// Suggest matching folder if not already matching
 	const suggested = suggestFolderForCategory(row.fileClassification);
 	if (suggested && suggested !== row.category) row.category = suggested;
@@ -363,9 +438,7 @@ function onPendingDocTypeChange(row) {
 		const suggested = suggestFolderForCategory(classHint);
 		if (suggested) row.category = suggested;
 	}
-	row.crossRouteTargets = isInConceptStudies(row.category)
-		? getConceptCrossRoutes(row.fileClassification, row.fileSubCategory)
-		: [];
+	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
@@ -1007,9 +1080,7 @@ function handleFiles(fileList) {
 		const { base, ext } = splitFileName(f.name);
 		const category = targetFolder.value;
 		const [fileClassification, fileSubCategory] = classifyFile(f.name, "");
-		const crossRouteTargets = isInConceptStudies(category)
-			? getConceptCrossRoutes(fileClassification, fileSubCategory)
-			: [];
+		const crossRouteTargets = crossRoutesFor(category, fileClassification, fileSubCategory);
 		return {
 			originalFile: f,
 			base,
@@ -1066,8 +1137,29 @@ async function _prepareWrapper(category, isoDate, fileBase = "") {
 // Excludes the primary category itself and already-added cross-route targets.
 function siblingFoldersFor(folderDocName, excludeNames = []) {
 	const label = folderLabelByName.value[folderDocName] || "";
+	if (!label) return folders.value;
+
+	// 1.LAYOUT folder (depth 4): offer its depth-5 children (DWG / PLAN)
+	if (isConceptLayoutFolder(folderDocName)) {
+		return folders.value.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 5;
+		});
+	}
+
+	// Discipline folder (depth 3 under 01-CONCEPT STUDIES): offer its depth-4 children
+	if (isConceptDisciplineFolder(folderDocName)) {
+		return folders.value.filter((f) => {
+			if (f.name === folderDocName || excludeNames.includes(f.name)) return false;
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(label + "/")) return false;
+			return fLabel.split("/").length === 4;
+		});
+	}
+
 	const rootSeg = label.split("/")[0];
-	if (!rootSeg) return folders.value;
 	return folders.value.filter((f) => {
 		const parts = (f.label || "").split("/");
 		return (
@@ -1246,18 +1338,18 @@ function doFolderUpload(entries) {
 	if (roots.size !== 1) { uploadError.value = "Select exactly one folder."; return; }
 	const sourceName = [...roots][0];
 
-	const isConceptSrc = isInConceptStudies(targetFolder.value);
 	const files = items.map((it) => {
 		const p = String(it.relativePath || it.file.webkitRelativePath || "");
 		const trimmed = p.startsWith(sourceName + "/") ? p.slice(sourceName.length + 1) : p;
 		const slashIdx = trimmed.lastIndexOf("/");
+		const relativeDir = slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "";
 		const [classification, subCategory] = classifyFile(it.file.name, "");
 		return {
 			file: it.file,
-			relativeDir: slashIdx >= 0 ? trimmed.slice(0, slashIdx) : "",
+			relativeDir,
 			classification,
 			subCategory,
-			crossRouteTargets: isConceptSrc ? getConceptCrossRoutes(classification, subCategory) : [],
+			crossRouteTargets: getFolderUploadCrossRoutes(targetFolder.value, relativeDir, classification, subCategory),
 		};
 	});
 
@@ -1272,6 +1364,27 @@ function doFolderUpload(entries) {
 	confirmUploadOpen.value = true;
 }
 
+// For a discipline folder upload: resolve which actual portal subfolder each file belongs to.
+// Returns { subfolder: folderObj, remainingPath: string } or null if no match.
+function resolvePortalSubfolder(disciplineFolderName, relativeDir) {
+	const disciplineLabel = folderLabelByName.value[disciplineFolderName] || "";
+	if (!disciplineLabel || !relativeDir) return null;
+	const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+	const parts = relativeDir.split("/").filter(Boolean);
+	for (let depth = parts.length; depth >= 1; depth--) {
+		const subParts = parts.slice(0, depth).map(norm);
+		const match = folders.value.find((f) => {
+			const fLabel = f.label || "";
+			if (!fLabel.startsWith(disciplineLabel + "/")) return false;
+			const relParts = fLabel.slice(disciplineLabel.length + 1).split("/").map(norm);
+			if (relParts.length !== subParts.length) return false;
+			return relParts.every((p, i) => p === subParts[i]);
+		});
+		if (match) return { subfolder: match, remainingPath: parts.slice(depth).join("/") };
+	}
+	return null;
+}
+
 async function confirmFolderUploadAndRun() {
 	const f = pendingFolder.value;
 	if (!f) return;
@@ -1283,28 +1396,110 @@ async function confirmFolderUploadAndRun() {
 	uploadInfo.value = "";
 	let done = 0;
 	try {
-		const prep = await call({
-			method: "portal_app.api.files.prepare_folder_upload",
-			type: "POST",
-			args: { project: project.value, target_folder: f.targetFolder, folder_name: f.wrapperName.trim() },
-		});
-		if (!prep?.folder_name) throw new Error("Folder creation failed.");
-		const wrapperDoc = prep.folder_name;
-		for (const e of f.files) {
-			uploadInfo.value = `Uploading "${f.wrapperName}" — ${done}/${f.files.length}…`;
-			await uploadFile("portal_app.api.files.upload_project_file", e.file, {
-				project: project.value,
-				is_private: isPrivateUpload.value ? "1" : "0",
-				destination: destination.value,
-				external_provider: externalProvider.value,
-				target_folder: wrapperDoc,
-				relative_path: e.relativeDir || "",
-				file_classification: e.classification || "",
-				file_sub_category: e.subCategory || "",
+		const isDiscipline = isConceptDisciplineFolder(f.targetFolder);
+
+		if (isDiscipline) {
+			// Route each file to its correct portal subfolder (depth-4 or depth-5) so clicking
+			// that subfolder in the browser shows the files. Files with no matching subfolder
+			// fall back to the discipline folder itself.
+			const norm = (s) => String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+
+			// Build a map: subfolder_path_within_discipline → { portalDocname, files[] }
+			// subfolder_path is the relativeDir segments that match portal folders (e.g. "1.LAYOUT/1. DWG")
+			const subfolderGroups = new Map(); // key: relativeDir subfolder path, value: { target: docname, files }
+
+			for (const e of f.files) {
+				const resolved = resolvePortalSubfolder(f.targetFolder, e.relativeDir);
+				let targetDoc = f.targetFolder;
+				let subPath = e.relativeDir || "";
+
+				if (resolved) {
+					// Check if the subfolder already has a valid portal folder
+					if (resolved.subfolder.name) {
+						targetDoc = resolved.subfolder.name;
+						subPath = resolved.remainingPath;
+					}
+				} else if (e.relativeDir) {
+					// Subfolder not in portal yet — auto-create it
+					const subfolderPath = e.relativeDir.split("/").filter(Boolean).slice(0, 2).join("/");
+					if (!subfolderGroups.has("__create__" + subfolderPath)) {
+						uploadInfo.value = `Creating subfolder "${subfolderPath}"…`;
+						try {
+							const createdDoc = await call({
+								method: "portal_app.api.files.ensure_project_subfolder_path",
+								args: { project: project.value, parent_folder: f.targetFolder, subfolder_path: subfolderPath },
+							});
+							if (createdDoc) {
+								subfolderGroups.set("__create__" + subfolderPath, { target: createdDoc, files: [] });
+								await loadFiles();
+							}
+						} catch { /* non-fatal, fall back to discipline folder */ }
+					}
+					const created = subfolderGroups.get("__create__" + subfolderPath);
+					if (created) { targetDoc = created.target; subPath = ""; }
+				}
+
+				const key = targetDoc;
+				if (!subfolderGroups.has(key)) subfolderGroups.set(key, { target: targetDoc, files: [] });
+				subfolderGroups.get(key).files.push({ ...e, uploadRelPath: subPath });
+			}
+
+			// Upload each group into a wrapper inside its portal subfolder
+			for (const [, group] of subfolderGroups) {
+				if (!group.files.length) continue;
+				uploadInfo.value = `Uploading to ${folderLabelByName.value[group.target] || "subfolder"}…`;
+				let wrapperDoc;
+				try {
+					const prep = await call({
+						method: "portal_app.api.files.prepare_folder_upload",
+						type: "POST",
+						args: { project: project.value, target_folder: group.target, folder_name: f.wrapperName.trim() },
+					});
+					if (!prep?.folder_name) continue;
+					wrapperDoc = prep.folder_name;
+				} catch { continue; }
+
+				for (const e of group.files) {
+					uploadInfo.value = `Uploading "${f.wrapperName}" — ${done}/${f.files.length}…`;
+					await uploadFile("portal_app.api.files.upload_project_file", e.file, {
+						project: project.value,
+						is_private: isPrivateUpload.value ? "1" : "0",
+						destination: destination.value,
+						external_provider: externalProvider.value,
+						target_folder: wrapperDoc,
+						relative_path: e.uploadRelPath || "",
+						file_classification: e.classification || "",
+						file_sub_category: e.subCategory || "",
+					});
+					done++;
+				}
+			}
+		} else {
+			// Standard (non-discipline) folder upload: single wrapper at target folder level
+			const prep = await call({
+				method: "portal_app.api.files.prepare_folder_upload",
+				type: "POST",
+				args: { project: project.value, target_folder: f.targetFolder, folder_name: f.wrapperName.trim() },
 			});
-			done++;
+			if (!prep?.folder_name) throw new Error("Folder creation failed.");
+			const wrapperDoc = prep.folder_name;
+			for (const e of f.files) {
+				uploadInfo.value = `Uploading "${f.wrapperName}" — ${done}/${f.files.length}…`;
+				await uploadFile("portal_app.api.files.upload_project_file", e.file, {
+					project: project.value,
+					is_private: isPrivateUpload.value ? "1" : "0",
+					destination: destination.value,
+					external_provider: externalProvider.value,
+					target_folder: wrapperDoc,
+					relative_path: e.relativeDir || "",
+					file_classification: e.classification || "",
+					file_sub_category: e.subCategory || "",
+				});
+				done++;
+			}
 		}
-		// Cross-upload per-file to concept category folders
+
+		// Cross-upload per-file to concept category sibling folders
 		const folderCrossMap = new Map();
 		for (const e of f.files) {
 			for (const ct of (e.crossRouteTargets || [])) {

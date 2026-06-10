@@ -95,27 +95,83 @@ function stripHtml(html) {
 	return div.textContent || div.innerText || "";
 }
 
-// Quick-create state. Visible only to project admins; backend enforces this too.
+// ── User map (email → full name) returned by list_tasks ───────────────────
+const userMap = ref({});
+
+// ── Quick-create state ────────────────────────────────────────────────────
 const newTaskOpen = ref(false);
 const newTaskSubject = ref("");
-const newTaskProject = ref("");
 const newTaskPriority = ref("Medium");
 const newTaskEnd = ref("");
 const newTaskBusy = ref(false);
 const manageableProjects = computed(() => portalCapabilities.value?.manageable_project_names || []);
 const canCreateTask = computed(() => manageableProjects.value.length > 0);
 
+// Searchable project combobox
+const projQuery    = ref("");
+const projResults  = ref([]);
+const projSelected = ref(null);   // { name, project_name }
+const projOpen     = ref(false);
+let projDebounce;
+async function onProjInput() {
+	projSelected.value = null;
+	clearTimeout(projDebounce);
+	projDebounce = setTimeout(async () => {
+		if (!projQuery.value.trim()) { projResults.value = []; projOpen.value = false; return; }
+		try {
+			projResults.value = await call({ method: "portal_app.api.projects.search_projects", args: { query: projQuery.value } });
+			projOpen.value = !!projResults.value.length;
+		} catch { projResults.value = []; }
+	}, 250);
+}
+function selectProj(p) {
+	projSelected.value = p;
+	projQuery.value = p.project_name + (p.portal_project_code ? ` (${p.portal_project_code})` : "");
+	projOpen.value = false;
+}
+function clearProj() { projQuery.value = ""; projSelected.value = null; projResults.value = []; projOpen.value = false; }
+function blurProj() { setTimeout(() => { projOpen.value = false; }, 180); }
+
+// Searchable user (assignee) combobox
+const userQuery    = ref("");
+const userResults  = ref([]);
+const userSelected = ref(null);   // { email, full_name }
+const userOpen     = ref(false);
+let userDebounce;
+async function onUserInput() {
+	userSelected.value = null;
+	clearTimeout(userDebounce);
+	userDebounce = setTimeout(async () => {
+		if (!userQuery.value.trim()) { userResults.value = []; userOpen.value = false; return; }
+		try {
+			userResults.value = await call({ method: "portal_app.api.projects.search_assignable_users", args: { query: userQuery.value } });
+			userOpen.value = !!userResults.value.length;
+		} catch { userResults.value = []; }
+	}, 250);
+}
+function selectUser(u) {
+	userSelected.value = u;
+	userQuery.value = u.full_name || u.email;
+	userOpen.value = false;
+}
+function clearUser() { userQuery.value = ""; userSelected.value = null; userResults.value = []; userOpen.value = false; }
+function blurUser() { setTimeout(() => { userOpen.value = false; }, 180); }
+
+function initials(name) {
+	return (name || "?").split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+}
+function assigneesOf(t) {
+	try {
+		const emails = JSON.parse(t._assign || "[]");
+		return emails.map(e => ({ email: e, full_name: userMap.value[e] || e }));
+	} catch { return []; }
+}
+
 async function createNewTask() {
 	const subject = newTaskSubject.value.trim();
-	if (!subject) {
-		toaster.error("Subject is required.");
-		return;
-	}
-	const proj = newTaskProject.value || project.value || manageableProjects.value[0];
-	if (!proj) {
-		toaster.error("Pick a project for this task.");
-		return;
-	}
+	if (!subject) { toaster.error("Subject is required."); return; }
+	const proj = projSelected.value?.name;
+	if (!proj) { toaster.error("Pick a project for this task."); return; }
 	newTaskBusy.value = true;
 	try {
 		await call({
@@ -127,11 +183,17 @@ async function createNewTask() {
 				status: "Open",
 				priority: newTaskPriority.value || "Medium",
 				exp_end_date: newTaskEnd.value || undefined,
+				assigned_to: userSelected.value?.email || undefined,
 			},
 		});
-		toaster.success(`Task created on ${proj}.`);
+		const label = projSelected.value?.project_name || proj;
+		toaster.success(`Task created on ${label}.`);
 		newTaskSubject.value = "";
 		newTaskEnd.value = "";
+		newTaskPriority.value = "Medium";
+		clearProj();
+		clearUser();
+		newTaskOpen.value = false;
 		await loadTasks();
 	} catch (e) {
 		toaster.error(e?.responseBody?.message || "Could not create task.");
@@ -161,6 +223,7 @@ async function loadTasks() {
 		tasks.value = res.tasks || [];
 		mineOpen.value = res.mine_open || [];
 		summary.value = res.summary || { total: 0, open: 0, overdue: 0 };
+		userMap.value = res.user_map || {};
 	} catch (e) {
 		console.error(e);
 		err.value = e?.responseBody?.message || "Could not load tasks.";
@@ -262,10 +325,18 @@ onMounted(async () => {
 				</div>
 			</div>
 
-			<div v-if="newTaskOpen && canCreateTask" class="portal-card-strong space-y-3 p-4">
-				<div class="grid gap-3 md:grid-cols-[1fr_minmax(0,160px)_minmax(0,140px)_minmax(0,160px)_auto]">
-					<div>
-						<label class="portal-section-title mb-1 block">Subject</label>
+			<!-- ── New task form ──────────────────────────────────────────── -->
+			<div v-if="newTaskOpen && canCreateTask" class="portal-card-strong p-5">
+				<h3 class="mb-4 flex items-center gap-2 text-sm font-semibold text-[color:var(--portal-text)]">
+					<span class="flex h-6 w-6 items-center justify-center rounded-lg" style="background:var(--portal-accent-soft)">
+						<FeatherIcon name="plus" class="h-3.5 w-3.5 text-[color:var(--portal-accent)]" />
+					</span>
+					Create New Task
+				</h3>
+				<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-[2fr_1.5fr_1.5fr_1fr_1fr_auto]">
+					<!-- Subject -->
+					<div class="xl:col-span-1">
+						<label class="portal-section-title mb-1 block">Subject <span class="text-red-400">*</span></label>
 						<TextInput
 							v-model="newTaskSubject"
 							class="w-full rounded-xl"
@@ -273,31 +344,108 @@ onMounted(async () => {
 							@keyup.enter="createNewTask"
 						/>
 					</div>
-					<div>
-						<label class="portal-section-title mb-1 block">Project</label>
-						<select v-model="newTaskProject" class="portal-input">
-							<option v-for="p in manageableProjects" :key="p" :value="p">{{ p }}</option>
-						</select>
+
+					<!-- Project search combobox -->
+					<div class="relative xl:col-span-1">
+						<label class="portal-section-title mb-1 block">Project <span class="text-red-400">*</span></label>
+						<div class="relative">
+							<FeatherIcon name="search" class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--portal-subtle)]" />
+							<input
+								v-model="projQuery"
+								class="portal-input pl-8 pr-8"
+								placeholder="Search project by name…"
+								autocomplete="off"
+								@input="onProjInput"
+								@focus="onProjInput"
+								@blur="blurProj"
+							/>
+							<button v-if="projQuery" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" @click="clearProj">
+								<FeatherIcon name="x" class="h-3.5 w-3.5" />
+							</button>
+						</div>
+						<!-- Dropdown -->
+						<ul v-if="projOpen && projResults.length"
+							class="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-[color:var(--portal-border)] bg-white shadow-lg"
+						>
+							<li
+								v-for="p in projResults" :key="p.name"
+								class="flex cursor-pointer flex-col px-3 py-2 hover:bg-[color:var(--portal-accent-soft)]"
+								@mousedown.prevent="selectProj(p)"
+							>
+								<span class="text-sm font-medium text-[color:var(--portal-text)]">{{ p.project_name }}</span>
+								<span class="text-[11px] text-[color:var(--portal-muted)]">{{ p.portal_project_code || p.name }} · {{ p.status }}</span>
+							</li>
+						</ul>
+						<p v-if="projSelected" class="mt-1 flex items-center gap-1 text-[11px] text-emerald-600">
+							<FeatherIcon name="check-circle" class="h-3 w-3" /> {{ projSelected.project_name }}
+						</p>
 					</div>
+
+					<!-- Assignee search combobox -->
+					<div class="relative xl:col-span-1">
+						<label class="portal-section-title mb-1 block">Assign to</label>
+						<div class="relative">
+							<FeatherIcon name="user" class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[color:var(--portal-subtle)]" />
+							<input
+								v-model="userQuery"
+								class="portal-input pl-8 pr-8"
+								placeholder="Search by name or email…"
+								autocomplete="off"
+								@input="onUserInput"
+								@focus="onUserInput"
+								@blur="blurUser"
+							/>
+							<button v-if="userQuery" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600" @click="clearUser">
+								<FeatherIcon name="x" class="h-3.5 w-3.5" />
+							</button>
+						</div>
+						<ul v-if="userOpen && userResults.length"
+							class="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-[color:var(--portal-border)] bg-white shadow-lg"
+						>
+							<li
+								v-for="u in userResults" :key="u.email"
+								class="flex cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-[color:var(--portal-accent-soft)]"
+								@mousedown.prevent="selectUser(u)"
+							>
+								<div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+									 style="background:linear-gradient(135deg,var(--portal-accent),var(--portal-accent-strong))">
+									{{ initials(u.full_name) }}
+								</div>
+								<div class="min-w-0">
+									<p class="truncate text-sm font-medium text-[color:var(--portal-text)]">{{ u.full_name }}</p>
+									<p class="truncate text-[11px] text-[color:var(--portal-muted)]">{{ u.email }}</p>
+								</div>
+							</li>
+						</ul>
+						<p v-if="userSelected" class="mt-1 flex items-center gap-1 text-[11px] text-emerald-600">
+							<FeatherIcon name="check-circle" class="h-3 w-3" /> {{ userSelected.full_name }}
+						</p>
+					</div>
+
+					<!-- Priority -->
 					<div>
 						<label class="portal-section-title mb-1 block">Priority</label>
 						<select v-model="newTaskPriority" class="portal-input">
 							<option v-for="p in priorityOptions" :key="p" :value="p">{{ p }}</option>
 						</select>
 					</div>
+
+					<!-- Due date -->
 					<div>
 						<label class="portal-section-title mb-1 block">Due date</label>
 						<input v-model="newTaskEnd" type="date" class="portal-input" />
 					</div>
+
+					<!-- Submit -->
 					<div class="flex items-end">
 						<Button
 							variant="solid"
-							class="rounded-xl"
+							class="w-full rounded-xl whitespace-nowrap"
 							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
 							:loading="newTaskBusy"
 							@click="createNewTask"
 						>
-							Create
+							Create Task
 						</Button>
 					</div>
 				</div>
@@ -412,10 +560,10 @@ onMounted(async () => {
 						<tr class="border-b border-[color:var(--portal-border)] text-[color:var(--portal-muted)]" style="background: var(--portal-bg-dim);">
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Task</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Project</th>
+							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Assigned</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Status</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Priority</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Progress</th>
-							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Start</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">End</th>
 							<th class="px-3 py-3 text-xs font-semibold uppercase tracking-wider">Discuss</th>
 							<th class="px-3 py-3 text-right text-xs font-semibold uppercase tracking-wider">Action</th>
@@ -448,6 +596,27 @@ onMounted(async () => {
 									{{ t.project }}
 								</button>
 							</td>
+							<!-- Assignees -->
+							<td class="px-3 py-3">
+								<div v-if="assigneesOf(t).length" class="flex flex-wrap gap-1.5">
+									<div
+										v-for="a in assigneesOf(t)"
+										:key="a.email"
+										class="flex items-center gap-1.5 rounded-full px-2 py-0.5"
+										style="background:var(--portal-accent-soft);border:1px solid rgba(79,70,229,0.15)"
+										:title="a.email"
+									>
+										<span class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white"
+											  style="background:linear-gradient(135deg,var(--portal-accent),var(--portal-accent-strong))">
+											{{ initials(a.full_name) }}
+										</span>
+										<span class="max-w-[90px] truncate text-[11px] font-medium text-[color:var(--portal-accent-strong)]">
+											{{ a.full_name }}
+										</span>
+									</div>
+								</div>
+								<span v-else class="text-xs text-[color:var(--portal-subtle)]">—</span>
+							</td>
 							<td class="px-3 py-3">
 								<select v-model="t.status" class="portal-input py-1.5">
 									<option v-for="s in statusOptions" :key="s" :value="s">{{ s }}</option>
@@ -469,9 +638,6 @@ onMounted(async () => {
 									/>
 									<span class="text-xs text-[color:var(--portal-muted)]">%</span>
 								</div>
-							</td>
-							<td class="px-3 py-3">
-								<input v-model="t.exp_start_date" type="date" class="portal-input py-1.5" />
 							</td>
 							<td class="px-3 py-3">
 								<input v-model="t.exp_end_date" type="date" class="portal-input py-1.5" />
@@ -501,7 +667,7 @@ onMounted(async () => {
 						</tr>
 						<tr v-if="!tasks.length">
 							<td colspan="9" class="px-3 py-12 text-center text-[color:var(--portal-muted)]">
-								No tasks found. Try clearing filters or disabling “Only my tasks”.
+								No tasks found. Try clearing filters or creating a new task above.
 							</td>
 						</tr>
 					</tbody>

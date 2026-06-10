@@ -137,9 +137,12 @@ const lineChart = computed(()=>{
   return { line1:_toPath(p1), area1:_toArea(p1), line2:_toPath(p2), area2:_toArea(p2) };
 });
 
-// Financial summary values — reactive to sel.financial
-const financialIncome  = computed(()=> (data.value?.totals?.estimated_cost||0) * (FIN_RATIO[sel.value.financial]?.inc ?? 0.65));
-const financialExpense = computed(()=> (data.value?.totals?.estimated_cost||0) * (FIN_RATIO[sel.value.financial]?.exp ?? 0.38));
+// Financial summary values — use real billed amounts when available, fall back to estimated_cost ratios
+const realBilled   = computed(()=> data.value?.totals?.total_billed    || 0);
+const realOutstand = computed(()=> data.value?.totals?.outstanding      || 0);
+const estCost      = computed(()=> data.value?.totals?.estimated_cost   || 0);
+const financialIncome  = computed(()=> realBilled.value || estCost.value * (FIN_RATIO[sel.value.financial]?.inc ?? 0.65));
+const financialExpense = computed(()=> realOutstand.value || estCost.value * (FIN_RATIO[sel.value.financial]?.exp ?? 0.38));
 
 // ── Bar Chart — reactive to sel.cash ─────────────────────────────────────────
 const barData = computed(()=>{
@@ -156,8 +159,12 @@ const barData = computed(()=>{
   return rows.map((r,i)=>{ const h=Math.max(4,Math.round((Number(r.c)/maxC)*H*scale)); return {x:42+i*82,y:yBase-h,h,w:52,color:CLR[i],label:r.stage.slice(0,6),count:Number(r.c)}; });
 });
 
-// Cash flow headline — reactive to sel.cash
-const cashFlowAmount = computed(()=> (data.value?.totals?.estimated_cost||0) * (CASH_RATIO[sel.value.cash] ?? 0.24));
+// Cash flow headline — use real sales_this_month when available
+const cashFlowAmount = computed(()=> {
+  const real = data.value?.totals?.sales_this_month || 0;
+  if (real) return real;
+  return estCost.value * (CASH_RATIO[sel.value.cash] ?? 0.24);
+});
 
 // ── Shortcuts ────────────────────────────────────────────────────────────────
 const SHORTCUTS=[
@@ -298,17 +305,22 @@ function scAction(s){
             </div>
           </div>
 
-          <!-- 2 · Sales This Month → Est. Portfolio -->
+          <!-- 2 · Contract / Portfolio Value -->
           <div class="flex items-center gap-4 rounded-xl bg-white p-5"
                style="border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,0.05);">
             <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl" style="background:#dcfce7;">
               <FeatherIcon name="trending-up" class="h-6 w-6" style="color:#16a34a;"/>
             </div>
             <div class="min-w-0">
-              <p class="text-[11px] font-semibold uppercase tracking-wider" style="color:#6b7280;">Sales This Month</p>
-              <p class="text-[19px] font-bold leading-none mt-1 truncate" style="color:#111827;">{{ fmtSAR(data?.totals?.estimated_cost) }}</p>
+              <p class="text-[11px] font-semibold uppercase tracking-wider" style="color:#6b7280;">
+                {{ data?.totals?.sales_this_month ? 'Sales This Month' : 'Portfolio Value' }}
+              </p>
+              <p class="text-[19px] font-bold leading-none mt-1 truncate" style="color:#111827;">
+                {{ fmtSAR(data?.totals?.sales_this_month || data?.totals?.estimated_cost) }}
+              </p>
               <p class="text-[11px] mt-1 flex items-center gap-0.5" style="color:#16a34a;">
-                <FeatherIcon name="arrow-up" class="h-3 w-3"/> from last month
+                <FeatherIcon name="layers" class="h-3 w-3"/>
+                {{ fmtN(data?.totals?.projects) }} projects
               </p>
             </div>
           </div>
@@ -451,12 +463,12 @@ function scAction(s){
             <div class="mb-1 flex items-center gap-5">
               <div class="flex items-center gap-1.5">
                 <span class="h-2.5 w-2.5 rounded-full inline-block" style="background:#f97316;"></span>
-                <span class="text-[11px]" style="color:#6b7280;">Income</span>
+                <span class="text-[11px]" style="color:#6b7280;">{{ realBilled ? 'Total Billed' : 'Income' }}</span>
                 <span class="ml-1 text-[12px] font-semibold" style="color:#f97316;">{{ fmtSAR(financialIncome) }}</span>
               </div>
               <div class="flex items-center gap-1.5">
                 <span class="h-2.5 w-2.5 rounded-full inline-block" style="background:#3b82f6;"></span>
-                <span class="text-[11px]" style="color:#6b7280;">Expense</span>
+                <span class="text-[11px]" style="color:#6b7280;">{{ realOutstand ? 'Outstanding' : 'Expense' }}</span>
                 <span class="ml-1 text-[12px] font-semibold" style="color:#3b82f6;">{{ fmtSAR(financialExpense) }}</span>
               </div>
             </div>

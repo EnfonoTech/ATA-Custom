@@ -15,6 +15,7 @@ const Files         = () => import("@/pages/Files.vue");
 const AllFiles      = () => import("@/pages/AllFiles.vue");
 const FileTools     = () => import("@/pages/FileTools.vue");
 const FolderRules   = () => import("@/pages/FolderRules.vue");
+const AIChat        = () => import("@/pages/AIChat.vue");
 const SharedFolder  = () => import("@/pages/SharedFolder.vue");
 const SharedWithMe  = () => import("@/pages/SharedWithMe.vue");
 const ManageShares  = () => import("@/pages/ManageShares.vue");
@@ -72,6 +73,7 @@ const routes = [
 				component: Admin,
 				meta: { requiresPortalAdmin: true },
 			},
+			{ path: "ai-chat", name: "AIChat", component: AIChat },
 			{ path: "coming-soon", name: "ComingSoon", component: ComingSoon },
 		],
 	},

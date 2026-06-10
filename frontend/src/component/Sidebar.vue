@@ -68,7 +68,12 @@ const groups = computed(() => {
 	}
 	const account = { title: "Account", items: accountItems };
 
-	return [workspace, modules, files, account];
+	const ai = {
+		title: "AI",
+		items: [{ name: "ATA AI CHAT", path: "/ai-chat", icon: "zap", ai: true }],
+	};
+
+	return [workspace, modules, files, ai, account];
 });
 
 function isActive(item) {
@@ -166,9 +171,37 @@ function navigate(item) {
 				>
 					{{ group.title }}
 				</p>
+				<template v-for="item in group.items" :key="item.path">
+				<!-- AI item: special gradient treatment -->
 				<div
-					v-for="item in group.items"
-					:key="item.path"
+					v-if="item.ai"
+					role="link"
+					tabindex="0"
+					class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl py-2 text-[13px] font-bold transition"
+					:class="collapsed ? 'justify-center px-2' : 'px-3'"
+					:style="isActive(item)
+						? 'background:linear-gradient(135deg,#4f46e5,#7c3aed);box-shadow:0 4px 14px rgba(79,70,229,0.45);color:white'
+						: 'background:linear-gradient(135deg,rgba(79,70,229,0.12),rgba(124,58,237,0.12));border:1px solid rgba(99,102,241,0.25);color:#6366f1'"
+					:title="collapsed ? item.name : undefined"
+					@click="navigate(item)"
+					@keydown.enter="navigate(item)"
+				>
+					<!-- Animated pulse ring when active -->
+					<span v-if="isActive(item)" class="absolute -inset-0.5 rounded-xl opacity-30"
+						  style="background:linear-gradient(135deg,#6366f1,#8b5cf6);animation:pulse 2s cubic-bezier(0.4,0,0.6,1) infinite"></span>
+					<FeatherIcon :name="item.icon" class="relative h-[17px] w-[17px] shrink-0" />
+					<span v-if="!collapsed" class="relative truncate tracking-wide">{{ item.name }}</span>
+					<span v-if="!collapsed" class="relative ml-auto flex h-1.5 w-1.5 shrink-0">
+						<span class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75"
+							  :style="isActive(item) ? 'background:#a5b4fc' : 'background:#6366f1'"></span>
+						<span class="relative inline-flex h-1.5 w-1.5 rounded-full"
+							  :style="isActive(item) ? 'background:#e0e7ff' : 'background:#6366f1'"></span>
+					</span>
+				</div>
+
+				<!-- Regular item -->
+				<div
+					v-else
 					role="link"
 					tabindex="0"
 					class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl py-2 text-[13px] font-medium transition"
@@ -208,6 +241,7 @@ function navigate(item) {
 						style="background: var(--portal-accent);"
 					></span>
 				</div>
+				</template>
 			</div>
 		</nav>
 

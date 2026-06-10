@@ -93,11 +93,32 @@ def get_allowed_project_names(user=None) -> list[str]:
 			return []
 		return frappe.get_all("Project", filters={"customer": cust}, pluck="name")
 
+	# Projects where user is listed in the Project User table
 	rows = frappe.db.sql(
 		"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
 		user,
 	)
-	return [r[0] for r in rows]
+	via_table = {r[0] for r in rows}
+
+	# Projects where user is the Portal Project Manager field (or owner when field is blank)
+	meta = frappe.get_meta("Project")
+	via_manager = set()
+	if meta.has_field("portal_project_manager"):
+		pm_rows = frappe.db.sql(
+			"SELECT name FROM `tabProject` WHERE portal_project_manager=%s",
+			user,
+		)
+		for r in pm_rows:
+			via_manager.add(r[0])
+		# Also pick up projects owned by this user where portal_project_manager is blank
+		owner_rows = frappe.db.sql(
+			"SELECT name FROM `tabProject` WHERE (portal_project_manager IS NULL OR portal_project_manager='') AND owner=%s",
+			user,
+		)
+		for r in owner_rows:
+			via_manager.add(r[0])
+
+	return list(via_table | via_manager)
 
 
 def assert_project_access(project_name: str) -> None:
