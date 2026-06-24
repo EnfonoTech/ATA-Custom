@@ -7,8 +7,6 @@
  "field_order": [
   "branding_section",
   "company_logo",
-  "logo_width",
-  "logo_height",
   "column_break_branding",
   "company_name",
   "company_tagline",
@@ -43,21 +41,7 @@
    "fieldname": "company_logo",
    "fieldtype": "Attach Image",
    "label": "Company Logo",
-   "description": "Upload your company logo. Displayed in the portal sidebar and login page. Recommended: PNG or SVG, transparent background."
-  },
-  {
-   "fieldname": "logo_width",
-   "fieldtype": "Int",
-   "label": "Logo Width (px)",
-   "description": "Max display width in pixels for sidebar logo. Leave 0 for auto.",
-   "default": "0"
-  },
-  {
-   "fieldname": "logo_height",
-   "fieldtype": "Int",
-   "label": "Logo Height (px)",
-   "description": "Max display height in pixels for sidebar logo. Leave 0 for auto (default 44px).",
-   "default": "0"
+   "description": "Upload your company logo. Displayed in the portal sidebar. Recommended: PNG or SVG, square or landscape, transparent background."
   },
   {
    "fieldname": "column_break_branding",

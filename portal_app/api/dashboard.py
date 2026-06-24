@@ -1,8 +1,22 @@
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, date_diff, nowdate
 
 from portal_app.api import helper
 from portal_app.api.projects import portfolio_dashboard
+
+
+def _planned_pct(start, end):
+	"""Elapsed timeline as percent (0-100). Returns None when dates are missing."""
+	if not start or not end:
+		return None
+	try:
+		total = date_diff(str(end), str(start))
+		if total <= 0:
+			return None
+		elapsed = date_diff(nowdate(), str(start))
+		return max(0, min(100, round((elapsed / total) * 100)))
+	except Exception:
+		return None
 
 
 @frappe.whitelist()
@@ -20,6 +34,8 @@ def get_dashboard_data():
 			"upcoming_projects": [],
 			"budget_health": {"under_80": 0, "at_risk": 0, "over_100": 0},
 			"user_projects_preview": [],
+			"team_member_count": 0,
+			"recent_activity": [],
 		}
 
 	portfolio = portfolio_dashboard()
@@ -88,17 +104,85 @@ def get_dashboard_data():
 		budget_health["avg_pct"] = round(sum(pct_samples) / len(pct_samples), 1)
 		budget_health["max_pct"] = round(max(pct_samples), 1)
 
+	project_fields = [
+		"name", "project_name", "status", "customer",
+		"expected_start_date", "expected_end_date",
+		"estimated_costing", "percent_complete", "modified",
+	]
+	meta_proj = frappe.get_meta("Project")
+	for fn in ("portal_kanban_stage", "portal_project_code", "portal_project_manager"):
+		if meta_proj.has_field(fn):
+			project_fields.append(fn)
+
+	user_projects_preview = frappe.get_all(
+		"Project",
+		filters={"name": ["in", allowed[:10]]},
+		fields=project_fields,
+		order_by="modified desc",
+		limit_page_length=10,
+	)
+	for p in user_projects_preview:
+		p["planned_pct"] = _planned_pct(p.get("expected_start_date"), p.get("expected_end_date"))
+
+	team_member_count = frappe.db.count(
+		"User",
+		filters={
+			"enabled": 1,
+			"user_type": "System User",
+			"name": ["not in", ["Guest", "Administrator"]],
+		},
+	)
+
+	recent_activity = []
+
+	for f in frappe.get_all(
+		"File",
+		filters={
+			"attached_to_doctype": "Project",
+			"attached_to_name": ["in", allowed],
+			"is_folder": 0,
+		},
+		fields=["file_name", "attached_to_name", "owner", "creation"],
+		order_by="creation desc",
+		limit_page_length=8,
+	):
+		recent_activity.append({
+			"type": "file",
+			"title": f"Uploaded: {f.file_name}",
+			"detail": f.attached_to_name,
+			"user": f.owner,
+			"time": str(f.creation),
+		})
+
+	for t in frappe.get_all(
+		"Task",
+		filters={
+			"project": ["in", allowed],
+			"modified": [">=", add_days(nowdate(), -14)],
+		},
+		fields=["name", "subject", "project", "status", "modified", "owner"],
+		order_by="modified desc",
+		limit_page_length=8,
+	):
+		recent_activity.append({
+			"type": "task",
+			"title": t.subject or t.name,
+			"detail": t.project,
+			"status": t.status,
+			"user": t.owner,
+			"time": str(t.modified),
+		})
+
+	recent_activity.sort(key=lambda x: x["time"], reverse=True)
+	recent_activity = recent_activity[:8]
+
 	return {
 		**portfolio,
 		"portal_settings": settings,
 		"my_tasks": my_tasks,
 		"upcoming_projects": upcoming_projects,
 		"budget_health": budget_health,
-		"user_projects_preview": frappe.get_all(
-			"Project",
-			filters={"name": ["in", allowed[:8]]},
-			fields=["name", "project_name", "status", "customer", "expected_end_date"],
-			order_by="modified desc",
-			limit_page_length=8,
-		),
+		"user_projects_preview": user_projects_preview,
+		"team_member_count": team_member_count,
+		"recent_activity": recent_activity,
 	}

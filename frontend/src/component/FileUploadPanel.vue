@@ -191,11 +191,19 @@ const folderRouteRules = ref([]);
 async function loadFolderRouteRules() {
 	try {
 		const res = await call({ method: "portal_app.api.files.list_folder_route_rules" });
-		folderRouteRules.value = res?.rules || [];
+		folderRouteRules.value = (res?.rules || []).filter((r) => r.enabled);
 	} catch {
 		folderRouteRules.value = [];
 	}
 }
+
+// Separate rules by type
+const crossRouteRules = computed(() =>
+	folderRouteRules.value.filter((r) => !r.rule_type || r.rule_type === "Cross-route"),
+);
+const mirrorRules = computed(() =>
+	folderRouteRules.value.filter((r) => r.rule_type === "Mirror"),
+);
 
 function _labelMatches(label, pattern, mode) {
 	const l = (label || "").toLowerCase();
@@ -206,15 +214,81 @@ function _labelMatches(label, pattern, mode) {
 	return l.includes(p);
 }
 
+// ── Mirror routing ───────────────────────────────────────────────────────────
+// Maps folderDocName → resolved mirror folder doc name (populated async before upload).
+const mirrorFolderCache = ref({});
+
+// Resolve which mirror folder a given source folder maps to, creating it if needed.
+async function resolveMirrorForFolder(folderDocName) {
+	if (!folderDocName || !mirrorRules.value.length) return;
+	if (mirrorFolderCache.value[folderDocName] !== undefined) return; // already resolved
+
+	const label = folderLabelByName.value[folderDocName] || "";
+	for (const rule of mirrorRules.value) {
+		const srcPrefix = (rule.source_folder_pattern || "").trim();
+		const tgtPrefix = (rule.target_folder_pattern || "").trim();
+		if (!srcPrefix || !tgtPrefix) continue;
+
+		// Source matches if folder label equals prefix or starts with prefix + /
+		const labelLower = label.toLowerCase();
+		const srcLower = srcPrefix.toLowerCase();
+		const isMatch = labelLower === srcLower || labelLower.startsWith(srcLower + "/");
+		if (!isMatch) continue;
+
+		// Mirror path = target prefix + (label after source prefix)
+		const suffix = label.slice(srcPrefix.length); // e.g. "/04-DRAWINGS" or ""
+		const mirrorPath = tgtPrefix + suffix;
+
+		// Check if mirror folder already exists in props.folders
+		const existing = props.folders.find(
+			(f) => (f.label || "").toLowerCase() === mirrorPath.toLowerCase(),
+		);
+		if (existing) {
+			mirrorFolderCache.value = { ...mirrorFolderCache.value, [folderDocName]: existing.name };
+			return;
+		}
+
+		// Create it dynamically via backend
+		try {
+			const res = await call({
+				method: "portal_app.api.files.ensure_project_subfolder",
+				args: { project: props.project, relative_path: mirrorPath },
+			});
+			if (res?.folder_name) {
+				mirrorFolderCache.value = { ...mirrorFolderCache.value, [folderDocName]: res.folder_name };
+			} else {
+				mirrorFolderCache.value = { ...mirrorFolderCache.value, [folderDocName]: null };
+			}
+		} catch {
+			mirrorFolderCache.value = { ...mirrorFolderCache.value, [folderDocName]: null };
+		}
+		return; // only apply the first matching mirror rule
+	}
+	// No mirror rule matched — cache null so we don't retry
+	mirrorFolderCache.value = { ...mirrorFolderCache.value, [folderDocName]: null };
+}
+
+// Pre-warm mirror cache when user changes the target folder (best-effort, non-blocking)
+watch(
+	() => targetFolder?.value,
+	(newFolder) => {
+		if (newFolder && mirrorRules.value.length) {
+			resolveMirrorForFolder(newFolder).catch(() => {});
+		}
+	},
+	{ immediate: false },
+);
+
+// ── Cross-route (classification-based) rules ─────────────────────────────────
 function isInConceptStudies(folderName) {
 	const label = folderLabelByName.value[folderName] || "";
-	return folderRouteRules.value.some((r) =>
+	return crossRouteRules.value.some((r) =>
 		_labelMatches(label, r.source_folder_pattern, r.source_match_mode),
 	);
 }
 
 function getConceptCrossRoutes(classification) {
-	const matchingRules = folderRouteRules.value.filter(
+	const matchingRules = crossRouteRules.value.filter(
 		(r) => r.file_classification === classification,
 	);
 	const targets = [];
@@ -271,17 +345,24 @@ function getLayoutSubfolderRoutes(folderDocName) {
 }
 
 function crossRoutesFor(folderName, classification, subCategory) {
+	// Mirror targets (resolved async before upload; already in cache by this point)
+	const mirrorTarget = mirrorFolderCache.value[folderName];
+	const mirrorRoutes = mirrorTarget ? [mirrorTarget] : [];
+
+	// Concept-studies structure-based routes
 	if (isConceptLayoutFolder(folderName))
-		return getLayoutSubfolderRoutes(folderName);
+		return [...mirrorRoutes, ...getLayoutSubfolderRoutes(folderName)];
 	if (isConceptDisciplineFolder(folderName)) {
 		return [...new Set([
+			...mirrorRoutes,
 			...getDisciplineSubfolderRoutes(folderName),
 			...getConceptCrossRoutes(classification, subCategory),
 		])];
 	}
 	if (isInConceptStudies(folderName))
-		return getConceptCrossRoutes(classification, subCategory);
-	return [];
+		return [...new Set([...mirrorRoutes, ...getConceptCrossRoutes(classification, subCategory)])];
+
+	return mirrorRoutes;
 }
 
 function getFolderUploadCrossRoutes(targetFolderName, relativeDir, classification, subCategory) {
@@ -289,7 +370,10 @@ function getFolderUploadCrossRoutes(targetFolderName, relativeDir, classificatio
 		return crossRoutesFor(targetFolderName, classification, subCategory);
 	const firstSeg = String(relativeDir || "").split("/")[0].trim();
 	if (firstSeg && /^1[\.\s]/i.test(firstSeg)) return [];
-	return getConceptCrossRoutes(classification, subCategory);
+	return [
+		...(mirrorFolderCache.value[targetFolderName] ? [mirrorFolderCache.value[targetFolderName]] : []),
+		...getConceptCrossRoutes(classification, subCategory),
+	];
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -606,12 +690,16 @@ function apiErr(e) {
 
 // Stage the dropped/picked files into the confirmation modal. Actual upload only runs when
 // the user confirms in `confirmUploadAndRun`.
-function handleFiles(fileList) {
+async function handleFiles(fileList) {
 	if (!fileList?.length) return;
 	if (!props.project) {
 		uploadError.value =
 			"No project selected for this upload. Open a project (or pick one on the Files page) and try again.";
 		return;
+	}
+	// Ensure mirror target folder is resolved before computing cross-routes.
+	if (targetFolder.value && mirrorRules.value.length) {
+		await resolveMirrorForFolder(targetFolder.value).catch(() => {});
 	}
 	if (!targetFolder.value) {
 		uploadError.value = "Pick a target subfolder before uploading.";
@@ -964,7 +1052,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 		<div class="flex flex-wrap items-stretch gap-3">
 			<button
 				type="button"
-				class="group flex min-w-0 flex-1 items-center gap-3 rounded-2xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-4 py-3 text-left transition hover:border-[color:var(--portal-accent)] hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+				class="group flex min-w-0 flex-1 items-center gap-3 rounded-2xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-4 py-3 text-left transition hover:border-[color:var(--portal-accent)] hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
 				:disabled="disabled || !folders.length"
 				@click="openFolderPicker"
 			>
@@ -1079,9 +1167,9 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 			</div>
 		</div>
 
-		<div v-if="uploadBusy && uploadInfo" class="flex items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
-			<span class="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent"></span>
-			<span class="text-sm font-medium text-indigo-800">{{ uploadInfo }}</span>
+		<div v-if="uploadBusy && uploadInfo" class="flex items-center gap-3 rounded-xl border border-[color:var(--portal-accent)]/40 px-4 py-3" style="background:var(--portal-accent-soft)">
+			<span class="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-[color:var(--portal-accent)] border-t-transparent"></span>
+			<span class="text-sm font-medium text-[color:var(--portal-accent-strong)]">{{ uploadInfo }}</span>
 		</div>
 		<p v-if="uploadError" class="text-sm text-red-600">{{ uploadError }}</p>
 		<p v-if="!uploadBusy && uploadInfo" class="text-sm text-green-700">{{ uploadInfo }}</p>
@@ -1095,7 +1183,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 				@click.self="closeFolderPicker"
 			>
 				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
-				<div class="relative z-10 w-full max-w-md rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in">
+				<div class="relative z-10 w-full max-w-md rounded-2xl border border-[color:var(--portal-border)] shadow-2xl portal-anim-in" style="background:var(--portal-surface)">
 					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
 						<div class="flex items-center gap-2">
 							<div
@@ -1108,7 +1196,8 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 						</div>
 						<button
 							type="button"
-							class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)]"
+							class="rounded-lg p-1.5 transition hover:bg-white/5"
+							style="color:var(--portal-muted)"
 							@click="closeFolderPicker"
 						>
 							<FeatherIcon name="x" class="h-4 w-4" />
@@ -1133,7 +1222,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 								v-for="node in folderTreeFiltered"
 								:key="node.label"
 								class="flex items-center gap-1 rounded-lg transition"
-								:class="targetFolder === node.name ? 'bg-[color:var(--portal-accent-soft)]' : 'hover:bg-white'"
+								:class="targetFolder === node.name ? 'bg-[color:var(--portal-accent-soft)]' : 'hover:bg-white/5'"
 							>
 								<button
 									v-if="node.hasChildren && !folderPickerSearch"
@@ -1198,7 +1287,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 				@click.self="cancelUploadConfirm"
 			>
 				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
-				<div class="relative z-10 w-full max-w-2xl rounded-2xl border border-[color:var(--portal-border)] bg-white shadow-2xl portal-anim-in" @click.stop>
+				<div class="relative z-10 w-full max-w-2xl rounded-2xl border border-[color:var(--portal-border)] shadow-2xl portal-anim-in" style="background:var(--portal-surface)" @click.stop>
 					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
 						<div class="flex items-center gap-2">
 							<div class="flex h-9 w-9 items-center justify-center rounded-xl text-white" style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);">
@@ -1210,7 +1299,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 								<p v-else class="text-xs text-[color:var(--portal-muted)]">Files will be wrapped in a dated folder. Same-day repeats become <strong>_v2</strong>, <strong>_v3</strong> …</p>
 							</div>
 						</div>
-						<button type="button" class="rounded-lg p-1.5 text-[color:var(--portal-muted)] transition hover:bg-gray-100 hover:text-[color:var(--portal-text)] disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">
+						<button type="button" class="rounded-lg p-1.5 transition hover:bg-white/5 disabled:opacity-50" style="color:var(--portal-muted)" :disabled="uploadBusy" @click="cancelUploadConfirm">
 							<FeatherIcon name="x" class="h-4 w-4" />
 						</button>
 					</div>
@@ -1233,14 +1322,14 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 								<div>
 									<label class="portal-section-title mb-1 block">Folder name</label>
 									<div class="flex items-center gap-2">
-										<span class="rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 font-mono text-sm font-bold text-indigo-700">NN_</span>
-										<input v-model="pendingFolder.wrapperName" type="text" class="min-w-0 flex-1 rounded-xl border border-gray-300 px-3 py-2 font-mono text-sm" :disabled="uploadBusy" />
+										<span class="rounded-lg border border-[color:var(--portal-accent)]/60 px-3 py-2 font-mono text-sm font-bold text-[color:var(--portal-accent)]" style="background:var(--portal-accent-soft)">NN_</span>
+										<input v-model="pendingFolder.wrapperName" type="text" class="min-w-0 flex-1 rounded-xl border border-[color:var(--portal-border)] px-3 py-2 font-mono text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" />
 									</div>
 									<p class="mt-1 text-[11px] text-[color:var(--portal-muted)]"><strong>NN</strong> = auto series (01, 02, 03&#x2026;) assigned on upload. Re-uploading the same folder increments to the next number.</p>
 								</div>
 								<div>
 									<label class="portal-section-title mb-1 block">Upload into</label>
-									<select v-model="pendingFolder.targetFolder" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy">
+									<select v-model="pendingFolder.targetFolder" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy">
 										<option value="">— Select destination —</option>
 										<option v-if="props.projectRootPath" :value="props.projectRootPath">Project folder (root)</option>
 										<option v-for="f in props.folders" :key="`ff-${f.name}`" :value="f.name">{{ folderOptionLabel(f.label) }}</option>
@@ -1250,7 +1339,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 									</p>
 								</div>
 							</div>
-							<div class="overflow-hidden rounded-xl border border-[color:var(--portal-border)] bg-white">
+							<div class="overflow-hidden rounded-xl border border-[color:var(--portal-border)]" style="background:var(--portal-surface-alt)">
 								<div class="border-b border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-4 py-2 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-muted)]">
 									{{ pendingFolder.files.length }} file{{ pendingFolder.files.length === 1 ? "" : "s" }} from "{{ pendingFolder.sourceName }}"
 								</div>
@@ -1263,7 +1352,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 											</span>
 											<span
 												v-if="e.classification"
-												class="shrink-0 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-800"
+												class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold text-[color:var(--portal-accent-strong)]" style="background:var(--portal-accent-soft)"
 											>{{ e.classification }}</span>
 											<span class="shrink-0 text-[color:var(--portal-muted)]">{{ fmtFileSize(e.file.size) }}</span>
 										</div>
@@ -1321,22 +1410,22 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 							<div class="grid gap-2 sm:grid-cols-3">
 								<label class="block sm:col-span-3">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">File name</span>
-									<input v-model="row.name" type="text" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @input="onPendingNameChange(row)" />
+									<input v-model="row.name" type="text" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" @input="onPendingNameChange(row)" />
 								</label>
 								<label class="block sm:col-span-2">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Category (folder)</span>
-									<select v-model="row.category" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingCategoryChange(row)">
+									<select v-model="row.category" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" @change="onPendingCategoryChange(row)">
 										<option v-if="projectRootPath" :value="projectRootPath">Project folder (all files)</option>
 										<option v-for="f in folders" :key="`pcat-${idx}-${f.name}`" :value="f.name">{{ folderOptionLabel(f.label) }}</option>
 									</select>
 								</label>
 								<label class="block">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">Date</span>
-									<input v-model="row.date" type="date" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingDateChange(row)" />
+									<input v-model="row.date" type="date" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" @change="onPendingDateChange(row)" />
 								</label>
 								<label v-if="fileTypes.length" class="block sm:col-span-3">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-[color:var(--portal-subtle)]">File type</span>
-									<select v-model="row.fileType" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" :disabled="uploadBusy">
+									<select v-model="row.fileType" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy">
 										<option value="">— Not set —</option>
 										<option v-for="t in fileTypes" :key="`ft-${idx}-${t.name}`" :value="t.name">{{ t.label }}</option>
 									</select>
@@ -1344,7 +1433,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 								<!-- File Classification (editable) -->
 								<label class="block sm:col-span-3">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">File Classification</span>
-									<select v-model="row.fileClassification" class="w-full rounded-xl border border-indigo-300 px-3 py-2 text-sm" :disabled="uploadBusy" @change="onPendingClassificationChange(row)">
+									<select v-model="row.fileClassification" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" @change="onPendingClassificationChange(row)">
 										<option v-for="opt in FILE_CLASSIFICATION_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
 									</select>
 									<span v-if="row.fileSubCategory" class="mt-0.5 block text-[11px] text-indigo-600">Sub: {{ row.fileSubCategory }}</span>
@@ -1352,7 +1441,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 								<!-- PDF-specific: Plan or Presentation -->
 								<label v-if="row.ext === '.pdf'" class="block sm:col-span-3">
 									<span class="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-indigo-700">PDF Type — Plan or Presentation?</span>
-									<select v-model="row.documentType" class="w-full rounded-xl border border-indigo-300 px-3 py-1.5 text-sm" :disabled="uploadBusy" @change="onPendingDocTypeChange(row)">
+									<select v-model="row.documentType" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-1.5 text-sm" style="background:var(--portal-bg);color:var(--portal-text)" :disabled="uploadBusy" @change="onPendingDocTypeChange(row)">
 										<option value="">— Auto-detect from filename —</option>
 										<option value="Presentation">Presentation</option>
 										<option value="Drawing Sheet">Plan / Drawing Sheet</option>
@@ -1369,7 +1458,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 											Also auto-upload to
 										</p>
 										<select
-											class="max-w-[180px] rounded-lg border border-emerald-300 bg-white px-2 py-1 text-[11px] font-medium text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+											class="max-w-[180px] rounded-lg border border-emerald-400/50 px-2 py-1 text-[11px] font-medium text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400" style="background:var(--portal-surface-alt)"
 											:disabled="uploadBusy"
 											@change="(ev) => {
 												const v = ev.target.value;
@@ -1418,7 +1507,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 						<p v-if="uploadError" class="text-sm text-red-600">{{ uploadError }}</p>
 					</div>
 					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
-						<button type="button" class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">Cancel</button>
+						<button type="button" class="portal-btn disabled:opacity-50" :disabled="uploadBusy" @click="cancelUploadConfirm">Cancel</button>
 						<button type="button" class="flex items-center gap-2 rounded-lg bg-[color:var(--portal-accent)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-50" :disabled="uploadBusy" @click="runConfirm">
 							<FeatherIcon name="upload" class="h-4 w-4" />
 							<template v-if="isFolderMode">

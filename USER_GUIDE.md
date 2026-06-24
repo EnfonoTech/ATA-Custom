@@ -1,10 +1,11 @@
-# Portal App — User Guide
+# ATA Architects Portal — User Guide
 
-> A guided tour of the Portal App from sign-in to sharing your first folder,
-> organised by what you actually do — not by what's on the menu. Use the table
-> of contents to jump to your role.
+> A guided tour of the ATA Portal from sign-in to AI queries, organised by
+> what you actually do — not by what's on the menu.
 
 **URL:** your bench's `/portal-app` (e.g. `https://erp.acme.com/portal-app`).
+
+**Last updated:** June 2026
 
 ---
 
@@ -14,18 +15,21 @@
 2. [Signing in](#2-signing-in)
 3. [Layout & navigation](#3-layout--navigation)
 4. [Dashboard](#4-dashboard)
-5. [Projects](#5-projects)
-6. [Tasks](#6-tasks)
-7. [Kanban](#7-kanban)
-8. [Calendar](#8-calendar)
-9. [Files](#9-files)
-10. [Sharing — Drive-style](#10-sharing-drive-style)
-11. [Shared with me](#11-shared-with-me)
-12. [File tools (Auditor)](#12-file-tools-auditor)
-13. [Profile & preferences](#13-profile--preferences)
-14. [Admin (System Manager)](#14-admin-system-manager)
-15. [Workflow recipes](#15-workflow-recipes)
-16. [FAQ & troubleshooting](#16-faq--troubleshooting)
+5. [ATA AI Chat](#5-ata-ai-chat)
+6. [Projects](#6-projects)
+7. [Tasks](#7-tasks)
+8. [Kanban](#8-kanban)
+9. [Calendar](#9-calendar)
+10. [Files / File Browser](#10-files--file-browser)
+11. [Sharing files with teammates](#11-sharing-files-with-teammates)
+12. [Shared with me](#12-shared-with-me)
+13. [File tools (Auditor)](#13-file-tools-auditor)
+14. [Folder Routing Rules (Admin)](#14-folder-routing-rules-admin)
+15. [Team Structure](#15-team-structure)
+16. [Profile & preferences](#16-profile--preferences)
+17. [Admin (System Manager)](#17-admin-system-manager)
+18. [Workflow recipes](#18-workflow-recipes)
+19. [FAQ & troubleshooting](#19-faq--troubleshooting)
 
 ---
 
@@ -78,8 +82,11 @@ than one.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ ☰  Portal           [search…]                Desk  ●  You      │  ← Header
+│ ☰  ATA Portal       [search…]                Desk  ●  You      │  ← Header
 ├──────────────┬─────────────────────────────────────────────────┤
+│ ATA AI CHAT  │                                                 │
+│  • AI Chat   │                                                 │
+│              │                                                 │
 │ WORKSPACE    │                                                 │
 │  • Dashboard │                                                 │
 │  • Projects  │                                                 │
@@ -92,6 +99,11 @@ than one.
 │  • Shared    │                                                 │
 │    with me   │                                                 │
 │  • File tools│ (Auditor only)                                  │
+│              │                                                 │
+│ MODULES      │ (coming soon: HR, Accounts, Stock, Assets…)    │
+│              │                                                 │
+│ TEAM STRUCTURE                                                 │
+│  • Teams     │                                                 │
 │              │                                                 │
 │ ACCOUNT      │                                                 │
 │  • Profile   │                                                 │
@@ -108,28 +120,106 @@ than one.
 
 ## 4. Dashboard
 
+The Dashboard is the first page you see after login. All data is **live** —
+pulled from ERPNext in real time on every page load.
+
 ```
 [Greeting hero]  Good morning, Siva
                  [ All projects ]   [ + New project ]
 
-[KPI tiles]  Projects · Open tasks · Estimated cost · Budget risk
+[KPI row]
+  ┌──────────────┐ ┌──────────────┐ ┌─────────────────┐ ┌──────────────┐
+  │ Total        │ │ Active       │ │ Total Team      │ │ Budget       │
+  │ Projects  12 │ │ Tasks     34 │ │ Members      8  │ │ Health   76% │
+  └──────────────┘ └──────────────┘ └─────────────────┘ └──────────────┘
 
-[Recently visited]  pinned chips you can click
+[Project Progress Chart]  grouped bars — Planned % vs Actual %
+[Project Stage Donut]     segments by Kanban stage with centre count
 
-[ERP status]            [Kanban stage]
-[My open tasks]         [Upcoming deadlines]
+[Recent Projects Table]
+  Name · Stage · Progress · Budget · Status · Due
 
-[Recent projects table]
+[Upcoming Milestones]     tasks with due dates + projects ending soon
+[Recent Activity Feed]    file uploads + task updates in the last 14 days
+[Team Composition]        members by sub-team and total headcount
 ```
 
-* The hero greeting changes with the time of day.
-* **Recently visited** chips are remembered locally per browser, not synced.
-* Click any row in **Recent projects** to open its detail page.
-* **+ New project** appears only if your role can create projects.
+### KPI Cards
+
+| Card | Source |
+|---|---|
+| **Total Projects** | Count of all active Project records you can access |
+| **Active Tasks** | Your tasks that are not Completed or Cancelled |
+| **Total Team Members** | Enabled System Users (excl. Guest / Admin) |
+| **Budget Health** | Average `estimated_costing` utilisation across projects |
+
+### Project Progress Chart
+
+A grouped bar chart comparing **Planned %** (time elapsed ÷ total project
+duration) against **Actual %** (`percent_complete` on the Project). Shows
+your five most recently modified projects.
+
+### Recent Projects Table
+
+Click any row to open the project's detail page.  
+Status indicators:
+
+| Indicator | Meaning |
+|---|---|
+| **On Track** | `percent_complete` ≥ planned % and end date is in the future |
+| **At Risk** | `percent_complete` materially below planned % |
+| **Overdue** | End date has passed and project is not complete |
+| **Done** | `percent_complete` = 100 or status = Completed |
+
+### Recent Activity Feed
+
+Combines, sorted newest-first:
+* File attachments uploaded to your projects in the last 14 days
+* Task status changes in the last 14 days
+
+Shows up to 8 items. Each entry has an icon, title, project context, and
+relative timestamp (e.g. "3h ago").
 
 ---
 
-## 5. Projects
+## 5. ATA AI Chat
+
+A conversational AI interface powered by Claude. Ask natural-language
+questions about your projects and documents.
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  ATA AI Chat                                                   │
+│                                                                │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ You: What is the current status of the Al Najem project? │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ AI:  Al Najem (2602-AL NAJEM) is currently in Concept    │  │
+│  │      Design stage, 35% complete. Expected completion:    │  │
+│  │      15 Aug 2026. 4 open tasks assigned to you.          │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                │
+│  [ Type a question…                              ] [ Send ]    │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**What you can ask:**
+* Current status and progress of a project
+* Which tasks are overdue or due this week
+* Which projects are over budget
+* Summary of recent file uploads for a project
+* Comparison across multiple projects
+
+**Limitations:**
+* The AI has **read-only** access — it cannot create, update, or delete records.
+* It only sees projects and data you personally have access to.
+* For large datasets (100+ projects) it works from a recent snapshot; very
+  recent changes may take a minute to appear.
+
+---
+
+## 6. Projects
 
 The Projects page lists every project you can access.
 
@@ -171,7 +261,7 @@ Things you can do:
 
 ---
 
-## 6. Tasks
+## 7. Tasks
 
 A unified workspace across every project you can see.
 
@@ -193,7 +283,7 @@ A unified workspace across every project you can see.
 
 ---
 
-## 7. Kanban
+## 8. Kanban
 
 Visual project lifecycle.
 
@@ -210,7 +300,7 @@ Visual project lifecycle.
 
 ---
 
-## 8. Calendar
+## 9. Calendar
 
 Project + task dates plotted across a month / week / day grid.
 
@@ -226,7 +316,7 @@ Project + task dates plotted across a month / week / day grid.
 
 ---
 
-## 9. Files
+## 10. Files / File Browser
 
 The hub for everything attached to a project.
 
@@ -255,8 +345,17 @@ The hub for everything attached to a project.
  [ ☐ Private upload ]    [ ▾ Advanced options ]
 ────────────────────────────────────────────────────────────────────
 
-[File table]   File · Size · Subfolder · Owner · Created · Open · Delete
+[File table]   File · Folder · Category · Date · Actions (Submit / Share) · Size
 ```
+
+The **File Browser** (`/portal-app/file-browser`) is a read-optimised cross-project view. Select
+any project from the year-grouped sidebar, then:
+
+* Click a **folder** in the sidebar tree to filter the file list.
+* Click a **category chip** (Presentation, Drawing, 3D Model…) to filter by file type.
+* Click **Submit** on any row to copy it to the `06-CLIENT SUBMITTAL` folder with
+  an auto-generated serial number and today's date prefix.
+* Click the **Share** (↗) button to open the inline share modal (see §11).
 
 ### 9.1 Picking a folder
 
@@ -311,7 +410,7 @@ target, and smoothly scrolls down to the upload zone.
 
 ---
 
-## 10. Sharing — Drive-style
+## 11. Sharing files with teammates
 
 ```
 [ Share button on any folder card or upload tile ]
@@ -383,7 +482,7 @@ that.
 
 ---
 
-## 11. Shared with me
+## 12. Shared with me
 
 ```
 [Refresh]                                       [3 projects · 8 folders · 41 files]
@@ -410,7 +509,7 @@ that.
 
 ---
 
-## 12. File tools (Auditor)
+## 13. File tools (Auditor)
 
 Only visible to users with the **Auditor** role (or System Manager). It's the
 single place where the **company-wide standard folder structure** for new
@@ -452,7 +551,96 @@ from disk verbatim.
 
 ---
 
-## 13. Profile & preferences
+## 14. Folder Routing Rules (Admin)
+
+Accessible from **Routing rules** in the sidebar (project managers only).
+
+Routing rules automate file distribution during upload — no user action needed.
+Two rule types are supported:
+
+### Mirror rule
+Replicates **every upload** from a source folder into a parallel target folder,
+preserving the full subfolder structure.
+
+| Setting | Example |
+|---|---|
+| Source pattern | `01-DOCUMENTS` |
+| Source match | `starts_with` (also matches `01-DOCUMENTS/04-DRAWINGS`) |
+| Target prefix | `03-BALADIYA/01-DOCUMENTS` |
+
+**ATA standard mirror:** Anything uploaded to `01-DOCUMENTS` or any subfolder
+(`01-DOCUMENTS/04-DRAWINGS`) is automatically mirrored to
+`03-BALADIYA/01-DOCUMENTS/04-DRAWINGS`. This rule is pre-seeded — if missing,
+click **Add documents mirror**.
+
+### Cross-route rule
+Sends files of a **specific classification** to a secondary folder. Only
+applies to the matching file type — other files in the same folder are not
+routed.
+
+**Pre-seeded ATA concept-studies rules** (active by default):
+
+| Classification | Source folder | Target folder |
+|---|---|---|
+| 3D Model Files | contains `01-CONCEPT STUDIES` | contains `02-SKETCH UP` |
+| Drawing / Layout Files | contains `01-CONCEPT STUDIES` | contains `02-SKETCH UP` |
+| Rendering / Image Files | contains `01-CONCEPT STUDIES` | contains `03-PERSPECTIVES` |
+| Editable Design Source Files | contains `01-CONCEPT STUDIES` | contains `03-PERSPECTIVES` |
+| Feasibility / Area Calculation Files | contains `01-CONCEPT STUDIES` | contains `04-FEASIBILITY` |
+| Presentation Files | contains `01-CONCEPT STUDIES` | contains `05-PRESENTATION` |
+| Uncategorized | contains `01-CONCEPT STUDIES` | contains `06-REFERENCES` |
+
+### Adding / editing rules
+
+1. Go to **Routing rules** in the sidebar.
+2. Click a rule-type card to add a new rule, or click **+ New rule**.
+3. Fill in source and target patterns (autocomplete suggestions from the folder template).
+4. Toggle **Enabled / Disabled** to activate or suspend a rule without deleting it.
+5. Click **Save**.
+
+> Rules take effect on the next upload. Files already uploaded are not
+> retroactively moved.
+
+---
+
+## 15. Team Structure
+
+The Team Structure page shows the organisation's hierarchy of teams and
+sub-teams.
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│  TEAM STRUCTURE                                                   │
+│                                                                   │
+│  ┌────────────────────┐  ┌────────────────────┐                  │
+│  │  CD Team           │  │  DD Team           │                  │
+│  │  Concept Design    │  │  Design Development│                  │
+│  │  12 members        │  │  9 members         │                  │
+│  │  ───────────────── │  │  ─────────────────  │                 │
+│  │  > ID Sub-Team (4) │  │  > LA Sub-Team (3) │                 │
+│  │  > LA Sub-Team (4) │  │  > ME Sub-Team (3) │                 │
+│  │  > ME Sub-Team (4) │  │  > ID Sub-Team (3) │                 │
+│  └────────────────────┘  └────────────────────┘                  │
+│                                                                   │
+│  ┌────────────────────┐                                           │
+│  │  TD Team           │                                           │
+│  │  Technical Design  │                                           │
+│  │  7 members         │                                           │
+│  │  ─────────────────  │                                          │
+│  │  > ME Sub-Team (4) │                                           │
+│  │  > ID Sub-Team (3) │                                           │
+│  └────────────────────┘                                           │
+└───────────────────────────────────────────────────────────────────┘
+```
+
+* Each team card shows the team name, description, and total member count.
+* Expanding a team card reveals its sub-teams with individual counts.
+* Data is sourced from ERPNext's custom Team / Sub-team doctypes.
+* This page is read-only — manage team assignments from the Frappe Desk.
+
+---
+
+## 16. Profile & preferences
 
 ```
 [Profile cover gradient]
@@ -481,7 +669,7 @@ Saving here also updates the avatar/name shown in the header.
 
 ---
 
-## 14. Admin (System Manager)
+## 17. Admin (System Manager)
 
 Visible only to portal admins. Two main flows:
 
@@ -494,9 +682,9 @@ Visible only to portal admins. Two main flows:
 
 ---
 
-## 15. Workflow recipes
+## 18. Workflow recipes
 
-### 15.1 First-time setup (administrator)
+### 18.1 First-time setup (administrator)
 
 ```
 1.  bench --site <site> install-app portal_app
@@ -527,7 +715,7 @@ Add customer-portal users: Project detail → Customer portal → search → Sav
 Drag a few files into 01-DOCUMENTS / … to seed the project.
 ```
 
-### 15.3 Sharing a deliverable with a teammate
+### 18.3 Sharing a deliverable with a teammate
 
 ```
 You are a Project Member.
@@ -540,7 +728,7 @@ You are a Project Member.
 They will see it under Shared with me, plus in the normal project view.
 ```
 
-### 15.4 Sending a deliverable outside the company
+### 18.4 Sending a deliverable outside the company
 
 ```
 1. Open the share modal on the relevant folder
@@ -550,7 +738,7 @@ They will see it under Shared with me, plus in the normal project view.
 5. If circumstances change: open the modal → Revoke link → done.
 ```
 
-### 15.5 Revoking access
+### 18.5 Revoking access
 
 ```
 Open the share modal on the folder
@@ -560,7 +748,7 @@ Open the share modal on the folder
 Effect is immediate — within seconds the user / link can no longer open files.
 ```
 
-### 15.6 Adopting a folder layout from a real project (Auditor)
+### 18.6 Adopting a folder layout from a real project (Auditor)
 
 ```
 1. Zip the folder structure you want.        $ zip -r layout.zip ./00-PROJECT
@@ -571,7 +759,7 @@ Effect is immediate — within seconds the user / link can no longer open files.
    are unchanged but will pick up new leaves on next visit."
 ```
 
-### 15.7 Deleting a file
+### 18.7 Deleting a file
 
 ```
 You uploaded it             →  Files page row → Delete (always allowed)
@@ -579,7 +767,7 @@ You're the project manager  →  Files page row → Delete (any file)
 You're a customer-portal    →  Cannot delete; ask your contact at the firm
 ```
 
-### 15.8 If you can't find a project
+### 18.8 If you can't find a project
 
 ```
 1. Profile page → check your roles. You need Projects User OR Portal Customer
@@ -590,7 +778,7 @@ You're a customer-portal    →  Cannot delete; ask your contact at the firm
 
 ---
 
-## 16. FAQ & troubleshooting
+## 19. FAQ & troubleshooting
 
 **Q. The Share button is greyed out.**
 You're not allocated to that project. Ask the manager to add you to the

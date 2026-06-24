@@ -122,12 +122,13 @@ function extractErr(e) {
 							v-if="profile?.user_image"
 							:src="profile.user_image"
 							alt=""
-							class="h-20 w-20 rounded-2xl object-cover ring-4 ring-white shadow-md"
+							class="h-20 w-20 rounded-2xl object-cover"
+					style="box-shadow: 0 0 0 4px var(--portal-surface), 0 4px 12px rgba(0,0,0,0.3);"
 						/>
 						<div
 							v-else
-							class="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-semibold text-white shadow-md ring-4 ring-white"
-							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+							class="flex h-20 w-20 items-center justify-center rounded-2xl text-2xl font-semibold text-white"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); box-shadow: 0 0 0 4px var(--portal-surface), 0 4px 12px rgba(0,0,0,0.3);"
 						>
 							{{ (form.full_name || profile?.name || "?").slice(0, 1).toUpperCase() }}
 						</div>

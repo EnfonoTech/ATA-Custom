@@ -18,23 +18,21 @@ from portal_app.api import helper
 
 @contextmanager
 def _bypass_max_attachments():
-	"""Disable Frappe's per-doctype max_attachments cap and file-size cap for portal uploads.
+	"""Disable Frappe's per-doctype max_attachments cap for the duration of an upload.
 
-	The portal handles large CAD, BIM, and render files that routinely exceed the default
-	10 MB system setting. We bypass both limits here; the admin can tighten per-project
-	rules via Portal Project Settings if needed.
+	The portal stores many files per Project under the standard folder layout, far above
+	the default 4-attachment cap. The proper long-term fix is the Property Setter created
+	in install.py (max_attachments=0 on Project), but until `bench migrate` runs we also
+	monkey-patch File.validate_attachment_limit at runtime so users aren't blocked.
 	"""
 	from frappe.core.doctype.file.file import File as _File
 
-	orig_attachment = _File.validate_attachment_limit
-	orig_size = _File.check_max_file_size
+	original = _File.validate_attachment_limit
 	_File.validate_attachment_limit = lambda self: None
-	_File.check_max_file_size = lambda self: len(self._content or b"")
 	try:
 		yield
 	finally:
-		_File.validate_attachment_limit = orig_attachment
-		_File.check_max_file_size = orig_size
+		_File.validate_attachment_limit = original
 
 PROJ_FOLD_DEFAULT = [
 	"01-DOCUMENTS/01-CLIENT DATA/01-BUSINESS CARD",
@@ -2177,239 +2175,6 @@ def prepare_folder_upload():
 
 
 @frappe.whitelist()
-def ensure_project_subfolder_path(project, parent_folder, subfolder_path):
-	"""Ensure a (possibly nested) subfolder path exists under parent_folder and return its docname.
-
-	Used when uploading to a discipline folder whose depth-4/5 subfolders may not exist yet.
-	Creates the full path (e.g. '1.LAYOUT/1. DWG') under parent_folder, reusing existing folders.
-	"""
-	helper.assert_customer_portal_can_upload(project)
-	folder_ctx = ensure_project_folders(project)
-	valid_names = {x["name"] for x in folder_ctx["subfolders"]}
-	valid_names.add(folder_ctx.get("project_root", ""))
-	# Walk parents of parent_folder to validate it belongs to this project
-	cur = parent_folder
-	found = cur in valid_names
-	if not found:
-		for _i in range(20):
-			p = frappe.db.get_value("File", cur, "folder") if cur else None
-			if not p:
-				break
-			if p in valid_names or p == folder_ctx.get("project_root"):
-				found = True
-				break
-			cur = p
-	if not found:
-		frappe.throw(_("Invalid parent folder"))
-	sub_path = cstr(subfolder_path or "").strip().strip("/")
-	if not sub_path:
-		return parent_folder
-	result = _ensure_folder_path(parent_folder, sub_path)
-	frappe.db.commit()
-	return result
-
-
-@frappe.whitelist()
-def list_folder_route_rules():
-	"""Return all enabled Portal Folder Route Rules so the frontend can apply them dynamically.
-
-	Each rule defines: when a file (matching file_classification) is uploaded to a folder whose
-	label contains source_folder_pattern, also auto-upload the same file to the first folder whose
-	label contains target_folder_pattern.
-
-	If no rules exist yet, seed the built-in defaults for 02-CONCEPT/01-CONCEPT STUDIES.
-	"""
-	if not frappe.db.exists("DocType", "Portal Folder Route Rule"):
-		return {"rules": _builtin_route_rules()}
-
-	rules = frappe.get_all(
-		"Portal Folder Route Rule",
-		filters={"enabled": 1},
-		fields=[
-			"name", "rule_name", "file_classification",
-			"source_folder_pattern", "source_match_mode",
-			"target_folder_pattern", "target_match_mode",
-		],
-		order_by="rule_name asc",
-	)
-
-	# Auto-seed defaults on first use (no rows yet)
-	if not frappe.db.count("Portal Folder Route Rule"):
-		_seed_default_rules()
-		rules = frappe.get_all(
-			"Portal Folder Route Rule",
-			filters={"enabled": 1},
-			fields=[
-				"name", "rule_name", "file_classification",
-				"source_folder_pattern", "source_match_mode",
-				"target_folder_pattern", "target_match_mode",
-			],
-			order_by="rule_name asc",
-		)
-
-	return {"rules": rules}
-
-
-def _builtin_route_rules():
-	"""Fallback rules when the DocType hasn't been migrated yet."""
-	return [
-		{"rule_name": "Sketch / 3D files → 02-SKETCH UP", "file_classification": "3D Model Files",                  "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "02-SKETCH UP",      "target_match_mode": "contains"},
-		{"rule_name": "Drawing files → 02-SKETCH UP",      "file_classification": "Drawing / Layout Files",          "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "02-SKETCH UP",      "target_match_mode": "contains"},
-		{"rule_name": "Renders → 03-PERSPECTIVES",          "file_classification": "Rendering / Image Files",        "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "03-PERSPECTIVES",   "target_match_mode": "contains"},
-		{"rule_name": "Editable Design → 03-PERSPECTIVES",  "file_classification": "Editable Design Source Files",   "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "03-PERSPECTIVES",   "target_match_mode": "contains"},
-		{"rule_name": "Feasibility → 04-FEASIBILITY",       "file_classification": "Feasibility / Area Calculation Files", "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "04-FEASIBILITY", "target_match_mode": "contains"},
-		{"rule_name": "Presentations → 05-PRESENTATION",    "file_classification": "Presentation Files",             "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "05-PRESENTATION",   "target_match_mode": "contains"},
-		{"rule_name": "Uncategorized → 06-REFERENCES",      "file_classification": "Uncategorized",                  "source_folder_pattern": "01-CONCEPT STUDIES", "source_match_mode": "contains", "target_folder_pattern": "06-REFERENCES",     "target_match_mode": "contains"},
-	]
-
-
-def _seed_default_rules():
-	"""Insert the built-in concept-studies routing rules on first use."""
-	for r in _builtin_route_rules():
-		doc = frappe.new_doc("Portal Folder Route Rule")
-		doc.update({
-			"rule_name": r["rule_name"],
-			"file_classification": r["file_classification"],
-			"source_folder_pattern": r["source_folder_pattern"],
-			"source_match_mode": r["source_match_mode"],
-			"target_folder_pattern": r["target_folder_pattern"],
-			"target_match_mode": r["target_match_mode"],
-			"enabled": 1,
-		})
-		doc.insert(ignore_permissions=True)
-	frappe.db.commit()
-
-
-@frappe.whitelist()
-def submit_to_client_submittal():
-	"""Copy an existing ERPNext File into the 06-CLIENT SUBMITTAL folder.
-
-	Naming convention: <SL.NO>_<YYYY-MM-DD>_<original_filename>
-	where SL.NO is the count of files already in CLIENT SUBMITTAL + 1.
-
-	Returns the new file doc name, generated filename, sl_no, and date.
-	"""
-	file_name = cstr(frappe.form_dict.get("file_name") or "").strip()
-	project   = cstr(frappe.form_dict.get("project")   or "").strip()
-
-	if not file_name or not project:
-		frappe.throw(_("file_name and project are required"))
-
-	helper.assert_customer_portal_can_upload(project)
-
-	src = frappe.get_doc("File", file_name)
-
-	folder_ctx = ensure_project_folders(project)
-	submittal_folder = None
-	for f in (folder_ctx.get("subfolders") or []):
-		lbl = (f.get("label") or "").upper()
-		if "06-CLIENT SUBMITTAL" in lbl or "CLIENT SUBMITTAL" in lbl:
-			submittal_folder = f["name"]
-			break
-
-	if not submittal_folder:
-		frappe.throw(_("The 06-CLIENT SUBMITTAL folder was not found for this project. "
-					   "Ensure the project has the standard folder structure (bench migrate may be needed)."))
-
-	# Serial number = count of non-folder files already in that folder + 1
-	existing = frappe.db.count("File", {"folder": submittal_folder, "is_folder": 0})
-	sl_no    = str(existing + 1).zfill(2)
-	date_str = frappe.utils.today()          # YYYY-MM-DD
-
-	orig_name = src.file_name or "file"
-	new_name  = f"{sl_no}_{date_str}_{orig_name}"
-
-	# Read the source file content
-	content = None
-	file_url = (src.file_url or "").lstrip("/")
-	for base in [frappe.get_site_path("public", file_url),
-				 frappe.get_site_path(file_url),
-				 frappe.get_site_path("private", "files", orig_name)]:
-		if base and __import__("os").path.exists(base):
-			with open(base, "rb") as fh:
-				content = fh.read()
-			break
-
-	if content is None:
-		# Last resort: use Frappe's get_content helper
-		try:
-			raw = src.get_content()
-			content = raw.encode("utf-8") if isinstance(raw, str) else raw
-		except Exception as exc:
-			frappe.throw(_("Could not read file content: {0}").format(str(exc)))
-
-	new_file = save_file(
-		new_name,
-		content,
-		"Project",
-		project,
-		folder=submittal_folder,
-		is_private=src.is_private,
-		df=None,
-	)
-
-	return {
-		"file_doc":  new_file.name,
-		"file_name": new_name,
-		"sl_no":     sl_no,
-		"date":      date_str,
-		"folder":    submittal_folder,
-	}
-
-
-@frappe.whitelist()
-def list_folder_template_paths():
-	"""Return all unique folder path strings from the active folder template."""
-	return {"paths": _folder_template()}
-
-
-@frappe.whitelist()
-def save_folder_route_rule():
-	"""Create or update a Portal Folder Route Rule document.
-
-	Accepts JSON body with fields: name (optional, update if given), rule_name,
-	file_classification, source_folder_pattern, source_match_mode,
-	target_folder_pattern, target_match_mode, enabled.
-	"""
-	if not frappe.db.exists("DocType", "Portal Folder Route Rule"):
-		frappe.throw(_("Portal Folder Route Rule DocType not found. Run bench migrate."))
-
-	data = frappe.request.get_json() or frappe.form_dict
-	doc_name = (data.get("name") or "").strip()
-
-	if doc_name and frappe.db.exists("Portal Folder Route Rule", doc_name):
-		doc = frappe.get_doc("Portal Folder Route Rule", doc_name)
-	else:
-		doc = frappe.new_doc("Portal Folder Route Rule")
-
-	for field in ("rule_name", "file_classification",
-				  "source_folder_pattern", "source_match_mode",
-				  "target_folder_pattern", "target_match_mode"):
-		if data.get(field) is not None:
-			doc.set(field, data[field])
-
-	doc.enabled = 1 if data.get("enabled", 1) else 0
-
-	if doc.is_new():
-		doc.insert(ignore_permissions=True)
-	else:
-		doc.save(ignore_permissions=True)
-
-	frappe.db.commit()
-	return {"name": doc.name, "rule_name": doc.rule_name}
-
-
-@frappe.whitelist()
-def delete_folder_route_rule(rule_name):
-	"""Delete a Portal Folder Route Rule document."""
-	if not frappe.db.exists("Portal Folder Route Rule", rule_name):
-		return {"ok": False, "message": "Not found"}
-	frappe.delete_doc("Portal Folder Route Rule", rule_name, ignore_permissions=True)
-	frappe.db.commit()
-	return {"ok": True}
-
-
-@frappe.whitelist()
 def list_portal_file_types():
 	"""Return the configured Portal File Type list (display name + extension hints).
 
@@ -2622,6 +2387,137 @@ def _classify_ext(ext: str) -> str:
 	if ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):              return "Rendering / Image Files"
 	if ext == ".pdf":                                                   return "Presentation Files"
 	return ""
+
+
+_ROUTE_RULE_DOCTYPE = "Portal Folder Route Rule"
+
+
+@frappe.whitelist()
+def list_folder_route_rules():
+	"""Return all folder routing rules (enabled + disabled) for the admin UI.
+	Also called by the upload panel to load active rules for auto-routing."""
+	if not frappe.db.exists("DocType", _ROUTE_RULE_DOCTYPE):
+		return {"rules": []}
+	rows = frappe.get_all(
+		_ROUTE_RULE_DOCTYPE,
+		fields=[
+			"name", "enabled", "rule_name", "rule_type",
+			"file_classification",
+			"source_folder_pattern", "source_match_mode",
+			"target_folder_pattern", "target_match_mode",
+			"notes",
+		],
+		order_by="creation asc",
+		ignore_permissions=True,
+	)
+	# Normalise missing rule_type (field added after first deploy).
+	for r in rows:
+		if not r.get("rule_type"):
+			r["rule_type"] = "Cross-route"
+	return {"rules": rows}
+
+
+@frappe.whitelist()
+def save_folder_route_rule(
+	name="", rule_name="", rule_type="Cross-route",
+	file_classification="",
+	source_folder_pattern="", source_match_mode="contains",
+	target_folder_pattern="", target_match_mode="contains",
+	enabled=1, notes="",
+):
+	"""Create or update a Portal Folder Route Rule. Admin-only."""
+	if not helper.has_portal_staff_project_access():
+		frappe.throw(_("Only project managers can manage routing rules."), frappe.PermissionError)
+	if not frappe.db.exists("DocType", _ROUTE_RULE_DOCTYPE):
+		frappe.throw(_("Portal Folder Route Rule doctype is not installed. Run bench migrate."))
+
+	src = cstr(source_folder_pattern).strip()
+	tgt = cstr(target_folder_pattern).strip()
+	if not src:
+		frappe.throw(_("Source folder pattern is required."))
+	if not tgt:
+		frappe.throw(_("Target folder pattern is required."))
+
+	rule_type = cstr(rule_type).strip() or "Cross-route"
+	if rule_type not in ("Cross-route", "Mirror"):
+		rule_type = "Cross-route"
+
+	auto_name = f"{src} → {tgt}"
+	rname = cstr(rule_name).strip() or auto_name
+
+	fields = {
+		"enabled":               cint(enabled),
+		"rule_name":             rname,
+		"rule_type":             rule_type,
+		"file_classification":   cstr(file_classification).strip(),
+		"source_folder_pattern": src,
+		"source_match_mode":     cstr(source_match_mode).strip() or "contains",
+		"target_folder_pattern": tgt,
+		"target_match_mode":     cstr(target_match_mode).strip() or "contains",
+		"notes":                 cstr(notes).strip(),
+	}
+
+	existing = cstr(name).strip()
+	if existing and frappe.db.exists(_ROUTE_RULE_DOCTYPE, existing):
+		doc = frappe.get_doc(_ROUTE_RULE_DOCTYPE, existing)
+		doc.update(fields)
+		doc.save(ignore_permissions=True)
+	else:
+		doc = frappe.get_doc({"doctype": _ROUTE_RULE_DOCTYPE, **fields})
+		doc.insert(ignore_permissions=True)
+
+	frappe.db.commit()
+	return {"name": doc.name, "rule_name": doc.rule_name}
+
+
+@frappe.whitelist()
+def delete_folder_route_rule(rule_name):
+	"""Delete a Portal Folder Route Rule by its document name. Admin-only."""
+	if not helper.has_portal_staff_project_access():
+		frappe.throw(_("Only project managers can manage routing rules."), frappe.PermissionError)
+	rn = cstr(rule_name).strip()
+	if not rn or not frappe.db.exists(_ROUTE_RULE_DOCTYPE, rn):
+		frappe.throw(_("Rule not found."))
+	frappe.delete_doc(_ROUTE_RULE_DOCTYPE, rn, ignore_permissions=True)
+	frappe.db.commit()
+	return {"ok": True}
+
+
+@frappe.whitelist()
+def list_folder_template_paths():
+	"""Return the flat list of relative folder paths from the project folder template.
+	Used by the Folder Rules page to populate pattern suggestions.
+	"""
+	paths = _folder_template()
+	# Also include every intermediate ancestor segment.
+	seen = set()
+	out = []
+	for leaf in paths:
+		parts = leaf.split("/")
+		for i in range(1, len(parts) + 1):
+			seg = "/".join(parts[:i])
+			if seg not in seen:
+				seen.add(seg)
+				out.append(seg)
+	return {"paths": sorted(out)}
+
+
+@frappe.whitelist()
+def ensure_project_subfolder(project, relative_path):
+	"""Ensure a folder path exists under the project root and return its doc name.
+
+	Called by the frontend when a Mirror routing rule targets a subfolder that
+	doesn't yet exist in the standard template (e.g. 03-BALADIYA/01-DOCUMENTS/04-DRAWINGS).
+	"""
+	helper.assert_project_access(project)
+	rel = _normalize_template_path(cstr(relative_path).strip())
+	if not rel:
+		frappe.throw(_("relative_path is required."))
+	folder_ctx = ensure_project_folders(project)
+	root = folder_ctx["project_root"]
+	folder_name = _ensure_folder_path(root, rel)
+	frappe.db.commit()
+	return {"folder_name": folder_name, "relative_path": rel}
 
 
 def _fmt_size(size_bytes: int) -> str:

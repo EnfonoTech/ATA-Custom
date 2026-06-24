@@ -142,59 +142,11 @@ def portfolio_dashboard():
 		},
 	)
 
-	# ── Real Sales Invoice data ───────────────────────────────────────────────
-	from frappe.utils import get_first_day, get_last_day, nowdate as _nd
-	today = _nd()
-	month_start = str(get_first_day(today))
-	month_end   = str(get_last_day(today))
-
-	has_si = frappe.db.table_exists("Sales Invoice")
-	si_meta = frappe.get_meta("Sales Invoice") if has_si else None
-	has_project_field = has_si and si_meta and si_meta.has_field("project")
-
-	sales_this_month = 0.0
-	total_billed     = 0.0
-	outstanding      = 0.0
-
-	if has_si and has_project_field:
-		try:
-			sales_this_month = flt(
-				frappe.db.sql(
-					f"""SELECT SUM(grand_total) FROM `tabSales Invoice`
-					WHERE docstatus=1 AND project IN ({placeholders})
-					AND posting_date BETWEEN %s AND %s""",
-					names + [month_start, month_end],
-				)[0][0]
-				or 0
-			)
-			total_billed = flt(
-				frappe.db.sql(
-					f"""SELECT SUM(grand_total) FROM `tabSales Invoice`
-					WHERE docstatus=1 AND project IN ({placeholders})""",
-					names,
-				)[0][0]
-				or 0
-			)
-			outstanding = flt(
-				frappe.db.sql(
-					f"""SELECT SUM(outstanding_amount) FROM `tabSales Invoice`
-					WHERE docstatus=1 AND project IN ({placeholders})
-					AND outstanding_amount > 0""",
-					names,
-				)[0][0]
-				or 0
-			)
-		except Exception:
-			pass
-
 	return {
 		"totals": {
 			"projects": len(names),
 			"open_tasks": open_tasks,
 			"estimated_cost": cost,
-			"sales_this_month": sales_this_month,
-			"total_billed": total_billed,
-			"outstanding": outstanding,
 		},
 		"by_status": status_rows,
 		"by_kanban": kanban_rows,
@@ -408,70 +360,6 @@ def import_portal_folder_template_zip(project=None):
 
 		ensure_project_folders(applied_project)
 	return {"ok": True, "rows": [{"folder_name": p} for p in paths], "count": len(paths)}
-
-
-@frappe.whitelist()
-def import_portal_folder_template_from_paths(paths_json, project=None):
-	"""Replace folder template from a list of relative paths (e.g. from webkitRelativePath folder upload).
-
-	paths_json: JSON array of relative file/folder path strings.
-	project:    Optional — apply the new template to this project immediately.
-	"""
-	helper.assert_can_edit_portal_folder_template()
-	import json as _json
-	try:
-		raw_paths = _json.loads(paths_json or "[]")
-	except Exception:
-		frappe.throw(_("Invalid paths JSON"))
-	if not isinstance(raw_paths, list):
-		frappe.throw(_("paths_json must be a JSON array"))
-
-	paths = set()
-	for raw in raw_paths:
-		name = cstr(raw or "").strip().replace("\\", "/")
-		if not name or name.startswith("__MACOSX/"):
-			continue
-		# Extract the directory part (drop filename — last segment that contains a dot or is last)
-		parts = [p for p in name.split("/") if p not in ("", ".", "..")]
-		if not parts:
-			continue
-		# If the path ends with "/" it's a directory; otherwise drop the file (last segment)
-		if raw.rstrip().endswith("/"):
-			dir_parts = parts
-		else:
-			dir_parts = parts[:-1]
-		if not dir_parts:
-			continue
-		norm = _normalize_folder_template_path("/".join(dir_parts))
-		if norm:
-			paths.add(norm)
-
-	if paths:
-		roots = {p.split("/", 1)[0] for p in paths}
-		if len(roots) == 1:
-			only_root = next(iter(roots))
-			stripped = {p[len(only_root) + 1 :] for p in paths if "/" in p}
-			if stripped:
-				paths = {s for s in stripped if s}
-
-	all_paths = sorted(paths)
-	leaves = []
-	for p in all_paths:
-		prefix = p + "/"
-		if any(other.startswith(prefix) for other in all_paths):
-			continue
-		leaves.append(p)
-
-	leaves.sort(key=lambda path: [seg.lower() for seg in path.split("/")])
-	save_portal_folder_template(rows=leaves)
-
-	applied_project = cstr(project or "").strip()
-	if applied_project:
-		helper.assert_manage_project(applied_project)
-		from portal_app.api.files import ensure_project_folders
-		ensure_project_folders(applied_project)
-
-	return {"ok": True, "rows": [{"folder_name": p} for p in leaves], "count": len(leaves)}
 
 
 @frappe.whitelist()
@@ -1014,78 +902,15 @@ def list_tasks(status=None, priority=None, project=None, search=None, only_mine=
 		limit_page_length=8,
 	)
 
-	# Resolve _assign emails → full names
-	import json as _json
-	all_emails = set()
-	for t in tasks:
-		try:
-			for e in _json.loads(t.get("_assign") or "[]"):
-				all_emails.add(e)
-		except Exception:
-			pass
-	user_map = {}
-	if all_emails:
-		for u in frappe.get_all("User", filters={"name": ["in", list(all_emails)]}, fields=["name", "full_name"]):
-			user_map[u.name] = u.full_name or u.name
-
 	return {
 		"tasks": tasks,
 		"summary": {"total": len(tasks), "open": open_count, "overdue": overdue},
 		"mine_open": mine_open,
-		"user_map": user_map,
 	}
 
 
 @frappe.whitelist()
-def search_projects(query=""):
-	"""Return allowed projects matching query (name or project_name)."""
-	if frappe.session.user == "Guest":
-		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	allowed = helper.get_allowed_project_names()
-	if not allowed:
-		return []
-	safe = cstr(query or "").strip()[:80]
-	filters = {"name": ["in", allowed]}
-	or_filters = None
-	if safe:
-		or_filters = [["project_name", "like", f"%{safe}%"], ["name", "like", f"%{safe}%"]]
-		if frappe.get_meta("Project").has_field("portal_project_code"):
-			or_filters.append(["portal_project_code", "like", f"%{safe}%"])
-	rows = frappe.get_all(
-		"Project",
-		filters=filters,
-		or_filters=or_filters,
-		fields=["name", "project_name", "portal_project_code", "status"],
-		order_by="project_name asc",
-		limit_page_length=12,
-	)
-	return rows
-
-
-@frappe.whitelist()
-def search_assignable_users(query=""):
-	"""Return active users matching query (full_name or email)."""
-	if frappe.session.user == "Guest":
-		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	safe = cstr(query or "").strip()[:80]
-	filters = {"enabled": 1}
-	or_filters = None
-	if safe:
-		or_filters = [["full_name", "like", f"%{safe}%"], ["name", "like", f"%{safe}%"]]
-	rows = frappe.get_all(
-		"User",
-		filters=filters,
-		or_filters=or_filters,
-		fields=["name as email", "full_name", "user_image"],
-		order_by="full_name asc",
-		limit_page_length=12,
-	)
-	skip = {"Administrator", "Guest"}
-	return [r for r in rows if r.email not in skip and r.email]
-
-
-@frappe.whitelist()
-def update_task(task, status=None, priority=None, progress=None, exp_start_date=None, exp_end_date=None, assigned_to=None):
+def update_task(task, status=None, priority=None, progress=None, exp_start_date=None, exp_end_date=None):
 	"""Inline task updates with access control for portal task board."""
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -1116,13 +941,6 @@ def update_task(task, status=None, priority=None, progress=None, exp_start_date=
 		doc.exp_start_date = getdate(exp_start_date)
 	if exp_end_date not in (None, ""):
 		doc.exp_end_date = getdate(exp_end_date)
-	if assigned_to not in (None, ""):
-		import json as _json
-		existing = set(_json.loads(doc._assign or "[]"))
-		assignee = cstr(assigned_to).strip()
-		if assignee and frappe.db.exists("User", assignee):
-			existing.add(assignee)
-			doc._assign = _json.dumps(list(existing))
 
 	doc.save(ignore_permissions=True)
 	return {"ok": True, "task": doc.name}
@@ -1204,7 +1022,7 @@ def add_task_comment(task, content):
 
 
 @frappe.whitelist()
-def create_task(project, subject, status="Open", priority="Medium", exp_end_date=None, assigned_to=None):
+def create_task(project, subject, status="Open", priority="Medium", exp_end_date=None):
 	"""Quick-create a Task on a project the caller can manage.
 
 	Restricted to project managers (Portal Project Manager / Projects Manager / System
@@ -1222,12 +1040,6 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 
 	allowed_statuses = {"Open", "Working", "Pending Review", "Overdue", "Completed", "Cancelled"}
 	allowed_priorities = {"Low", "Medium", "High", "Urgent"}
-	import json as _json
-	assign_list = []
-	if assigned_to:
-		assignee = cstr(assigned_to).strip()
-		if assignee and frappe.db.exists("User", assignee):
-			assign_list = [assignee]
 	doc = frappe.get_doc(
 		{
 			"doctype": "Task",
@@ -1237,7 +1049,6 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 			"priority": priority if priority in allowed_priorities else "Medium",
 			"exp_end_date": exp_end_date or None,
 			"is_group": 0,
-			"_assign": _json.dumps(assign_list) if assign_list else None,
 		}
 	)
 	doc.insert(ignore_permissions=True)

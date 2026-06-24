@@ -8,6 +8,7 @@
   "enabled",
   "rule_name",
   "column_break_header",
+  "rule_type",
   "file_classification",
   "source_section",
   "source_folder_pattern",
@@ -40,10 +41,18 @@
    "fieldtype": "Column Break"
   },
   {
+   "default": "Cross-route",
+   "fieldname": "rule_type",
+   "fieldtype": "Select",
+   "label": "Rule Type",
+   "in_list_view": 1,
+   "options": "Cross-route\nMirror",
+   "description": "Cross-route: auto-post specific file types to a secondary folder. Mirror: duplicate ALL uploads from a source folder prefix into a parallel target folder, preserving subfolder structure."
+  },
+  {
    "fieldname": "file_classification",
    "fieldtype": "Select",
    "label": "File Classification",
-   "reqd": 1,
    "in_list_view": 1,
    "options": "\nPresentation Files\nDrawing / Layout Files\n3D Model Files\nFeasibility / Area Calculation Files\nEditable Design Source Files\nRendering / Image Files\nSubmission Files\nUncategorized",
    "description": "Which auto-detected file classification triggers this rule."
@@ -80,7 +89,7 @@
    "label": "Target Folder Pattern",
    "reqd": 1,
    "length": 255,
-   "description": "Text to match in the target folder's label (e.g. '05-PRESENTATION'). The first matching folder is used."
+   "description": "Cross-route: text to match in a target folder label — first match wins. Mirror: the destination folder prefix (e.g. '03-BALADIYA/01-DOCUMENTS') — subfolder structure from source is replicated here."
   },
   {
    "default": "contains",
