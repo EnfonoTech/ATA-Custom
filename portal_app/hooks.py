@@ -145,7 +145,13 @@ after_migrate = "portal_app.install.after_migrate"
 # ---------------
 # Hook on document methods and events
 
-doc_events = {}
+doc_events = {
+	"ToDo": {
+		"after_insert": "portal_app.api.projects.sync_project_access_from_todo",
+		"on_update": "portal_app.api.projects.sync_project_access_from_todo",
+		"on_trash": "portal_app.api.projects.sync_project_access_from_todo",
+	}
+}
 
 # Scheduled Tasks
 # ---------------
