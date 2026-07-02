@@ -36,7 +36,7 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage"):
+	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone"):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -224,6 +224,41 @@ def rename_project(project, project_name):
 	doc.project_name = title
 	doc.save(ignore_permissions=True)
 	return {"name": doc.name, "project_name": doc.project_name}
+
+
+@frappe.whitelist()
+def update_project(project, **kwargs):
+	"""Update editable project fields from the portal edit modal."""
+	helper.assert_manage_project(project)
+	doc = frappe.get_doc("Project", project)
+
+	for k in ("project_name", "status", "expected_start_date", "expected_end_date", "percent_complete", "notes"):
+		v = kwargs.get(k)
+		if v is not None:
+			doc.set(k, v if v != "" else None)
+
+	meta = frappe.get_meta("Project")
+	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase"):
+		if meta.has_field(k):
+			v = kwargs.get(k)
+			if v is not None:
+				doc.set(k, v if v != "" else None)
+
+	doc.save(ignore_permissions=True)
+	return {"name": doc.name, "project_name": doc.project_name}
+
+
+@frappe.whitelist()
+def get_portal_users():
+	"""Return enabled non-guest users for Lead Architect dropdown."""
+	users = frappe.get_all(
+		"User",
+		filters={"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]},
+		fields=["name", "full_name"],
+		order_by="full_name asc",
+		limit_page_length=200,
+	)
+	return users
 
 
 @frappe.whitelist()
@@ -462,7 +497,7 @@ def create_project(project_name, company=None, **kwargs):
 			doc.set(k, v)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage"):
+	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_phase", "portal_office"):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v not in (None, ""):
@@ -1220,3 +1255,10 @@ def calendar_events(search=None, type_filter="all", project=None):
 			)
 
 	return {"events": events, "projects": project_options}
+
+
+@frappe.whitelist()
+def delete_project(project):
+	helper.assert_manage_project(project)
+	frappe.delete_doc("Project", project, ignore_permissions=True)
+	return {"deleted": project}

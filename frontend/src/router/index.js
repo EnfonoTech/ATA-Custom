@@ -6,6 +6,8 @@ import { call } from "@/api";
 import Layout from "@/pages/Layout.vue";
 import Login from "@/pages/Login.vue";
 const Dashboard     = () => import("@/pages/Dashboard.vue");
+const OrgChartPage  = () => import("@/pages/OrgChartPage.vue");
+const TeamsPage     = () => import("@/pages/TeamsPage.vue");
 const Projects      = () => import("@/pages/Projects.vue");
 const ProjectDetail = () => import("@/pages/ProjectDetail.vue");
 const Kanban        = () => import("@/pages/Kanban.vue");
@@ -39,6 +41,8 @@ const routes = [
 		children: [
 			{ path: "", redirect: "/dashboard" },
 			{ path: "dashboard", name: "Dashboard", component: Dashboard },
+			{ path: "org-chart", name: "OrgChart", component: OrgChartPage },
+			{ path: "teams", name: "Teams", component: TeamsPage },
 			{ path: "projects", name: "Projects", component: Projects },
 			{ path: "projects/:name", name: "ProjectDetail", component: ProjectDetail, props: true },
 			{ path: "kanban", name: "Kanban", component: Kanban },

@@ -2,6 +2,28 @@ import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
+def ensure_department_portal_custom_fields():
+	if not frappe.db.exists("DocType", "Department"):
+		return
+
+	create_custom_fields(
+		{
+			"Department": [
+				{
+					"fieldname": "portal_office",
+					"label": "Portal Office",
+					"fieldtype": "Data",
+					"insert_after": "department_name",
+					"in_list_view": 1,
+					"description": "Office location tag used by the portal Teams page (e.g. RIYADH, LISBON, MANILA)",
+				},
+			]
+		},
+		update=True,
+	)
+	frappe.clear_cache(doctype="Department")
+
+
 def ensure_project_portal_custom_fields():
 	if not frappe.db.exists("DocType", "Project"):
 		return
@@ -33,6 +55,35 @@ def ensure_project_portal_custom_fields():
 					"insert_after": "status",
 					"in_list_view": 1,
 					"description": "Visual workflow stage for Kanban (FR-PM-002)",
+				},
+				{
+					"fieldname": "portal_office",
+					"label": "Portal Office",
+					"fieldtype": "Data",
+					"insert_after": "portal_kanban_stage",
+					"description": "Office location for this project (e.g. RIYADH, LISBON, MANILA)",
+				},
+				{
+					"fieldname": "portal_phase",
+					"label": "Portal Phase",
+					"fieldtype": "Select",
+					"options": "\nSchematic Design\nCD\nCD+\nDD\nTD\nFC\nConstruction",
+					"insert_after": "portal_office",
+					"description": "Architectural phase of this project",
+				},
+				{
+					"fieldname": "portal_project_server",
+					"label": "Portal Project Server",
+					"fieldtype": "Data",
+					"insert_after": "portal_project_manager",
+					"description": "Project server name or URL shown in the portal",
+				},
+				{
+					"fieldname": "portal_upcoming_milestone",
+					"label": "Portal Upcoming Milestone",
+					"fieldtype": "Data",
+					"insert_after": "portal_project_server",
+					"description": "Next upcoming milestone for this project",
 				},
 			]
 		},
@@ -148,6 +199,7 @@ def seed_default_portal_file_types():
 
 
 def after_install():
+	ensure_department_portal_custom_fields()
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
@@ -157,6 +209,7 @@ def after_install():
 
 def after_migrate():
 	"""Re-apply custom fields so new installs / restores get User.portal_linked_customer."""
+	ensure_department_portal_custom_fields()
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
