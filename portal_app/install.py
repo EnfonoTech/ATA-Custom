@@ -85,6 +85,27 @@ def ensure_project_portal_custom_fields():
 					"insert_after": "portal_project_server",
 					"description": "Next upcoming milestone for this project",
 				},
+				{
+					"fieldname": "portal_server_t",
+					"label": "T-Server (Google Drive)",
+					"fieldtype": "Data",
+					"insert_after": "portal_upcoming_milestone",
+					"description": "Link to this project's folder on Google Drive",
+				},
+				{
+					"fieldname": "portal_server_a",
+					"label": "A-Server (Autodesk)",
+					"fieldtype": "Data",
+					"insert_after": "portal_server_t",
+					"description": "Link to this project on the Autodesk (BIM) server",
+				},
+				{
+					"fieldname": "portal_server_c",
+					"label": "C-Server (Client / AWS)",
+					"fieldtype": "Data",
+					"insert_after": "portal_server_a",
+					"description": "Link to this project's client folder on the AWS server",
+				},
 			]
 		},
 		update=True,

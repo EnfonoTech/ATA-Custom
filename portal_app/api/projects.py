@@ -36,7 +36,7 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone"):
+	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_server_t", "portal_server_a", "portal_server_c"):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -238,7 +238,7 @@ def update_project(project, **kwargs):
 			doc.set(k, v if v != "" else None)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase"):
+	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c"):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v is not None:

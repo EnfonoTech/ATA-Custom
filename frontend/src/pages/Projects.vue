@@ -53,6 +53,9 @@ async function openEdit(p, e) {
 		expected_end_date:      p.expected_end_date || "",
 		percent_complete:       p.percent_complete || 0,
 		notes:                  p.notes || "",
+		portal_server_t:        p.portal_server_t || "",
+		portal_server_a:        p.portal_server_a || "",
+		portal_server_c:        p.portal_server_c || "",
 	};
 	if (!portalUsers.value.length) {
 		try {
@@ -536,7 +539,7 @@ function printProjects() {
 							<th class="px-4 py-3">Phase</th>
 							<th class="px-4 py-3">Status</th>
 							<th class="px-4 py-3">Lead Architect</th>
-							<th class="px-4 py-3">Project Server</th>
+							<th class="px-4 py-3">Servers</th>
 							<th class="px-4 py-3">Upcoming Milestone</th>
 							<th class="px-4 py-3">Progress</th>
 							<th class="px-4 py-3 text-right">Actions</th>
@@ -572,8 +575,22 @@ function printProjects() {
 							</td>
 							<!-- Lead Architect -->
 							<td class="px-4 py-3 text-xs" style="color:var(--portal-text);">{{ p.portal_project_manager || "—" }}</td>
-							<!-- Project Server -->
-							<td class="px-4 py-3 text-xs" style="color:var(--portal-muted);">{{ p.portal_project_server || "—" }}</td>
+							<!-- Servers (T = Google Drive, A = Autodesk, C = Client/AWS) -->
+							<td class="px-4 py-3">
+								<div class="flex items-center gap-1">
+									<a
+										v-for="s in [['t', p.portal_server_t, '#185FA5'], ['a', p.portal_server_a, '#276749'], ['c', p.portal_server_c, '#9B2335']]"
+										:key="s[0]"
+										:href="s[1] || undefined"
+										:target="s[1] ? '_blank' : undefined"
+										rel="noopener noreferrer"
+										:title="s[1] ? (s[0].toUpperCase() + '-Server') : (s[0].toUpperCase() + '-Server not set')"
+										class="flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold uppercase transition"
+										:style="s[1] ? { background: s[2] + '22', color: s[2], cursor: 'pointer' } : { background: 'rgba(128,128,128,0.1)', color: 'var(--portal-subtle)', cursor: 'default' }"
+										@click.stop="!s[1] && $event.preventDefault()"
+									>{{ s[0] }}</a>
+								</div>
+							</td>
 							<!-- Upcoming Milestone -->
 							<td class="px-4 py-3 text-xs" style="color:var(--portal-muted);">{{ p.portal_upcoming_milestone || "—" }}</td>
 							<!-- Progress bar -->
@@ -981,6 +998,16 @@ function printProjects() {
 								class="w-full h-2 rounded-full appearance-none cursor-pointer"
 								style="accent-color:#f59e0b;"
 							/>
+						</div>
+
+						<!-- Servers -->
+						<div>
+							<label class="block text-xs font-semibold text-gray-600 mb-1.5">Servers (links)</label>
+							<div class="space-y-2">
+								<input v-model="editForm.portal_server_t" type="url" placeholder="T-Server — Google Drive link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+								<input v-model="editForm.portal_server_a" type="url" placeholder="A-Server — Autodesk link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+								<input v-model="editForm.portal_server_c" type="url" placeholder="C-Server — Client / AWS link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+							</div>
 						</div>
 
 						<!-- Remarks -->
