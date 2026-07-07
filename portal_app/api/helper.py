@@ -133,6 +133,19 @@ def assert_manage_project(project_name: str) -> None:
 		)
 
 
+def can_manage_teams(user=None) -> bool:
+	"""Editing Teams (Department) info and member assignment is a staff-level action."""
+	return has_portal_staff_project_access(user)
+
+
+def assert_manage_teams() -> None:
+	if not can_manage_teams():
+		frappe.throw(
+			_("Only a Projects Manager or System Manager can manage teams."),
+			frappe.PermissionError,
+		)
+
+
 def can_edit_portal_folder_template(user=None) -> bool:
 	"""Company-wide subfolder template in Portal Project Settings (desk single).
 

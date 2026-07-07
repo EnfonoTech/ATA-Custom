@@ -34,6 +34,7 @@ export default defineConfig({
   },
 
   build: {
+    sourcemap: false,
     outDir: "../portal_app/public/frontend",
     emptyOutDir: true,
     chunkSizeWarningLimit: 1000,

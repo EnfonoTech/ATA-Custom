@@ -31,6 +31,9 @@ function canDeleteFileOnDetail(f) {
 }
 
 const teamList = ref([]);
+const userGroups = ref([]);
+const addingGroup = ref(false);
+const selectedGroup = ref("");
 /** Linked customer portal users from API: { name, full_name, email } */
 const customerPortalUsers = ref([]);
 const cpSearchQ = ref("");
@@ -180,6 +183,7 @@ async function deleteProjectFile(f) {
 onMounted(async () => {
 	await loadDashboard();
 	await loadFiles();
+	loadUserGroups();
 });
 
 watch(
@@ -258,6 +262,35 @@ function addTeamUser(u) {
 
 function removeTeamUser(u) {
 	teamList.value = teamList.value.filter((x) => x !== u);
+}
+
+async function loadUserGroups() {
+	try {
+		userGroups.value = await call({ method: "portal_app.api.teams.get_user_groups" });
+	} catch (e) {
+		console.error(e);
+		userGroups.value = [];
+	}
+}
+
+/** Add every member of the selected User Group to the team at once, then persist. */
+async function addTeamUserGroup() {
+	if (!selectedGroup.value) return;
+	addingGroup.value = true;
+	teamError.value = "";
+	try {
+		const members = await call({
+			method: "portal_app.api.teams.get_user_group_members",
+			args: { user_group: selectedGroup.value },
+		});
+		for (const m of members || []) addTeamUser(m);
+		selectedGroup.value = "";
+		await saveTeam();
+	} catch (e) {
+		teamError.value = apiErr(e);
+	} finally {
+		addingGroup.value = false;
+	}
 }
 
 // Refs on each picker wrapper so we can detect clicks outside and close the dropdown.
@@ -780,6 +813,27 @@ async function submitNewCustomer() {
 								</span>
 								<span v-if="teamList.includes(h.name)" class="text-xs text-gray-400">on team</span>
 							</button>
+						</div>
+
+						<div v-if="userGroups.length" class="mt-3 flex flex-wrap items-center gap-2">
+							<label class="text-xs font-medium text-gray-600">Or add a whole User Group</label>
+							<div class="flex items-center gap-2">
+								<select v-model="selectedGroup" class="portal-input text-sm">
+									<option value="">— Select —</option>
+									<option v-for="g in userGroups" :key="g.name" :value="g.name">
+										{{ g.name }} ({{ g.member_count }})
+									</option>
+								</select>
+								<Button
+									variant="subtle"
+									class="rounded-xl"
+									:disabled="!selectedGroup"
+									:loading="addingGroup"
+									@click="addTeamUserGroup"
+								>
+									Add group
+								</Button>
+							</div>
 						</div>
 					</div>
 					<ul class="divide-y rounded-xl border border-gray-100 text-sm">

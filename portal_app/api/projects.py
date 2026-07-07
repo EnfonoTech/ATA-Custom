@@ -36,7 +36,7 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage"):
+	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_server_t", "portal_server_a", "portal_server_c"):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -224,6 +224,41 @@ def rename_project(project, project_name):
 	doc.project_name = title
 	doc.save(ignore_permissions=True)
 	return {"name": doc.name, "project_name": doc.project_name}
+
+
+@frappe.whitelist()
+def update_project(project, **kwargs):
+	"""Update editable project fields from the portal edit modal."""
+	helper.assert_manage_project(project)
+	doc = frappe.get_doc("Project", project)
+
+	for k in ("project_name", "status", "expected_start_date", "expected_end_date", "percent_complete", "notes"):
+		v = kwargs.get(k)
+		if v is not None:
+			doc.set(k, v if v != "" else None)
+
+	meta = frappe.get_meta("Project")
+	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c"):
+		if meta.has_field(k):
+			v = kwargs.get(k)
+			if v is not None:
+				doc.set(k, v if v != "" else None)
+
+	doc.save(ignore_permissions=True)
+	return {"name": doc.name, "project_name": doc.project_name}
+
+
+@frappe.whitelist()
+def get_portal_users():
+	"""Return enabled non-guest users for Lead Architect dropdown."""
+	users = frappe.get_all(
+		"User",
+		filters={"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]},
+		fields=["name", "full_name"],
+		order_by="full_name asc",
+		limit_page_length=200,
+	)
+	return users
 
 
 @frappe.whitelist()
@@ -433,6 +468,7 @@ def get_capabilities():
 		"can_edit_portal_folder_template": helper.can_edit_portal_folder_template()
 		if not effective_customer_portal
 		else False,
+		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
 		"portal_user": frappe.session.user,
 	}
 
@@ -462,7 +498,7 @@ def create_project(project_name, company=None, **kwargs):
 			doc.set(k, v)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage"):
+	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_phase", "portal_office"):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v not in (None, ""):
@@ -522,7 +558,84 @@ def sync_project_team(project, users):
 		doc.append("users", {"user": u})
 	doc.save(ignore_permissions=True)
 
+	_sync_project_assignment(project, clean)
+
 	return {"ok": True, "users": [row.user for row in doc.users]}
+
+
+def _sync_project_assignment(project, users):
+	"""Mirror Project team membership into Frappe's standard Assign To (ToDo) so the
+	portal's Team list and ERP's native "Assigned To" sidebar show the same people.
+	Does not touch the Project Users table or any portal access-control logic."""
+	from frappe.desk.form.assign_to import add as assign_add
+	from frappe.desk.form.assign_to import remove as assign_remove
+
+	current = set(
+		frappe.get_all(
+			"ToDo",
+			filters={
+				"reference_type": "Project",
+				"reference_name": project,
+				"status": ["not in", ("Cancelled", "Closed")],
+			},
+			pluck="allocated_to",
+		)
+	)
+	target = set(users)
+
+	to_add = list(target - current)
+	if to_add:
+		assign_add({"doctype": "Project", "name": project, "assign_to": to_add}, ignore_permissions=True)
+
+	for u in current - target:
+		assign_remove("Project", project, u, ignore_permissions=True)
+
+
+def sync_project_access_from_todo(doc, method=None):
+	"""Doc event on ToDo: keep Project Users (portal access) in sync with "Assign To" /
+	"Assign To User Group" done from ERP Desk directly on a Project — not just from the
+	portal's own Team UI. This is the other direction of _sync_project_assignment, so
+	assigning a project from either side has the same effect on both.
+
+	Wrapped defensively: some existing projects have bad link data (e.g. an invalid
+	portal_project_manager) that makes Project.save() fail — that must not break the
+	underlying ToDo assign/unassign action itself.
+	"""
+	if doc.reference_type != "Project":
+		return
+	project = doc.reference_name
+	user = doc.allocated_to
+	if not project or not user or not frappe.db.exists("Project", project):
+		return
+
+	is_active = method != "on_trash" and doc.status not in ("Cancelled", "Closed")
+
+	try:
+		proj = frappe.get_doc("Project", project)
+		existing = {row.user for row in proj.users}
+		if is_active and user not in existing:
+			proj.append("users", {"user": user})
+			proj.save(ignore_permissions=True)
+		elif not is_active and user in existing:
+			still_assigned = frappe.db.exists(
+				"ToDo",
+				{
+					"reference_type": "Project",
+					"reference_name": project,
+					"allocated_to": user,
+					"status": ["not in", ("Cancelled", "Closed")],
+				},
+			)
+			if not still_assigned:
+				for row in list(proj.users):
+					if row.user == user:
+						proj.remove(row)
+				proj.save(ignore_permissions=True)
+	except Exception:
+		frappe.log_error(
+			title="sync_project_access_from_todo failed",
+			message=frappe.get_traceback(),
+		)
 
 
 @frappe.whitelist()
@@ -1220,3 +1333,10 @@ def calendar_events(search=None, type_filter="all", project=None):
 			)
 
 	return {"events": events, "projects": project_options}
+
+
+@frappe.whitelist()
+def delete_project(project):
+	helper.assert_manage_project(project)
+	frappe.delete_doc("Project", project, ignore_permissions=True)
+	return {"deleted": project}

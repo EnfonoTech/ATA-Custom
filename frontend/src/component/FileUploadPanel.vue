@@ -31,6 +31,13 @@ const folderPickerOpen = ref(false);
 const folderPickerSearch = ref("");
 const folderPickerExpanded = ref(new Set());
 
+// Guided folder picker — Windows Explorer–style breadcrumb browser: an
+// alternate way to pick the upload target that shows one level of folders at
+// a time (nothing pre-selected) with a clickable path trail to navigate back
+// up. Does not touch/replace the existing quick "Choose folder" tree picker.
+const guidedPickerOpen = ref(false);
+const guidedPickerPath = ref([]); // trail of folder nodes from root to current level
+
 // Confirm-before-upload modal — same flow as the Files hub: stage picked / dropped files
 // so the user can review the auto-generated name (which embeds today's date), the category
 // (target folder), and the date itself before the actual upload runs.
@@ -675,6 +682,51 @@ async function pickFolder(name) {
 	uploadCardRef.value?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ── Guided folder picker (Windows Explorer–style breadcrumb browser) ──────
+// guidedPickerPath: the trail of folders drilled into so far, root to current.
+// At any level, only that level's direct children are shown — never a full tree.
+function childFoldersOf(parentLabel) {
+	const prefix = parentLabel ? `${parentLabel}/` : "";
+	return props.folders
+		.filter((f) => {
+			const label = String(f.label || "");
+			if (!label.startsWith(prefix)) return false;
+			return !label.slice(prefix.length).includes("/");
+		})
+		.map((f) => ({ ...f, seg: String(f.label).slice(prefix.length) }))
+		.sort((a, b) => a.seg.localeCompare(b.seg, undefined, { numeric: true }));
+}
+
+const rootFolderOptions = computed(() => childFoldersOf(""));
+
+const guidedCurrentFolder = computed(() =>
+	guidedPickerPath.value.length ? guidedPickerPath.value[guidedPickerPath.value.length - 1] : null,
+);
+const guidedCurrentChildren = computed(() =>
+	guidedCurrentFolder.value ? childFoldersOf(guidedCurrentFolder.value.label) : rootFolderOptions.value,
+);
+
+function openGuidedPicker() {
+	if (props.disabled) return;
+	guidedPickerPath.value = [];
+	guidedPickerOpen.value = true;
+}
+function closeGuidedPicker() {
+	guidedPickerOpen.value = false;
+}
+function guidedNavigateInto(folder) {
+	guidedPickerPath.value = [...guidedPickerPath.value, folder];
+}
+function guidedNavigateToBreadcrumb(index) {
+	// index === -1 means "Home" (top-level list)
+	guidedPickerPath.value = guidedPickerPath.value.slice(0, index + 1);
+}
+async function guidedSelectCurrent() {
+	if (!guidedCurrentFolder.value) return;
+	await pickFolder(guidedCurrentFolder.value.name);
+	guidedPickerOpen.value = false;
+}
+
 function apiErr(e) {
 	const body = e?.responseBody;
 	if (body?._server_messages) {
@@ -1087,6 +1139,15 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 				</button>
 				<button
 					class="portal-btn"
+					:disabled="disabled || !folders.length"
+					title="Pick a folder step by step"
+					@click="openGuidedPicker"
+				>
+					<FeatherIcon name="list" class="h-4 w-4" />
+					Browse folders
+				</button>
+				<button
+					class="portal-btn"
 					:disabled="disabled || !targetFolder || uploadBusy"
 					title="Upload an entire folder (structure preserved)"
 					@click="onFolderButtonClick"
@@ -1273,6 +1334,96 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 					</div>
 					<div class="flex items-center justify-end gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
 						<button class="portal-btn" @click="closeFolderPicker">Done</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<!-- Guided folder picker: Windows Explorer–style breadcrumb browser, one level at a time -->
+		<Teleport to="body">
+			<div
+				v-if="guidedPickerOpen"
+				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+				@click.self="closeGuidedPicker"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"></div>
+				<div class="relative z-10 w-full max-w-lg rounded-2xl border border-[color:var(--portal-border)] shadow-2xl portal-anim-in" style="background:var(--portal-surface)">
+					<div class="flex items-center justify-between gap-3 border-b border-[color:var(--portal-border)] px-5 py-4">
+						<div class="flex items-center gap-2">
+							<div
+								class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
+								style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+							>
+								<FeatherIcon name="folder" class="h-4 w-4" />
+							</div>
+							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Select a folder</h2>
+						</div>
+						<button
+							type="button"
+							class="rounded-lg p-1.5 transition hover:bg-white/5"
+							style="color:var(--portal-muted)"
+							@click="closeGuidedPicker"
+						>
+							<FeatherIcon name="x" class="h-4 w-4" />
+						</button>
+					</div>
+
+					<!-- Breadcrumb path -->
+					<div class="flex items-center gap-1 overflow-x-auto border-b border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-2.5 text-sm">
+						<button
+							type="button"
+							class="shrink-0 rounded-lg px-2 py-1 font-medium transition hover:bg-white/5"
+							:class="!guidedCurrentFolder ? 'text-[color:var(--portal-accent-strong)]' : 'text-[color:var(--portal-muted)]'"
+							@click="guidedNavigateToBreadcrumb(-1)"
+						>
+							<FeatherIcon name="home" class="h-3.5 w-3.5" />
+						</button>
+						<template v-for="(node, i) in guidedPickerPath" :key="node.name">
+							<FeatherIcon name="chevron-right" class="h-3.5 w-3.5 shrink-0" style="color:var(--portal-subtle);" />
+							<button
+								type="button"
+								class="shrink-0 truncate rounded-lg px-2 py-1 font-medium transition hover:bg-white/5"
+								:class="i === guidedPickerPath.length - 1 ? 'text-[color:var(--portal-accent-strong)]' : 'text-[color:var(--portal-muted)]'"
+								@click="guidedNavigateToBreadcrumb(i)"
+							>{{ node.seg }}</button>
+						</template>
+					</div>
+
+					<div class="px-5 py-3">
+						<div class="grid max-h-[50vh] grid-cols-3 gap-2 overflow-auto p-1 sm:grid-cols-4">
+							<button
+								v-for="node in guidedCurrentChildren"
+								:key="node.name"
+								type="button"
+								class="flex flex-col items-center gap-1.5 rounded-xl p-3 text-center transition hover:bg-[color:var(--portal-accent-soft)]"
+								@click="guidedNavigateInto(node)"
+							>
+								<FeatherIcon name="folder" class="h-8 w-8" style="color:var(--portal-accent);" />
+								<span class="w-full truncate text-xs font-medium text-[color:var(--portal-text)]">{{ node.seg }}</span>
+							</button>
+							<div
+								v-if="!guidedCurrentChildren.length"
+								class="col-span-3 py-6 text-center text-xs text-[color:var(--portal-muted)] sm:col-span-4"
+							>
+								No subfolders here.
+							</div>
+						</div>
+					</div>
+
+					<div class="flex items-center justify-between gap-2 border-t border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-5 py-3">
+						<span class="min-w-0 truncate text-xs text-[color:var(--portal-muted)]">
+							<template v-if="guidedCurrentFolder">Current: <strong class="text-[color:var(--portal-text)]">{{ guidedCurrentFolder.seg }}</strong></template>
+							<template v-else>Pick a folder above, or drill into one to go deeper.</template>
+						</span>
+						<button
+							class="portal-btn portal-btn-primary shrink-0"
+							:disabled="!guidedCurrentFolder"
+							@click="guidedSelectCurrent"
+						>
+							Select this folder
+						</button>
 					</div>
 				</div>
 			</div>

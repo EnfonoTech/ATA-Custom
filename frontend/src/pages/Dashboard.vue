@@ -86,19 +86,11 @@ const statusDonutStyle = computed(() => {
 });
 
 // ── Progress Bar Chart ─────────────────────────────────────────────────────
-const DEMO_PROJECTS = [
-  { name:"Cultural Center",   planned:80, actual:72 },
-  { name:"Museum Project",    planned:65, actual:60 },
-  { name:"Office Complex",    planned:50, actual:40 },
-  { name:"Residential Tower", planned:75, actual:68 },
-  { name:"Urban Plaza",       planned:45, actual:38 },
-];
 const progressProjects = computed(() => {
   const previews = data.value?.user_projects_preview || [];
-  if (!previews.length) return DEMO_PROJECTS;
   return previews.slice(0, 5).map((p, i) => ({
     name:    (p.project_name || p.name).replace(/^\d{4}\s*[–—-]\s*/, "").split(/[\s/]/)[0] || `P${i+1}`,
-    planned: p.planned_pct ?? (DEMO_PROJECTS[i]?.planned || 65),
+    planned: p.planned_pct ?? 0,
     actual:  Math.round(Number(p.percent_complete) || 0),
   }));
 });
@@ -106,12 +98,6 @@ const progressProjects = computed(() => {
 // ── Tasks Overview Donut ───────────────────────────────────────────────────
 const taskSegments = computed(() => {
   const tasks = data.value?.my_tasks || [];
-  if (!tasks.length) return [
-    { label:"Completed",   count:72, color:"#22c55e" },
-    { label:"In Progress", count:58, color:"#3b82f6" },
-    { label:"To Do",       count:66, color:"#f59e0b" },
-    { label:"Overdue",     count:14, color:"#ef4444" },
-  ];
   const completed  = tasks.filter(t=>t.status==="Completed").length;
   const inProgress = tasks.filter(t=>["Working","In Progress"].includes(t.status)).length;
   const todo       = tasks.filter(t=>t.status==="Open").length;
@@ -152,13 +138,6 @@ function fmtDue(d) {
 
 const recentProjects = computed(() => {
   const previews = data.value?.user_projects_preview || [];
-  if (!previews.length) return [
-    { id:"", name:"Museum Project",     stage:"Design Development",     progress:60, budget:"—", status:"On Track", due:"30 May 2025" },
-    { id:"", name:"Office Complex",     stage:"Construction Documents", progress:40, budget:"—", status:"At Risk",  due:"15 Jun 2025" },
-    { id:"", name:"Residential Tower",  stage:"Technical Design",       progress:68, budget:"—", status:"On Track", due:"30 Jun 2025" },
-    { id:"", name:"Urban Plaza",        stage:"Schematic Design",       progress:38, budget:"—", status:"At Risk",  due:"25 May 2025" },
-    { id:"", name:"Cultural Center",    stage:"Construction Documents", progress:72, budget:"—", status:"On Track", due:"10 Jun 2025" },
-  ];
   const avgBudget = data.value?.budget_health?.avg_pct;
   return previews.slice(0, 5).map(p => ({
     id:       p.name,
@@ -172,18 +151,10 @@ const recentProjects = computed(() => {
 });
 
 // ── Upcoming Milestones ────────────────────────────────────────────────────
-const MILESTONE_DEMO = [
-  { icon:"check-circle",   color:"#3b82f6", title:"Schematic Design Approval",        project:"Museum Project / CD Team",     date:"20 May 2025" },
-  { icon:"file-text",      color:"#22c55e", title:"Design Development Completion",    project:"Office Complex / DD Team",     date:"28 May 2025" },
-  { icon:"alert-triangle", color:"#f59e0b", title:"Construction Documents 50%",       project:"Residential Tower / TD Team",  date:"05 Jun 2025" },
-  { icon:"users",          color:"#8b5cf6", title:"Client Presentation",              project:"Urban Plaza / CD Team",        date:"12 Jun 2025" },
-  { icon:"clipboard",      color:"#06b6d4", title:"Tender Documentation",             project:"Office Complex / DD Team",     date:"12 Jun 2025" },
-];
 const ICON_CYCLE  = ["check-circle","file-text","alert-triangle","users","clipboard"];
 const COLOR_CYCLE = ["#3b82f6","#22c55e","#f59e0b","#8b5cf6","#06b6d4"];
 
 const upcomingMilestones = computed(() => {
-  // Tasks assigned to me with a due date
   const taskItems = (data.value?.my_tasks || [])
     .filter(t => t.exp_end_date)
     .slice(0, 3)
@@ -194,7 +165,6 @@ const upcomingMilestones = computed(() => {
       project: t.project || "—",
       date:    fmtDue(t.exp_end_date),
     }));
-  // Projects with imminent end dates
   const projItems = (data.value?.upcoming_projects || [])
     .slice(0, 3)
     .map((p, i) => ({
@@ -204,18 +174,8 @@ const upcomingMilestones = computed(() => {
       project: `Due ${fmtDue(p.expected_end_date)}`,
       date:    fmtDue(p.expected_end_date),
     }));
-  const combined = [...taskItems, ...projItems].slice(0, 5);
-  return combined.length ? combined : MILESTONE_DEMO;
+  return [...taskItems, ...projItems].slice(0, 5);
 });
-
-// ── Recent Activity ────────────────────────────────────────────────────────
-const ACTIVITY_DEMO = [
-  { icon:"upload",    color:"#3b82f6", title:"Drawing A-101 (Ground Floor Plan) uploaded", detail:"Museum Project / CD - ID Team",     time:"2h ago" },
-  { icon:"edit-2",    color:"#22c55e", title:"Landscape Layout L-200 updated",             detail:"Urban Plaza / CD - LA Team",        time:"4h ago" },
-  { icon:"file-plus", color:"#f59e0b", title:"RFI #125 submitted",                        detail:"Office Complex / DD - ID Team",     time:"6h ago" },
-  { icon:"x-circle",  color:"#ef4444", title:"Issue #45 closed",                          detail:"Residential Tower / TD - LA Team",  time:"1d ago" },
-  { icon:"file-text", color:"#8b5cf6", title:"Specifications Section 09 00 00 updated",   detail:"Residential Tower / TD - LA Team",  time:"1d ago" },
-];
 
 function activityIcon(item) {
   if (item.type === "file") return "upload";
@@ -232,7 +192,6 @@ function activityColor(item) {
 
 const recentActivity = computed(() => {
   const feed = data.value?.recent_activity || [];
-  if (!feed.length) return ACTIVITY_DEMO;
   return feed.slice(0, 5).map(a => ({
     icon:   activityIcon(a),
     color:  activityColor(a),
@@ -243,17 +202,8 @@ const recentActivity = computed(() => {
 });
 
 // ── Team Member Count ──────────────────────────────────────────────────────
-const teamMemberCount = computed(() => Number(data.value?.team_member_count) || 128);
-
-// ── Team Performance (static demo — not in API) ────────────────────────────
-const teamPerformance = [
-  { team:"CD - ID", count:32, onTrack:75, atRisk:20, overdue:5  },
-  { team:"CD - LA", count:30, onTrack:70, atRisk:20, overdue:10 },
-  { team:"DD - ID", count:28, onTrack:68, atRisk:21, overdue:11 },
-  { team:"DD - LA", count:27, onTrack:72, atRisk:19, overdue:9  },
-  { team:"TD - ID", count:26, onTrack:69, atRisk:19, overdue:12 },
-  { team:"TD - LA", count:25, onTrack:66, atRisk:20, overdue:14 },
-];
+const teamMemberCount = computed(() => Number(data.value?.team_member_count) || 0);
+const teamPerformance = computed(() => data.value?.team_performance || []);
 
 // ── Period dropdowns ───────────────────────────────────────────────────────
 const PERIOD_OPTS    = ["This Month","Last Month","This Quarter","This Year"];
@@ -425,7 +375,161 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
           </div>
         </div>
 
-        <!-- ── ROW 2 · Status · Progress · Team Structure ────────────────── -->
+        <!-- ── ROW 2 · Team Performance · Milestones · Tasks · Activity ──── -->
+        <div class="grid gap-4 lg:grid-cols-4">
+
+          <!-- Team Performance -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Team Performance</h3>
+              <div class="relative" @click.stop>
+                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
+                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
+                        @click="toggleMenu('team',$event)">
+                  {{ sel.team }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
+                </button>
+                <div v-if="openMenu==='team'"
+                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
+                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
+                  <button v-for="opt in PERIOD_OPTS" :key="opt"
+                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
+                          :style="opt===sel.team?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
+                          @click="pickPeriod('team',opt)">{{ opt }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Header row -->
+            <div class="grid grid-cols-4 gap-1 pb-2 mb-2" style="border-bottom:1px solid var(--portal-border);">
+              <span class="text-[10px] font-semibold" style="color:var(--portal-subtle);">Team</span>
+              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">On Track</span>
+              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">At Risk</span>
+              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">Overdue</span>
+            </div>
+            <div v-if="teamPerformance.length" class="space-y-2.5">
+              <div v-for="t in teamPerformance" :key="t.team" class="grid grid-cols-4 gap-1 items-center">
+                <span class="text-[11px] font-medium truncate" style="color:var(--portal-text);">{{ t.team }}</span>
+                <div class="flex flex-col gap-0.5">
+                  <div class="h-1 rounded-full overflow-hidden" style="background:var(--portal-surface-alt);">
+                    <div class="h-full rounded-full transition-all" :style="{width:t.onTrack+'%',background:'#22c55e'}"></div>
+                  </div>
+                  <span class="text-[10px] text-center" style="color:#22c55e;">{{ t.onTrack }}%</span>
+                </div>
+                <span class="text-[10px] text-center font-semibold" style="color:#f59e0b;">{{ t.atRisk }}%</span>
+                <span class="text-[10px] text-center font-semibold" style="color:#ef4444;">{{ t.overdue }}%</span>
+              </div>
+            </div>
+            <p v-else class="text-xs text-center py-4" style="color:var(--portal-muted);">No performance data</p>
+          </div>
+
+          <!-- Upcoming Milestones -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Upcoming Milestones</h3>
+              <div class="relative" @click.stop>
+                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
+                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
+                        @click="toggleMenu('milestones',$event)">
+                  {{ sel.milestones }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
+                </button>
+                <div v-if="openMenu==='milestones'"
+                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
+                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
+                  <button v-for="opt in MILESTONE_OPTS" :key="opt"
+                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
+                          :style="opt===sel.milestones?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
+                          @click="pickPeriod('milestones',opt)">{{ opt }}</button>
+                </div>
+              </div>
+            </div>
+            <ul v-if="upcomingMilestones.length" class="space-y-3">
+              <li v-for="m in upcomingMilestones" :key="m.title" class="flex items-start gap-2.5">
+                <div class="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                     :style="{background: m.color+'20'}">
+                  <FeatherIcon :name="m.icon" class="h-3.5 w-3.5" :style="{color:m.color}"/>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-medium truncate leading-snug" style="color:var(--portal-text);">{{ m.title }}</p>
+                  <p class="text-[11px] truncate mt-0.5" style="color:var(--portal-muted);">{{ m.project }}</p>
+                </div>
+                <span class="text-[11px] shrink-0 font-medium" style="color:var(--portal-subtle);">{{ m.date }}</span>
+              </li>
+            </ul>
+            <p v-else class="text-xs text-center py-4" style="color:var(--portal-muted);">No upcoming milestones</p>
+          </div>
+
+          <!-- Tasks Overview -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Tasks Overview</h3>
+              <div class="relative" @click.stop>
+                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
+                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
+                        @click="toggleMenu('tasks',$event)">
+                  {{ sel.tasks }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
+                </button>
+                <div v-if="openMenu==='tasks'"
+                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
+                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
+                  <button v-for="opt in TASK_OPTS" :key="opt"
+                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
+                          :style="opt===sel.tasks?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
+                          @click="pickPeriod('tasks',opt)">{{ opt }}</button>
+                </div>
+              </div>
+            </div>
+            <!-- Donut + Legend -->
+            <div class="flex items-center gap-4">
+              <div class="relative shrink-0" style="width:112px;height:112px;">
+                <div class="absolute inset-0 rounded-full" :style="taskDonutStyle"></div>
+                <div class="absolute inset-[19px] rounded-full flex flex-col items-center justify-center"
+                     style="background:var(--portal-surface);">
+                  <p class="text-xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalTasksCount) }}</p>
+                  <p class="text-[9px] mt-0.5 text-center" style="color:var(--portal-muted);">Total Tasks</p>
+                </div>
+              </div>
+              <ul class="flex-1 space-y-2">
+                <li v-for="seg in taskSegments" :key="seg.label" class="flex items-center gap-1.5 text-[11px]">
+                  <span class="h-2 w-2 rounded-full shrink-0" :style="{background:seg.color}"></span>
+                  <span class="flex-1 truncate" style="color:var(--portal-muted);">{{ seg.label }}</span>
+                  <span class="font-bold" style="color:var(--portal-text);">{{ seg.count }}</span>
+                  <span style="color:var(--portal-subtle);">({{ Math.round(seg.count/(totalTasksCount||1)*100) }}%)</span>
+                </li>
+              </ul>
+            </div>
+            <div class="mt-4 pt-3 flex justify-end" style="border-top:1px solid var(--portal-border);">
+              <button class="flex items-center gap-1 text-xs font-medium" style="color:var(--portal-accent);"
+                      @click="router.push('/tasks')">
+                View all tasks <FeatherIcon name="arrow-right" class="h-3.5 w-3.5"/>
+              </button>
+            </div>
+          </div>
+
+          <!-- Recent Activity -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Recent Activity</h3>
+              <button class="text-xs font-medium" style="color:var(--portal-accent);"
+                      @click="router.push('/projects')">View all</button>
+            </div>
+            <ul v-if="recentActivity.length" class="space-y-3">
+              <li v-for="a in recentActivity" :key="a.title" class="flex items-start gap-2.5">
+                <div class="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
+                     :style="{background:a.color+'20'}">
+                  <FeatherIcon :name="a.icon" class="h-3 w-3" :style="{color:a.color}"/>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-medium leading-snug" style="color:var(--portal-text);">{{ a.title }}</p>
+                  <p class="text-[11px] truncate mt-0.5" style="color:var(--portal-muted);">{{ a.detail }}</p>
+                </div>
+                <span class="text-[11px] shrink-0" style="color:var(--portal-subtle);">{{ a.time }}</span>
+              </li>
+            </ul>
+            <p v-else class="text-xs text-center py-4" style="color:var(--portal-muted);">No recent activity</p>
+          </div>
+        </div>
+
+        <!-- ── ROW 3 · Status · Progress · Team Structure ────────────────── -->
         <div class="grid gap-4 lg:grid-cols-3">
 
           <!-- Project Status Overview -->
@@ -584,157 +688,6 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
               <span class="text-xs" style="color:var(--portal-muted);">Total Members</span>
               <span class="text-sm font-bold" style="color:var(--portal-text);">{{ fmtN(teamMemberCount) }}</span>
             </div>
-          </div>
-        </div>
-
-        <!-- ── ROW 3 · Team Performance · Milestones · Tasks · Activity ──── -->
-        <div class="grid gap-4 lg:grid-cols-4">
-
-          <!-- Team Performance -->
-          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Team Performance</h3>
-              <div class="relative" @click.stop>
-                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
-                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
-                        @click="toggleMenu('team',$event)">
-                  {{ sel.team }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
-                </button>
-                <div v-if="openMenu==='team'"
-                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
-                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
-                  <button v-for="opt in PERIOD_OPTS" :key="opt"
-                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
-                          :style="opt===sel.team?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
-                          @click="pickPeriod('team',opt)">{{ opt }}</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Header row -->
-            <div class="grid grid-cols-4 gap-1 pb-2 mb-2" style="border-bottom:1px solid var(--portal-border);">
-              <span class="text-[10px] font-semibold" style="color:var(--portal-subtle);">Team</span>
-              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">On Track</span>
-              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">At Risk</span>
-              <span class="text-[10px] font-semibold text-center" style="color:var(--portal-subtle);">Overdue</span>
-            </div>
-            <div class="space-y-2.5">
-              <div v-for="t in teamPerformance" :key="t.team" class="grid grid-cols-4 gap-1 items-center">
-                <span class="text-[11px] font-medium truncate" style="color:var(--portal-text);">{{ t.team }}</span>
-                <div class="flex flex-col gap-0.5">
-                  <div class="h-1 rounded-full overflow-hidden" style="background:var(--portal-surface-alt);">
-                    <div class="h-full rounded-full transition-all" :style="{width:t.onTrack+'%',background:'#22c55e'}"></div>
-                  </div>
-                  <span class="text-[10px] text-center" style="color:#22c55e;">{{ t.onTrack }}%</span>
-                </div>
-                <span class="text-[10px] text-center font-semibold" style="color:#f59e0b;">{{ t.atRisk }}%</span>
-                <span class="text-[10px] text-center font-semibold" style="color:#ef4444;">{{ t.overdue }}%</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Upcoming Milestones -->
-          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Upcoming Milestones</h3>
-              <div class="relative" @click.stop>
-                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
-                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
-                        @click="toggleMenu('milestones',$event)">
-                  {{ sel.milestones }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
-                </button>
-                <div v-if="openMenu==='milestones'"
-                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
-                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
-                  <button v-for="opt in MILESTONE_OPTS" :key="opt"
-                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
-                          :style="opt===sel.milestones?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
-                          @click="pickPeriod('milestones',opt)">{{ opt }}</button>
-                </div>
-              </div>
-            </div>
-            <ul class="space-y-3">
-              <li v-for="m in upcomingMilestones" :key="m.title" class="flex items-start gap-2.5">
-                <div class="h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                     :style="{background: m.color+'20'}">
-                  <FeatherIcon :name="m.icon" class="h-3.5 w-3.5" :style="{color:m.color}"/>
-                </div>
-                <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium truncate leading-snug" style="color:var(--portal-text);">{{ m.title }}</p>
-                  <p class="text-[11px] truncate mt-0.5" style="color:var(--portal-muted);">{{ m.project }}</p>
-                </div>
-                <span class="text-[11px] shrink-0 font-medium" style="color:var(--portal-subtle);">{{ m.date }}</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- Tasks Overview -->
-          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Tasks Overview</h3>
-              <div class="relative" @click.stop>
-                <button class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs"
-                        style="background:var(--portal-surface-alt);color:var(--portal-muted);border:1px solid var(--portal-border-strong);"
-                        @click="toggleMenu('tasks',$event)">
-                  {{ sel.tasks }} <FeatherIcon name="chevron-down" class="h-3 w-3"/>
-                </button>
-                <div v-if="openMenu==='tasks'"
-                     class="absolute right-0 top-full z-50 mt-1 w-36 rounded-xl overflow-hidden py-1 shadow-2xl"
-                     style="background:var(--portal-surface-dropdown);border:1px solid var(--portal-border);">
-                  <button v-for="opt in TASK_OPTS" :key="opt"
-                          class="w-full px-3 py-1.5 text-left text-xs hover:opacity-80"
-                          :style="opt===sel.tasks?'color:var(--portal-accent);font-weight:600;':'color:var(--portal-muted);'"
-                          @click="pickPeriod('tasks',opt)">{{ opt }}</button>
-                </div>
-              </div>
-            </div>
-            <!-- Donut + Legend -->
-            <div class="flex items-center gap-4">
-              <div class="relative shrink-0" style="width:112px;height:112px;">
-                <div class="absolute inset-0 rounded-full" :style="taskDonutStyle"></div>
-                <div class="absolute inset-[19px] rounded-full flex flex-col items-center justify-center"
-                     style="background:var(--portal-surface);">
-                  <p class="text-xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalTasksCount) }}</p>
-                  <p class="text-[9px] mt-0.5 text-center" style="color:var(--portal-muted);">Total Tasks</p>
-                </div>
-              </div>
-              <ul class="flex-1 space-y-2">
-                <li v-for="seg in taskSegments" :key="seg.label" class="flex items-center gap-1.5 text-[11px]">
-                  <span class="h-2 w-2 rounded-full shrink-0" :style="{background:seg.color}"></span>
-                  <span class="flex-1 truncate" style="color:var(--portal-muted);">{{ seg.label }}</span>
-                  <span class="font-bold" style="color:var(--portal-text);">{{ seg.count }}</span>
-                  <span style="color:var(--portal-subtle);">({{ Math.round(seg.count/(totalTasksCount||1)*100) }}%)</span>
-                </li>
-              </ul>
-            </div>
-            <div class="mt-4 pt-3 flex justify-end" style="border-top:1px solid var(--portal-border);">
-              <button class="flex items-center gap-1 text-xs font-medium" style="color:var(--portal-accent);"
-                      @click="router.push('/tasks')">
-                View all tasks <FeatherIcon name="arrow-right" class="h-3.5 w-3.5"/>
-              </button>
-            </div>
-          </div>
-
-          <!-- Recent Activity -->
-          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
-            <div class="flex items-center justify-between mb-4">
-              <h3 class="font-semibold text-sm" style="color:var(--portal-text);">Recent Activity</h3>
-              <button class="text-xs font-medium" style="color:var(--portal-accent);"
-                      @click="router.push('/projects')">View all</button>
-            </div>
-            <ul class="space-y-3">
-              <li v-for="a in recentActivity" :key="a.title" class="flex items-start gap-2.5">
-                <div class="h-7 w-7 rounded-lg flex items-center justify-center shrink-0 mt-0.5"
-                     :style="{background:a.color+'20'}">
-                  <FeatherIcon :name="a.icon" class="h-3 w-3" :style="{color:a.color}"/>
-                </div>
-                <div class="min-w-0 flex-1">
-                  <p class="text-xs font-medium leading-snug" style="color:var(--portal-text);">{{ a.title }}</p>
-                  <p class="text-[11px] truncate mt-0.5" style="color:var(--portal-muted);">{{ a.detail }}</p>
-                </div>
-                <span class="text-[11px] shrink-0" style="color:var(--portal-subtle);">{{ a.time }}</span>
-              </li>
-            </ul>
           </div>
         </div>
 

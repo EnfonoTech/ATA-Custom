@@ -722,7 +722,6 @@ const folderTreeFiltered = computed(() => {
 
 function openFolderPicker() {
 	folderPickerSearch.value = "";
-	// Expand all ancestors of current selection so user can see where they are.
 	if (targetFolderEntry.value?.label) {
 		const segs = targetFolderEntry.value.label.split("/");
 		const next = new Set(folderPickerExpanded.value);
@@ -2364,7 +2363,9 @@ async function deleteProjectFile(f) {
 							>
 								<FeatherIcon name="folder" class="h-4 w-4" />
 							</div>
-							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Choose folder</h2>
+							<div>
+								<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Choose folder</h2>
+							</div>
 						</div>
 						<button
 							type="button"

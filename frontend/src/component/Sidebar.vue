@@ -1,7 +1,8 @@
 <script setup>
-import { ref, inject, computed } from "vue";
+import { ref, inject, computed, onMounted } from "vue";
 import { FeatherIcon } from "frappe-ui";
 import { useRoute, useRouter } from "vue-router";
+import { call } from "@/api";
 
 const route  = useRoute();
 const router = useRouter();
@@ -16,16 +17,26 @@ const portalSettings     = inject("portalSettings", ref({ company_logo: "", comp
 
 const CS = (m) => `/coming-soon?m=${m}`;
 
-// ── Team Structure (collapsible) ─────────────────────────────────────────
-const TEAMS = [
-	{ key:"cd", name:"CD Team", count:46, subTeams:[{ name:"ID Team", count:23 },{ name:"LA Team", count:23 }] },
-	{ key:"dd", name:"DD Team", count:42, subTeams:[{ name:"ID Team", count:21 },{ name:"LA Team", count:21 }] },
-	{ key:"td", name:"TD Team", count:40, subTeams:[{ name:"ID Team", count:20 },{ name:"LA Team", count:20 }] },
-];
-const ataExpanded  = ref(true);
-const teamExpanded = ref({ cd:false, dd:false, td:false });
-function toggleAta()     { ataExpanded.value = !ataExpanded.value; }
-function toggleTeam(key) { teamExpanded.value[key] = !teamExpanded.value[key]; }
+// ── Team Structure — fetched from backend ─────────────────────────────────
+const ataExpanded   = ref(true);
+const teamExpanded  = ref({});
+const teamTotal     = ref(0);
+const teamDepts     = ref([]);
+
+function toggleAta()      { ataExpanded.value = !ataExpanded.value; }
+function toggleTeam(name) { teamExpanded.value[name] = !teamExpanded.value[name]; }
+
+onMounted(async () => {
+	try {
+		const data = await call({ method: "portal_app.api.teams.get_team_summary" });
+		if (data) {
+			teamTotal.value = data.total || 0;
+			teamDepts.value = data.departments || [];
+		}
+	} catch (e) {
+		console.error("team summary error", e);
+	}
+});
 
 const groups = computed(() => {
 	const a      = portalAdmin.value;
@@ -35,8 +46,12 @@ const groups = computed(() => {
 		title: "Project Management",
 		items: [
 			{ name: "Dashboard", path: "/dashboard", icon: "layout"       },
+			{ name: "Org Chart", path: "/org-chart", icon: "share-2"      },
 			{ name: "Projects",  path: "/projects",  icon: "folder"       },
+			{ name: "Teams",     path: "/teams",     icon: "users"        },
+			{ name: "Gantt Chart", path: "/gantt",   icon: "bar-chart-2"  },
 			{ name: "Tasks",     path: "/tasks",      icon: "check-square" },
+			{ name: "Daily Gantt", path: "/daily-gantt", icon: "clock"     },
 			{ name: "Kanban",    path: "/kanban",     icon: "columns"      },
 			{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
 		],
@@ -240,7 +255,7 @@ function navigate(item) {
 			</div>
 
 			<!-- ── TEAM STRUCTURE ── -->
-			<div class="space-y-0.5">
+			<div v-if="teamTotal > 0" class="space-y-0.5">
 				<p v-if="!collapsed" class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em]" style="color:var(--portal-section-label);">
 					Team Structure
 				</p>
@@ -254,44 +269,27 @@ function navigate(item) {
 				     @mouseleave="$event.currentTarget.style.background=''">
 					<FeatherIcon name="users" class="h-[17px] w-[17px] shrink-0" style="color:var(--portal-subtle);"/>
 					<span class="flex-1 truncate">ATA Teams</span>
-					<span class="rounded-full px-1.5 py-0.5 text-[10px] font-bold mr-1" style="background:var(--portal-surface-alt);color:var(--portal-muted);">128</span>
+					<span class="rounded-full px-1.5 py-0.5 text-[10px] font-bold mr-1" style="background:var(--portal-surface-alt);color:var(--portal-muted);">{{ teamTotal }}</span>
 					<FeatherIcon :name="ataExpanded ? 'chevron-down' : 'chevron-right'" class="h-3.5 w-3.5 shrink-0" style="color:var(--portal-subtle);"/>
 				</div>
-				<!-- Collapsed: icon only -->
 				<div v-else class="flex justify-center py-2">
 					<FeatherIcon name="users" class="h-[17px] w-[17px]" style="color:var(--portal-subtle);" title="ATA Teams"/>
 				</div>
 
-				<!-- Expanded team list -->
+				<!-- Expanded dept list -->
 				<template v-if="ataExpanded && !collapsed">
-					<div v-for="team in TEAMS" :key="team.key" class="ml-3">
-						<!-- Team row -->
+					<div v-for="dept in teamDepts" :key="dept.name" class="ml-3">
 						<div class="flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-1.5 text-[12px] font-medium transition"
 						     style="color:var(--portal-muted);"
-						     @click="toggleTeam(team.key)"
+						     @click="toggleTeam(dept.name)"
 						     @mouseenter="$event.currentTarget.style.background='rgba(128,128,128,0.06)'"
 						     @mouseleave="$event.currentTarget.style.background=''">
 							<span class="h-3.5 w-3.5 shrink-0 flex items-center justify-center">
 								<span class="h-full w-px" style="background:var(--portal-border);"></span>
 							</span>
-							<span class="flex-1 truncate">{{ team.name }}</span>
-							<span class="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style="background:var(--portal-surface-alt);color:var(--portal-muted);">{{ team.count }}</span>
-							<FeatherIcon :name="teamExpanded[team.key] ? 'chevron-down' : 'chevron-right'" class="h-3 w-3 shrink-0 ml-0.5" style="color:var(--portal-subtle);"/>
+							<span class="flex-1 truncate">{{ dept.label }}</span>
+							<span class="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style="background:var(--portal-surface-alt);color:var(--portal-muted);">{{ dept.count }}</span>
 						</div>
-
-						<!-- Sub-teams -->
-						<template v-if="teamExpanded[team.key]">
-							<div v-for="sub in team.subTeams" :key="sub.name"
-							     class="portal-sub-team flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-[11px] ml-3 cursor-default transition"
-							     style="color:var(--portal-subtle);">
-								<span class="h-3.5 w-3.5 shrink-0 flex items-center justify-center">
-									<span class="h-full w-px" style="background:var(--portal-border);"></span>
-								</span>
-								<FeatherIcon name="user" class="h-3 w-3 shrink-0" style="color:var(--portal-subtle);"/>
-								<span class="flex-1 truncate">{{ sub.name }}</span>
-								<span class="rounded-full px-1.5 py-0.5 text-[10px] font-bold" style="background:var(--portal-surface-alt);color:var(--portal-subtle);">{{ sub.count }}</span>
-							</div>
-						</template>
 					</div>
 				</template>
 			</div>
