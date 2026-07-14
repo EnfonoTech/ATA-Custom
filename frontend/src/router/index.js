@@ -42,9 +42,9 @@ const routes = [
 		component: Layout,
 		children: [
 			{ path: "", redirect: "/dashboard" },
-			{ path: "dashboard", name: "Dashboard", component: Dashboard },
-			{ path: "org-chart", name: "OrgChart", component: OrgChartPage },
-			{ path: "teams", name: "Teams", component: TeamsPage },
+			{ path: "dashboard", name: "Dashboard", component: Dashboard, meta: { requiresManager: true } },
+			{ path: "org-chart", name: "OrgChart", component: OrgChartPage, meta: { requiresManager: true } },
+			{ path: "teams", name: "Teams", component: TeamsPage, meta: { requiresManager: true } },
 			{ path: "gantt", name: "GanttChart", component: GanttChart },
 			{ path: "daily-gantt", name: "DailyGantt", component: DailyGantt },
 			{ path: "projects", name: "Projects", component: Projects },
@@ -118,6 +118,19 @@ router.beforeEach(async (to) => {
 
 	if (to.path === "/login" && isAuthenticated) {
 		return "/dashboard";
+	}
+
+	if (to.meta.requiresManager && isAuthenticated) {
+		try {
+			const caps = await call({
+				method: "portal_app.api.projects.get_capabilities",
+			});
+			if (!caps?.is_manager) {
+				return "/projects";
+			}
+		} catch {
+			return "/projects";
+		}
 	}
 
 	if (to.meta.requiresPortalAdmin && isAuthenticated) {

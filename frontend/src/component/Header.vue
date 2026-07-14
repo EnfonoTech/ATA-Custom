@@ -6,22 +6,81 @@
 		<div class="flex items-center gap-3 px-5 py-3">
 
 			<!-- Search bar (center-ish) -->
-			<div class="flex-1 max-w-lg">
+			<div class="flex-1 max-w-lg relative">
 				<div class="relative flex items-center">
 					<FeatherIcon name="search" class="absolute left-3 h-4 w-4 pointer-events-none" style="color:var(--portal-subtle);"/>
 					<input
+						ref="searchInput"
+						v-model="searchQuery"
 						type="text"
 						placeholder="Search projects, teams, tasks, documents..."
 						class="w-full rounded-xl pl-9 pr-16 py-2 text-sm outline-none transition"
 						style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);color:var(--portal-text);"
-						@focus="$event.target.style.borderColor='var(--portal-accent)'"
-						@blur="$event.target.style.borderColor='var(--portal-border-strong)'"
+						@input="onSearchInput"
+						@focus="$event.target.style.borderColor='var(--portal-accent)'; if (hasSearchResults) searchOpen = true"
+						@blur="$event.target.style.borderColor='var(--portal-border-strong)'; closeSearch()"
 					/>
 					<div class="absolute right-2.5 flex items-center gap-0.5">
 						<kbd class="rounded px-1 py-0.5 text-[10px] font-medium" style="background:var(--portal-border-strong);color:var(--portal-subtle);border:1px solid var(--portal-border-strong);">Ctrl</kbd>
 						<span class="text-[10px]" style="color:var(--portal-subtle);">+</span>
 						<kbd class="rounded px-1 py-0.5 text-[10px] font-medium" style="background:var(--portal-border-strong);color:var(--portal-subtle);border:1px solid var(--portal-border-strong);">K</kbd>
 					</div>
+				</div>
+
+				<!-- Results dropdown -->
+				<div
+					v-if="searchOpen && searchQuery.trim().length >= 2"
+					class="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-96 overflow-y-auto rounded-xl shadow-lg"
+					style="background:var(--portal-surface);border:1px solid var(--portal-border);"
+				>
+					<div v-if="searching" class="px-4 py-3 text-xs" style="color:var(--portal-muted);">Searching…</div>
+					<template v-else-if="hasSearchResults">
+						<div v-if="searchResults.projects.length" class="py-1">
+							<p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style="color:var(--portal-subtle);">Projects</p>
+							<div
+								v-for="p in searchResults.projects" :key="p.name"
+								class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition"
+								style="color:var(--portal-text);"
+								@mousedown.prevent="goToProject(p)"
+								@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
+								@mouseleave="$event.currentTarget.style.background=''"
+							>
+								<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0" style="color:var(--portal-subtle);"/>
+								<span class="truncate">{{ p.project_name }}</span>
+								<span class="ml-auto text-[10px]" style="color:var(--portal-subtle);">{{ p.status }}</span>
+							</div>
+						</div>
+						<div v-if="searchResults.tasks.length" class="py-1" style="border-top:1px solid var(--portal-border);">
+							<p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style="color:var(--portal-subtle);">Tasks</p>
+							<div
+								v-for="t in searchResults.tasks" :key="t.name"
+								class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition"
+								style="color:var(--portal-text);"
+								@mousedown.prevent="goToTask(t)"
+								@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
+								@mouseleave="$event.currentTarget.style.background=''"
+							>
+								<FeatherIcon name="check-square" class="h-3.5 w-3.5 shrink-0" style="color:var(--portal-subtle);"/>
+								<span class="truncate">{{ t.subject }}</span>
+								<span class="ml-auto text-[10px]" style="color:var(--portal-subtle);">{{ t.status }}</span>
+							</div>
+						</div>
+						<div v-if="searchResults.teams.length" class="py-1" style="border-top:1px solid var(--portal-border);">
+							<p class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider" style="color:var(--portal-subtle);">Teams</p>
+							<div
+								v-for="team in searchResults.teams" :key="team.name"
+								class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer transition"
+								style="color:var(--portal-text);"
+								@mousedown.prevent="goToTeam(team)"
+								@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
+								@mouseleave="$event.currentTarget.style.background=''"
+							>
+								<FeatherIcon name="users" class="h-3.5 w-3.5 shrink-0" style="color:var(--portal-subtle);"/>
+								<span class="truncate">{{ team.department_name }}</span>
+							</div>
+						</div>
+					</template>
+					<div v-else class="px-4 py-3 text-xs" style="color:var(--portal-muted);">No results for "{{ searchQuery }}"</div>
 				</div>
 			</div>
 
@@ -227,7 +286,7 @@ const THEMES = [
 
 // ── Dark / Light mode ───────────────────────────────────────────────────────
 const isDark = ref(
-	(() => { try { return localStorage.getItem("portal_mode") !== "light"; } catch { return true; } })()
+	(() => { try { return localStorage.getItem("portal_mode") === "dark"; } catch { return false; } })()
 );
 
 function toggleMode() {
@@ -407,7 +466,72 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
 	if (notifPollHandle) clearInterval(notifPollHandle);
+	window.removeEventListener("keydown", handleGlobalKeydown);
 });
+
+// ── Global search ───────────────────────────────────────────────────────────
+const searchInput   = ref(null);
+const searchQuery   = ref("");
+const searchOpen    = ref(false);
+const searching     = ref(false);
+const searchResults = ref({ projects: [], tasks: [], teams: [] });
+let searchDebounce  = null;
+
+const hasSearchResults = computed(() =>
+	searchResults.value.projects.length || searchResults.value.tasks.length || searchResults.value.teams.length
+);
+
+function onSearchInput() {
+	clearTimeout(searchDebounce);
+	const q = searchQuery.value.trim();
+	if (q.length < 2) {
+		searchResults.value = { projects: [], tasks: [], teams: [] };
+		searchOpen.value = false;
+		return;
+	}
+	searchDebounce = setTimeout(async () => {
+		searching.value = true;
+		try {
+			searchResults.value = await call({ method: "portal_app.api.search.global_search", args: { query: q } });
+			searchOpen.value = true;
+		} catch (e) {
+			console.error("search error", e);
+		} finally {
+			searching.value = false;
+		}
+	}, 250);
+}
+
+function goToProject(p) {
+	searchOpen.value = false;
+	searchQuery.value = "";
+	router.push({ name: "ProjectDetail", params: { name: p.name } });
+}
+function goToTask() {
+	searchOpen.value = false;
+	searchQuery.value = "";
+	router.push({ name: "Tasks" });
+}
+function goToTeam() {
+	searchOpen.value = false;
+	searchQuery.value = "";
+	router.push({ name: "Teams" });
+}
+function closeSearch() {
+	setTimeout(() => { searchOpen.value = false; }, 150);
+}
+
+function handleGlobalKeydown(e) {
+	if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+		e.preventDefault();
+		searchInput.value?.focus();
+	}
+	if (e.key === "Escape") {
+		searchOpen.value = false;
+		searchInput.value?.blur();
+	}
+}
+window.addEventListener("keydown", handleGlobalKeydown);
 
 const openLogoutModal = () => {
 	logoutModal.value = true;

@@ -74,6 +74,10 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		order_by=f"{sort_by} {sort_order}",
 		limit_page_length=500,
 	)
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
 	return {"projects": projects}
 
 
@@ -82,6 +86,9 @@ def get_project(name):
 	helper.assert_project_access(name)
 	doc = frappe.get_doc("Project", name)
 	out = doc.as_dict()
+	if not helper.has_portal_staff_project_access():
+		out.pop("estimated_costing", None)
+		out.pop("portal_project_manager", None)
 	return {"project": out}
 
 
@@ -469,6 +476,10 @@ def get_capabilities():
 		if not effective_customer_portal
 		else False,
 		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
+		# System Manager / Projects Manager only — gates management-level views (Dashboard,
+		# Org Chart, Teams) and management-level fields (estimated cost, project manager)
+		# away from regular "Projects User" team members.
+		"is_manager": staff_project_access,
 		"portal_user": frappe.session.user,
 	}
 
@@ -924,6 +935,47 @@ def search_portal_users(txt=""):
 		]
 
 	return frappe.get_all("User", **kwargs)
+
+
+@frappe.whitelist()
+def search_projects(query=""):
+	"""Project combobox for the Tasks quick-create form — scoped to projects the
+	caller can create tasks in (same rule create_task enforces)."""
+	allowed_names = helper.get_allowed_project_names()
+	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	if not manageable:
+		return []
+
+	query = (query or "").strip()
+	safe = cstr(query).replace("%", "").replace("_", "").strip()[:100]
+	filters = {"name": ["in", manageable]}
+	or_filters = None
+	if safe:
+		or_filters = [
+			["project_name", "like", f"%{safe}%"],
+			["name", "like", f"%{safe}%"],
+		]
+		if frappe.get_meta("Project").has_field("portal_project_code"):
+			or_filters.append(["portal_project_code", "like", f"%{safe}%"])
+
+	fields = ["name", "project_name"]
+	if frappe.get_meta("Project").has_field("portal_project_code"):
+		fields.append("portal_project_code")
+
+	return frappe.get_all(
+		"Project",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="project_name asc",
+		limit_page_length=25,
+	)
+
+
+@frappe.whitelist()
+def search_assignable_users(query=""):
+	"""Assignee combobox for the Tasks quick-create form."""
+	return search_portal_users(query)
 
 
 def _task_is_assigned_to_user(task_name: str, user: str) -> bool:

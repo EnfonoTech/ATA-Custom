@@ -106,23 +106,14 @@ def assert_project_access(project_name: str) -> None:
 
 
 def can_manage_project(project_name: str) -> bool:
-	if has_portal_staff_project_access():
-		return project_name in get_allowed_project_names()
-	if user_is_customer_portal_user():
+	"""Management-level action (edit, delete, team sync, sharing, folder rules, etc.).
+
+	Restricted to System Manager / Projects Manager. Regular "Projects User" team
+	members — even a project's Lead Architect or the document owner — get read-only
+	access to projects; they cannot edit or delete them."""
+	if not has_portal_staff_project_access():
 		return False
-	if project_name not in get_allowed_project_names():
-		return False
-	meta = frappe.get_meta("Project")
-	if meta.has_field("portal_project_manager"):
-		pm = frappe.db.get_value("Project", project_name, "portal_project_manager")
-		if pm and pm == frappe.session.user:
-			return True
-		# Desk projects often omit Portal Project Manager; treat document owner as manager when the field is blank.
-		if not pm:
-			owner = frappe.db.get_value("Project", project_name, "owner")
-			if owner == frappe.session.user:
-				return True
-	return False
+	return project_name in get_allowed_project_names()
 
 
 def assert_manage_project(project_name: str) -> None:

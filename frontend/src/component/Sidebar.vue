@@ -38,23 +38,28 @@ onMounted(async () => {
 	}
 });
 
+const isManager = computed(() => !!portalCapabilities.value?.is_manager);
+
 const groups = computed(() => {
 	const a      = portalAdmin.value;
 	const isCust = !!portalCapabilities.value?.is_customer_portal_user;
 
+	const workspaceItems = [
+		{ name: "Dashboard", path: "/dashboard", icon: "layout"       },
+		{ name: "Org Chart", path: "/org-chart", icon: "share-2"      },
+		{ name: "Projects",  path: "/projects",  icon: "folder"       },
+		{ name: "Teams",     path: "/teams",     icon: "users"        },
+		{ name: "Gantt Chart", path: "/gantt",   icon: "bar-chart-2"  },
+		{ name: "Tasks",     path: "/tasks",      icon: "check-square" },
+		{ name: "Daily Gantt", path: "/daily-gantt", icon: "clock"     },
+		{ name: "Kanban",    path: "/kanban",     icon: "columns"      },
+		{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
+	];
+	// Management-level views — only System Manager / Projects Manager.
+	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams"]);
 	const workspace = {
 		title: "Project Management",
-		items: [
-			{ name: "Dashboard", path: "/dashboard", icon: "layout"       },
-			{ name: "Org Chart", path: "/org-chart", icon: "share-2"      },
-			{ name: "Projects",  path: "/projects",  icon: "folder"       },
-			{ name: "Teams",     path: "/teams",     icon: "users"        },
-			{ name: "Gantt Chart", path: "/gantt",   icon: "bar-chart-2"  },
-			{ name: "Tasks",     path: "/tasks",      icon: "check-square" },
-			{ name: "Daily Gantt", path: "/daily-gantt", icon: "clock"     },
-			{ name: "Kanban",    path: "/kanban",     icon: "columns"      },
-			{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
-		],
+		items: isManager.value ? workspaceItems : workspaceItems.filter((i) => !managerOnlyPaths.has(i.path)),
 	};
 
 	const modules = {
@@ -254,8 +259,8 @@ function navigate(item) {
 				</template>
 			</div>
 
-			<!-- ── TEAM STRUCTURE ── -->
-			<div v-if="teamTotal > 0" class="space-y-0.5">
+			<!-- ── TEAM STRUCTURE (management-level only) ── -->
+			<div v-if="isManager && teamTotal > 0" class="space-y-0.5">
 				<p v-if="!collapsed" class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em]" style="color:var(--portal-section-label);">
 					Team Structure
 				</p>

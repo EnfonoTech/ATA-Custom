@@ -10,7 +10,7 @@ const projects = ref([]);
 const loading = ref(true);
 const search = ref("");
 const status = ref("");
-const viewMode = ref("year");
+const viewMode = ref("table");
 const expandedYears = ref({});
 // Membership filter: "all" (default), "team" (I'm a team member), "manage" (I manage)
 const membershipFilter = ref("all");
@@ -19,6 +19,7 @@ const portalCapabilities = inject("portalCapabilities", ref({}));
 const refreshPortalCapabilities = inject("refreshPortalCapabilities", async () => {});
 
 const canCreate = computed(() => !!portalCapabilities.value?.can_create_project);
+const isManager = computed(() => !!portalCapabilities.value?.is_manager);
 
 const showNew = ref(false);
 const creating = ref(false);
@@ -538,7 +539,7 @@ function printProjects() {
 							<th class="px-4 py-3">Office</th>
 							<th class="px-4 py-3">Phase</th>
 							<th class="px-4 py-3">Status</th>
-							<th class="px-4 py-3">Lead Architect</th>
+							<th v-if="isManager" class="px-4 py-3">Lead Architect</th>
 							<th class="px-4 py-3">Servers</th>
 							<th class="px-4 py-3">Upcoming Milestone</th>
 							<th class="px-4 py-3">Progress</th>
@@ -574,7 +575,7 @@ function printProjects() {
 								<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 							</td>
 							<!-- Lead Architect -->
-							<td class="px-4 py-3 text-xs" style="color:var(--portal-text);">{{ p.portal_project_manager || "—" }}</td>
+							<td v-if="isManager" class="px-4 py-3 text-xs" style="color:var(--portal-text);">{{ p.portal_project_manager || "—" }}</td>
 							<!-- Servers (T = Google Drive, A = Autodesk, C = Client/AWS) -->
 							<td class="px-4 py-3">
 								<div class="flex items-center gap-1">
@@ -668,7 +669,7 @@ function printProjects() {
 						<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 					</div>
 					<div class="space-y-2 text-sm text-[color:var(--portal-muted)]">
-						<p class="flex items-center justify-between gap-2">
+						<p v-if="isManager" class="flex items-center justify-between gap-2">
 							<span class="flex items-center gap-1.5"><FeatherIcon name="user" class="h-3.5 w-3.5" />Lead Architecture</span>
 							<span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span>
 						</p>
@@ -680,7 +681,7 @@ function printProjects() {
 							<span class="flex items-center gap-1.5"><FeatherIcon name="calendar" class="h-3.5 w-3.5" />Timeline</span>
 							<span class="font-medium text-[color:var(--portal-text)]">{{ p.expected_start_date || "—" }} → {{ p.expected_end_date || "—" }}</span>
 						</p>
-						<p class="flex items-center justify-between gap-2">
+						<p v-if="isManager" class="flex items-center justify-between gap-2">
 							<span class="flex items-center gap-1.5"><FeatherIcon name="dollar-sign" class="h-3.5 w-3.5" />Cost</span>
 							<span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span>
 						</p>
@@ -733,10 +734,10 @@ function printProjects() {
 								<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 							</div>
 							<div class="space-y-1 text-xs text-[color:var(--portal-muted)]">
-								<p class="flex justify-between gap-2"><span>Lead Architecture</span><span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span></p>
+								<p v-if="isManager" class="flex justify-between gap-2"><span>Lead Architecture</span><span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span></p>
 								<p class="flex justify-between gap-2"><span>Stage</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.portal_kanban_stage || "—" }}</span></p>
 								<p class="flex justify-between gap-2"><span>Timeline</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.expected_start_date || "—" }} → {{ p.expected_end_date || "—" }}</span></p>
-								<p class="flex justify-between gap-2"><span>Est. cost</span><span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span></p>
+								<p v-if="isManager" class="flex justify-between gap-2"><span>Est. cost</span><span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span></p>
 							</div>
 						</div>
 					</div>

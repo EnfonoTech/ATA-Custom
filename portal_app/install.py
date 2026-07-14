@@ -106,6 +106,14 @@ def ensure_project_portal_custom_fields():
 					"insert_after": "portal_server_a",
 					"description": "Link to this project's client folder on the AWS server",
 				},
+				{
+					"fieldname": "portal_team",
+					"label": "Portal Team",
+					"fieldtype": "Link",
+					"options": "Department",
+					"insert_after": "portal_office",
+					"description": "Team (Department) this project belongs to — groups it on the portal Gantt Chart",
+				},
 			]
 		},
 		update=True,
