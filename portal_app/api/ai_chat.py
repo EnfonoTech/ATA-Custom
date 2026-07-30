@@ -121,19 +121,20 @@ def ask(question):
 
     # ── Budget / cost ─────────────────────────────────────────────────────────
     if any(k in ql for k in ["budget", "cost", "contract value", "estimated", "sar", "value"]):
-        if not allowed:
-            return {"type": "text", "answer": "No projects accessible."}
-        placeholders = ",".join(["%s"] * len(allowed))
+        value_visible = helper.get_value_visible_project_names()
+        if not value_visible:
+            return {"type": "text", "answer": "No budget-visible projects for your account."}
+        placeholders = ",".join(["%s"] * len(value_visible))
         rows = frappe.db.sql(
             f"""SELECT project_name, portal_project_code, estimated_costing
                FROM `tabProject` WHERE name IN ({placeholders}) AND estimated_costing > 0
                ORDER BY estimated_costing DESC LIMIT 10""",
-            allowed,
+            value_visible,
             as_dict=True,
         )
         total = frappe.db.sql(
             f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders})",
-            allowed,
+            value_visible,
         )[0][0] or 0
         items = [f"{r.get('portal_project_code') or ''} {r.project_name}: SAR {int(r.estimated_costing or 0):,}".strip() for r in rows]
         return {

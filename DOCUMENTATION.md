@@ -73,6 +73,41 @@ Use this order so each feature has data to work with.
 - Table of projects with search and **status** filter.
 - Click a row to open **Project detail**.
 - **New project** opens a form (title, optional code, dates, customer link name) when your user is allowed to create projects.
+- **Servers column:** three small badges — **T** (Google Drive), **A** (Autodesk), and **ERP**. T/A open their linked server URL in a new tab when set on the project's edit form; greyed out and non-clickable when empty. **ERP** opens a small popup with two links: **Client Server** (the client-side server link set on the project) and **Project Files** (jumps to the **Files** hub filtered to this project).
+- **Value visibility:** the **estimated cost** shown on a project (list, Kanban, dashboard) is only visible to **System Manager** (all projects) and **Projects Manager** (only the project(s) where they are the **Portal Project Manager**) — other roles never see it.
+
+### Organization Chart
+
+- Collapsible hierarchy of teams and members, built from **Teams** data (each department is a top-level node; members are children).
+- Click the **+ / −** button on a node to expand/collapse its reports. Click a member row to see their details (avatar, role, office, direct-report count) in the right panel.
+- **Office filter** buttons (RIYADH / LISBON / MANILA / All) narrow the tree; **Headcount Summary** panel shows active employee counts per office.
+
+### Teams
+
+- Workload view of teams (ERPNext **Department** records tagged with an office). Filter by office; see each team's member list and active-project count.
+- **Add / remove member** (individually or by picking a whole **User Group** at once) — only for users allowed to manage teams. Membership is implemented as Frappe's native **Assign To** on the Department, kept in sync with each project's team.
+
+### Contracts
+
+- **Management-only** area (System Manager / Projects Manager on that specific project) for uploading contract/agreement documents — kept entirely separate from the shared project **Files** area so regular team members never see it.
+- Files are stored under a dedicated `Home/Contracts/<project>` folder tree, always **private**, and restricted to **`.pdf`, `.doc`, `.docx`, `.jpg`, `.jpeg`, `.png`**.
+- Pick a project on the left, then **Upload Contract**, open, or delete files on the right.
+
+### Gantt Chart
+
+- Team-grouped timeline of all projects you can access, with office/team filters. Useful for a portfolio-level view of overlapping schedules.
+- **Milestones:** the **+ Milestone** button (or the flag icon on a project row) lets a manager set a short text label plus the **date** it falls on — the red flag on the timeline is positioned at that real date. A milestone with no date only shows the flag at the project's bar end (legacy rows saved before the date field existed).
+
+### Daily Task
+
+- A personal, per-user reminder board (4 weeks) of small dated-and-timed items — title, date/time, colour, complete/incomplete. Not tied to a project.
+- Staff (System Manager / Projects Manager) can assign an item to someone else; regular users can only create items for themselves.
+- Stored as standard calendar **Event** records (two small hidden custom fields), not a new DocType. Replaces the earlier **Daily Gantt** screen.
+
+### AI Chat
+
+- Sidebar link **"ATA AI Chat"** opens a Q&A-style panel that answers questions about project counts, budgets, recent uploads, and tasks using rule-based keyword matching over the portal's own data (not a live AI/LLM call).
+- **Known issue:** as of this writing the `/ai-chat` route is not registered in the app router, so this screen does not currently load — see **Common issues** below.
 
 ### Project detail
 
@@ -95,6 +130,25 @@ Use this order so each feature has data to work with.
 
 - Select a **project**, then list and upload files attached to that **Project** in ERPNext.
 - Banners may appear if administrators enabled flags in **Portal Project Settings** (Frappe Drive, Google Drive, BIM placeholders)—read them as **guidance**, not as automatic sync (see next section).
+
+### File Browser (all files)
+
+- Cross-project file listing with category/classification filters and search — for finding a file when you don't remember which project it's under.
+
+### Shared with me / Manage shares
+
+- **Shared with me:** files/folders another user has explicitly shared with you (Drive-style), grouped by project.
+- **Manage shares** (project admins): audit and **revoke** active share links/grants across every project you manage.
+
+### Folder Rules / File Tools (admin & auditor)
+
+- **Folder Rules:** define automatic routing of uploaded files into secondary folders based on file type ("Mirror" or "Cross-route").
+- **File Tools:** edit the company-wide folder template applied to new projects (manual rows, or import from a ZIP/folder structure).
+
+### Admin (System Manager)
+
+- Create portal users (Projects User / Projects Manager / Portal Customer roles only).
+- Run or manage **demo seed** data runs (tracked and reversible) for training/sales demos — includes an option to import a project list from an uploaded `.docx` file.
 
 ### Profile
 
@@ -186,6 +240,8 @@ The portal is for **day-to-day visibility**, **team membership** (where allowed)
 - [ ] Sidebar collapse (Ctrl+B)  
 - [ ] Logout → portal login URL  
 
+For a full manual QA checklist covering every screen (Org Chart, Teams, Gantt, Daily Task, Contracts, Files/sharing, Admin, known issues), see **[TESTING.md](TESTING.md)**.
+
 ---
 
 ## 8. Common issues
@@ -198,6 +254,9 @@ The portal is for **day-to-day visibility**, **team membership** (where allowed)
 | Cannot change team | User is not **Portal Project Manager** on that project and not Projects/System Manager. |
 | Upload fails | Network; session expired (log in again); file size limits on server; permission on **Project**. |
 | Drive banner but files “only” on ERPNext | Expected: see **Files, ERPNext, and Frappe Drive** above. |
+| **"ATA AI Chat" sidebar link does nothing / blank page** | Known gap — the `/ai-chat` route is not yet wired up in the app; report to your administrator/developer rather than retrying. |
+| Task quick-create project/assignee dropdown stays empty | Known gap — the underlying lookup endpoints are not yet implemented; create/assign the task from **Project detail** or Desk instead. |
+| "Submit to Client Submittal" button in File Browser errors | Known gap — the backend action for this button is not yet implemented. |
 
 ---
 

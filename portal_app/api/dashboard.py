@@ -5,6 +5,14 @@ from portal_app.api import helper
 from portal_app.api.projects import portfolio_dashboard
 
 
+def _pct_change(curr, prev):
+	"""Percent change vs `prev`. None when there's no prior baseline to compare against
+	(can't express a meaningful percent change from zero)."""
+	if not prev:
+		return None
+	return round(((curr - prev) / prev) * 100, 1)
+
+
 def _planned_pct(start, end):
 	"""Elapsed timeline as percent (0-100). Returns None when dates are missing."""
 	if not start or not end:
@@ -36,6 +44,7 @@ def get_dashboard_data():
 			"user_projects_preview": [],
 			"team_member_count": 0,
 			"recent_activity": [],
+			"trends": {"projects": None, "team_members": None},
 		}
 
 	portfolio = portfolio_dashboard()
@@ -123,6 +132,8 @@ def get_dashboard_data():
 	)
 	for p in user_projects_preview:
 		p["planned_pct"] = _planned_pct(p.get("expected_start_date"), p.get("expected_end_date"))
+		if not helper.can_view_project_value(p["name"]):
+			p["estimated_costing"] = None
 
 	team_member_count = frappe.db.count(
 		"User",
@@ -132,6 +143,26 @@ def get_dashboard_data():
 			"name": ["not in", ["Guest", "Administrator"]],
 		},
 	)
+
+	# "vs last month" trends — the only two metrics with a real historical baseline
+	# (creation date). Project/task *status* isn't snapshotted anywhere, so a trend
+	# for On Track / At Risk / Delayed can't be computed truthfully; those cards show
+	# a share-of-total instead (see get_teams-style ratios computed on the frontend).
+	cutoff = add_days(nowdate(), -30)
+	projects_prev = frappe.db.count("Project", {"name": ["in", allowed], "creation": ["<=", cutoff]})
+	team_prev = frappe.db.count(
+		"User",
+		filters={
+			"enabled": 1,
+			"user_type": "System User",
+			"name": ["not in", ["Guest", "Administrator"]],
+			"creation": ["<=", cutoff],
+		},
+	)
+	trends = {
+		"projects": _pct_change(len(allowed), projects_prev),
+		"team_members": _pct_change(team_member_count, team_prev),
+	}
 
 	recent_activity = []
 
@@ -185,4 +216,5 @@ def get_dashboard_data():
 		"user_projects_preview": user_projects_preview,
 		"team_member_count": team_member_count,
 		"recent_activity": recent_activity,
+		"trends": trends,
 	}

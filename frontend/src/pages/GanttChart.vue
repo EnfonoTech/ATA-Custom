@@ -98,6 +98,12 @@ function parseDate(s) {
 	return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function fmtMilestoneDate(s) {
+	const d = parseDate(s);
+	if (!d) return "";
+	return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
 function barStyle(p) {
 	let start = parseDate(p.expected_start_date);
 	let end = parseDate(p.expected_end_date);
@@ -133,6 +139,82 @@ function statusPillClass(s) {
 
 function printGantt() {
 	window.print();
+}
+
+// ── Add / Edit Milestone — a text label (portal_upcoming_milestone) plus the
+// actual date it falls on (portal_milestone_date), both saved on the Project.
+// The date is what positions the flag on the timeline below — without it the
+// flag has nowhere real to sit, so it's required. ──────────────────────────
+const milestoneProject = ref(null);
+const milestoneText    = ref("");
+const milestoneDate    = ref("");
+const milestoneSaving  = ref(false);
+const milestoneError   = ref("");
+
+function openMilestone(p) {
+	milestoneProject.value = p;
+	milestoneText.value = p.portal_upcoming_milestone || "";
+	milestoneDate.value = p.portal_milestone_date || "";
+	milestoneError.value = "";
+}
+function closeMilestone() { milestoneProject.value = null; }
+
+async function saveMilestone() {
+	if (!milestoneProject.value) return;
+	if (milestoneText.value.trim() && !milestoneDate.value) {
+		milestoneError.value = "Pick the date this milestone falls on.";
+		return;
+	}
+	milestoneSaving.value = true;
+	milestoneError.value = "";
+	try {
+		await call({
+			method: "portal_app.api.projects.update_project",
+			type: "POST",
+			args: {
+				project: milestoneProject.value.name,
+				portal_upcoming_milestone: milestoneText.value.trim(),
+				portal_milestone_date: milestoneText.value.trim() ? milestoneDate.value : "",
+			},
+		});
+		milestoneProject.value.portal_upcoming_milestone = milestoneText.value.trim();
+		milestoneProject.value.portal_milestone_date = milestoneText.value.trim() ? milestoneDate.value : "";
+		closeMilestone();
+	} catch (e) {
+		const body = e?.responseBody;
+		milestoneError.value = body?.message || body?.exc || "Could not save milestone.";
+	} finally {
+		milestoneSaving.value = false;
+	}
+}
+
+// Real position on the timeline for a project's milestone flag — falls back to
+// the bar's end (old behaviour) only for rows saved before a date existed.
+function milestoneFlagStyle(p) {
+	const d = parseDate(p.portal_milestone_date);
+	if (d) {
+		const p_ = pct(d);
+		if (p_ < 0 || p_ > 100) return null;
+		return { left: `calc(${p_}% - 6px)` };
+	}
+	const bar = barStyle(p);
+	if (!bar) return null;
+	return { left: `calc(${bar.left} + ${bar.width} - 6px)` };
+}
+
+// All projects across every team + unassigned, for the header "+ Milestone" project picker.
+const allProjectsFlat = computed(() => [
+	...teams.value.flatMap((t) => t.projects),
+	...unassigned.value,
+]);
+const milestonePickerOpen = ref(false);
+function openMilestonePicker() {
+	if (!allProjectsFlat.value.length) return;
+	milestonePickerOpen.value = true;
+}
+function pickProjectForMilestone(p) {
+	milestonePickerOpen.value = false;
+	openMilestone(p);
 }
 </script>
 
@@ -175,6 +257,10 @@ function printGantt() {
 						<button class="portal-btn portal-btn-ghost" @click="printGantt">
 							<FeatherIcon name="printer" class="h-4 w-4" />
 							Print
+						</button>
+						<button class="portal-btn portal-btn-primary" @click="openMilestonePicker">
+							<FeatherIcon name="flag" class="h-4 w-4" />
+							Milestone
 						</button>
 					</div>
 				</div>
@@ -223,9 +309,20 @@ function printGantt() {
 					<!-- Rows -->
 					<div class="divide-y divide-[color:var(--portal-border)]">
 						<div v-for="p in t.projects" :key="p.name" class="grid items-center" style="grid-template-columns: 220px 1fr;">
-							<div class="px-3 py-2.5 min-w-0">
-								<div class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ p.project_name }}</div>
-								<span class="portal-pill text-[10px] mt-0.5" :class="statusPillClass(p.status)">{{ p.status }}</span>
+							<div class="px-3 py-2.5 min-w-0 flex items-center gap-2">
+								<div class="min-w-0 flex-1">
+									<div class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ p.project_name }}</div>
+									<span class="portal-pill text-[10px] mt-0.5" :class="statusPillClass(p.status)">{{ p.status }}</span>
+									<span v-if="p.portal_phase" class="portal-pill portal-pill-accent text-[10px] mt-0.5 ml-1">{{ p.portal_phase }}</span>
+								</div>
+								<button
+									type="button"
+									class="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-black/5"
+									:title="p.portal_upcoming_milestone ? 'Edit milestone' : 'Add milestone'"
+									@click="openMilestone(p)"
+								>
+									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+								</button>
 							</div>
 							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/visibleMonths.length}% 100%` }">
 								<!-- today line -->
@@ -243,11 +340,11 @@ function printGantt() {
 									</span>
 								</div>
 								<FeatherIcon
-									v-if="p.portal_upcoming_milestone && barStyle(p)"
+									v-if="p.portal_upcoming_milestone && milestoneFlagStyle(p)"
 									name="flag"
 									class="absolute top-1 h-3.5 w-3.5 text-red-500"
-									:style="{ left: `calc(${barStyle(p).left} + ${barStyle(p).width} - 6px)` }"
-									:title="'Milestone: ' + p.portal_upcoming_milestone"
+									:style="milestoneFlagStyle(p)"
+									:title="'Milestone: ' + p.portal_upcoming_milestone + (p.portal_milestone_date ? ' — ' + fmtMilestoneDate(p.portal_milestone_date) : '')"
 								/>
 								<span v-if="!barStyle(p)" class="absolute inset-0 flex items-center px-2 text-[10px]" style="color:var(--portal-subtle);">No dates set</span>
 							</div>
@@ -263,9 +360,20 @@ function printGantt() {
 					</div>
 					<div class="divide-y divide-[color:var(--portal-border)]">
 						<div v-for="p in unassigned" :key="p.name" class="grid items-center" style="grid-template-columns: 220px 1fr;">
-							<div class="px-3 py-2.5 min-w-0">
-								<div class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ p.project_name }}</div>
-								<span class="portal-pill text-[10px] mt-0.5" :class="statusPillClass(p.status)">{{ p.status }}</span>
+							<div class="px-3 py-2.5 min-w-0 flex items-center gap-2">
+								<div class="min-w-0 flex-1">
+									<div class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ p.project_name }}</div>
+									<span class="portal-pill text-[10px] mt-0.5" :class="statusPillClass(p.status)">{{ p.status }}</span>
+									<span v-if="p.portal_phase" class="portal-pill portal-pill-accent text-[10px] mt-0.5 ml-1">{{ p.portal_phase }}</span>
+								</div>
+								<button
+									type="button"
+									class="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-black/5"
+									:title="p.portal_upcoming_milestone ? 'Edit milestone' : 'Add milestone'"
+									@click="openMilestone(p)"
+								>
+									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+								</button>
 							</div>
 							<div class="relative h-9 border-l border-[color:var(--portal-border)]">
 								<div v-if="todayPct !== null" class="absolute top-0 bottom-0 w-px bg-red-500 z-10" :style="{ left: todayPct + '%' }"></div>
@@ -288,6 +396,84 @@ function printGantt() {
 
 		</div>
 	</div>
+
+	<!-- Pick a project to add a milestone to (from the header "+ Milestone" button) -->
+	<Teleport to="body">
+		<div
+			v-if="milestonePickerOpen"
+			class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="milestonePickerOpen = false"></div>
+			<div class="relative z-10 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden portal-anim-in" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+				<div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--portal-border);">
+					<h2 class="text-sm font-semibold" style="color:var(--portal-text);">Pick a project</h2>
+					<button class="h-7 w-7 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="milestonePickerOpen = false">
+						<FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
+					</button>
+				</div>
+				<div class="max-h-[50vh] overflow-y-auto p-2">
+					<button
+						v-for="p in allProjectsFlat" :key="p.name"
+						type="button"
+						class="w-full flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-[color:var(--portal-surface-alt)]"
+						style="color:var(--portal-text);"
+						@click="pickProjectForMilestone(p)"
+					>
+						<span class="truncate">{{ p.project_name }}</span>
+						<FeatherIcon name="flag" class="h-3.5 w-3.5 shrink-0" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+					</button>
+				</div>
+			</div>
+		</div>
+	</Teleport>
+
+	<!-- Add / Edit Milestone Modal -->
+	<Teleport to="body">
+		<div
+			v-if="milestoneProject"
+			class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+			role="dialog"
+			aria-modal="true"
+		>
+			<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="closeMilestone"></div>
+			<div class="relative z-10 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden portal-anim-in" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+				<div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--portal-border);">
+					<div class="min-w-0">
+						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">Milestone</h2>
+						<p class="text-xs mt-0.5 truncate" style="color:var(--portal-muted);">{{ milestoneProject.project_name }}</p>
+					</div>
+					<button class="h-7 w-7 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeMilestone">
+						<FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
+					</button>
+				</div>
+
+				<div class="px-5 py-4 space-y-3">
+					<input
+						v-model="milestoneText"
+						type="text"
+						placeholder="e.g. Client presentation"
+						class="portal-input w-full"
+						maxlength="140"
+						@keyup.enter="saveMilestone"
+					/>
+					<div>
+						<label class="block text-xs font-medium mb-1" style="color:var(--portal-muted);">Milestone date</label>
+						<input v-model="milestoneDate" type="date" class="portal-input w-full" @keyup.enter="saveMilestone"/>
+						<p class="text-[11px] mt-1" style="color:var(--portal-subtle);">This is where the flag lands on the Gantt timeline.</p>
+					</div>
+					<p v-if="milestoneError" class="text-xs text-red-600">{{ milestoneError }}</p>
+				</div>
+				<div class="flex items-center justify-end gap-3 px-5 py-4 border-t" style="border-color:var(--portal-border);">
+					<button class="portal-btn portal-btn-ghost" @click="closeMilestone">Cancel</button>
+					<button class="portal-btn portal-btn-primary" :disabled="milestoneSaving" @click="saveMilestone">
+						{{ milestoneSaving ? "Saving…" : "Save" }}
+					</button>
+				</div>
+			</div>
+		</div>
+	</Teleport>
 </template>
 
 <style>

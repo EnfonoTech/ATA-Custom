@@ -38,7 +38,7 @@ def get_gantt_data(office=None, team=None):
         "portal_team",
     ]
     meta = frappe.get_meta("Project")
-    for f in ("portal_phase", "portal_upcoming_milestone"):
+    for f in ("portal_phase", "portal_upcoming_milestone", "portal_milestone_date"):
         if meta.has_field(f):
             fields.append(f)
 

@@ -21,6 +21,18 @@ const refreshPortalCapabilities = inject("refreshPortalCapabilities", async () =
 const canCreate = computed(() => !!portalCapabilities.value?.can_create_project);
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
 
+// ── ERP Server popup (Client link + Project Files) ───────────────────────────
+// Teleported centered modal (same pattern as "New project") — never clipped.
+const erpDropdownProject = ref(null);
+function toggleErpDropdown(p) {
+	erpDropdownProject.value = erpDropdownProject.value?.name === p.name ? null : p;
+}
+function closeErpDropdown() { erpDropdownProject.value = null; }
+function goToProjectFiles(p) {
+	closeErpDropdown();
+	router.push({ path: "/files", query: { project: p.name } });
+}
+
 const showNew = ref(false);
 const creating = ref(false);
 const createError = ref("");
@@ -50,6 +62,7 @@ async function openEdit(p, e) {
 		portal_office:          p.portal_office || "",
 		portal_phase:           p.portal_phase || "",
 		portal_project_manager: p.portal_project_manager || "",
+		estimated_costing:      p.estimated_costing || "",
 		expected_start_date:    p.expected_start_date || "",
 		expected_end_date:      p.expected_end_date || "",
 		percent_complete:       p.percent_complete || 0,
@@ -278,23 +291,8 @@ async function submitCreate() {
 	}
 }
 
-const OFFICE_BG    = { RIYADH: "rgba(201,168,76,0.12)",  LISBON: "rgba(24,95,165,0.12)",  MANILA: "rgba(39,103,73,0.12)"  };
-const OFFICE_COLOR = { RIYADH: "#C9A84C",               LISBON: "#185FA5",               MANILA: "#276749"               };
-const OFFICE_BORDER= { RIYADH: "rgba(201,168,76,0.35)",  LISBON: "rgba(24,95,165,0.35)",  MANILA: "rgba(39,103,73,0.35)"  };
-
-function officeBadgeStyle(office) {
-	return {
-		background: OFFICE_BG[office]    || "rgba(128,128,128,0.1)",
-		color:      OFFICE_COLOR[office] || "#6b7280",
-		border:     `1px solid ${OFFICE_BORDER[office] || "rgba(128,128,128,0.2)"}`,
-	};
-}
-
 function rowBgStyle(p) {
 	const isHold = ["On Hold","Cancelled","Hold","Temp Hold"].includes(p.status);
-	if (p.portal_office && OFFICE_BG[p.portal_office]) {
-		return { background: OFFICE_BG[p.portal_office], opacity: isHold ? 0.6 : 1 };
-	}
 	return { opacity: isHold ? 0.6 : 1 };
 }
 
@@ -536,7 +534,7 @@ function printProjects() {
 					<thead>
 						<tr class="text-white text-xs font-semibold uppercase tracking-wider" style="background:#0F172A;">
 							<th class="px-4 py-3">Project</th>
-							<th class="px-4 py-3">Office</th>
+							<th class="px-4 py-3">Assignee</th>
 							<th class="px-4 py-3">Phase</th>
 							<th class="px-4 py-3">Status</th>
 							<th v-if="isManager" class="px-4 py-3">Lead Architect</th>
@@ -561,13 +559,8 @@ function printProjects() {
 								<div class="font-semibold text-sm" style="color:var(--portal-text);">{{ p.project_name }}</div>
 								<div v-if="p.portal_project_code" class="text-[10px] mt-0.5" style="color:var(--portal-muted);">{{ p.portal_project_code }}</div>
 							</td>
-							<!-- Office -->
-							<td class="px-4 py-3">
-								<span v-if="p.portal_office" class="text-xs font-semibold px-2 py-0.5 rounded-full" :style="officeBadgeStyle(p.portal_office)">
-									{{ p.portal_office }}
-								</span>
-								<span v-else class="text-xs" style="color:var(--portal-muted);">—</span>
-							</td>
+							<!-- Assignee (office) -->
+							<td class="px-4 py-3 text-xs font-medium" style="color:var(--portal-text);">{{ p.portal_office || "—" }}</td>
 							<!-- Phase -->
 							<td class="px-4 py-3 text-xs font-medium" style="color:var(--portal-text);">{{ p.portal_phase || "—" }}</td>
 							<!-- Status -->
@@ -576,11 +569,11 @@ function printProjects() {
 							</td>
 							<!-- Lead Architect -->
 							<td v-if="isManager" class="px-4 py-3 text-xs" style="color:var(--portal-text);">{{ p.portal_project_manager || "—" }}</td>
-							<!-- Servers (T = Google Drive, A = Autodesk, C = Client/AWS) -->
+							<!-- Servers (T = Google Drive, A = Autodesk, ERP = Client link + this project's uploaded files) -->
 							<td class="px-4 py-3">
 								<div class="flex items-center gap-1">
 									<a
-										v-for="s in [['t', p.portal_server_t, '#185FA5'], ['a', p.portal_server_a, '#276749'], ['c', p.portal_server_c, '#9B2335']]"
+										v-for="s in [['t', p.portal_server_t, '#185FA5'], ['a', p.portal_server_a, '#276749']]"
 										:key="s[0]"
 										:href="s[1] || undefined"
 										:target="s[1] ? '_blank' : undefined"
@@ -590,6 +583,15 @@ function printProjects() {
 										:style="s[1] ? { background: s[2] + '22', color: s[2], cursor: 'pointer' } : { background: 'rgba(128,128,128,0.1)', color: 'var(--portal-subtle)', cursor: 'default' }"
 										@click.stop="!s[1] && $event.preventDefault()"
 									>{{ s[0] }}</a>
+
+									<!-- ERP Server — two portions: the client's own server link, and this project's uploaded data (Files hub) -->
+									<button
+										type="button"
+										class="flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold uppercase transition"
+										style="background:#9B233522;color:#9B2335;cursor:pointer;"
+										title="ERP Server — client link & project files"
+										@click.stop="toggleErpDropdown(p)"
+									>erp</button>
 								</div>
 							</td>
 							<!-- Upcoming Milestone -->
@@ -1001,13 +1003,19 @@ function printProjects() {
 							/>
 						</div>
 
+						<!-- Estimated Cost (managers only) -->
+						<div v-if="isManager">
+							<label class="block text-xs font-semibold text-gray-600 mb-1.5">Estimated Cost (SAR)</label>
+							<input v-model="editForm.estimated_costing" type="number" min="0" step="1" placeholder="e.g. 500000" class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+						</div>
+
 						<!-- Servers -->
 						<div>
 							<label class="block text-xs font-semibold text-gray-600 mb-1.5">Servers (links)</label>
 							<div class="space-y-2">
 								<input v-model="editForm.portal_server_t" type="url" placeholder="T-Server — Google Drive link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
 								<input v-model="editForm.portal_server_a" type="url" placeholder="A-Server — Autodesk link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
-								<input v-model="editForm.portal_server_c" type="url" placeholder="C-Server — Client / AWS link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
+								<input v-model="editForm.portal_server_c" type="url" placeholder="ERP Server — Client server link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
 							</div>
 						</div>
 
@@ -1035,6 +1043,52 @@ function printProjects() {
 						>
 							{{ saving ? "Saving…" : "Save Changes" }}
 						</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<!-- ERP Server popup — same centered-modal pattern as "New project" above, so it can never be clipped -->
+		<Teleport to="body">
+			<div
+				v-if="erpDropdownProject"
+				class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="closeErpDropdown"></div>
+				<div class="relative z-10 w-full max-w-xs rounded-2xl shadow-2xl overflow-hidden portal-anim-in" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+					<div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--portal-border);">
+						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">ERP Server</h2>
+						<button class="h-7 w-7 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeErpDropdown">
+							<FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
+						</button>
+					</div>
+					<div class="p-2">
+						<a
+							:href="erpDropdownProject.portal_server_c || undefined"
+							:target="erpDropdownProject.portal_server_c ? '_blank' : undefined"
+							rel="noopener noreferrer"
+							class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition"
+							:style="erpDropdownProject.portal_server_c ? 'color:var(--portal-text);cursor:pointer;' : 'color:var(--portal-subtle);cursor:default;'"
+							@click="!erpDropdownProject.portal_server_c && $event.preventDefault()"
+							@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
+							@mouseleave="$event.currentTarget.style.background=''"
+						>
+							<FeatherIcon name="link" class="h-4 w-4 shrink-0" />
+							Client Server{{ erpDropdownProject.portal_server_c ? "" : " (not set)" }}
+						</a>
+						<a
+							href="#"
+							class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition"
+							style="color:var(--portal-text);cursor:pointer;"
+							@click.prevent="goToProjectFiles(erpDropdownProject)"
+							@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
+							@mouseleave="$event.currentTarget.style.background=''"
+						>
+							<FeatherIcon name="folder" class="h-4 w-4 shrink-0" />
+							Project Files
+						</a>
 					</div>
 				</div>
 			</div>

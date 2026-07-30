@@ -86,10 +86,17 @@ def ensure_project_portal_custom_fields():
 					"description": "Next upcoming milestone for this project",
 				},
 				{
+					"fieldname": "portal_milestone_date",
+					"label": "Milestone Date",
+					"fieldtype": "Date",
+					"insert_after": "portal_upcoming_milestone",
+					"description": "Date the milestone above falls on — positions the flag on the Gantt Chart timeline",
+				},
+				{
 					"fieldname": "portal_server_t",
 					"label": "T-Server (Google Drive)",
 					"fieldtype": "Data",
-					"insert_after": "portal_upcoming_milestone",
+					"insert_after": "portal_milestone_date",
 					"description": "Link to this project's folder on Google Drive",
 				},
 				{
@@ -101,10 +108,10 @@ def ensure_project_portal_custom_fields():
 				},
 				{
 					"fieldname": "portal_server_c",
-					"label": "C-Server (Client / AWS)",
+					"label": "ERP Server — Client link",
 					"fieldtype": "Data",
 					"insert_after": "portal_server_a",
-					"description": "Link to this project's client folder on the AWS server",
+					"description": "Client-side server link shown in the ERP Server badge, alongside this project's own uploaded files",
 				},
 				{
 					"fieldname": "portal_team",

@@ -51,12 +51,13 @@ const groups = computed(() => {
 		{ name: "Teams",     path: "/teams",     icon: "users"        },
 		{ name: "Gantt Chart", path: "/gantt",   icon: "bar-chart-2"  },
 		{ name: "Tasks",     path: "/tasks",      icon: "check-square" },
-		{ name: "Daily Gantt", path: "/daily-gantt", icon: "clock"     },
+		{ name: "Daily Task", path: "/daily-task", icon: "clock"     },
 		{ name: "Kanban",    path: "/kanban",     icon: "columns"      },
 		{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
+		{ name: "Contracts", path: "/contracts",  icon: "lock"         },
 	];
 	// Management-level views — only System Manager / Projects Manager.
-	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams"]);
+	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
 	const workspace = {
 		title: "Project Management",
 		items: isManager.value ? workspaceItems : workspaceItems.filter((i) => !managerOnlyPaths.has(i.path)),

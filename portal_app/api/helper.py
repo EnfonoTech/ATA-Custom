@@ -105,6 +105,38 @@ def assert_project_access(project_name: str) -> None:
 		frappe.throw(_("No access to this project"), frappe.PermissionError)
 
 
+def can_view_project_value(project_name: str, user=None) -> bool:
+	"""Whether `user` may see this project's monetary value (Dashboard "Value" column).
+
+	System Manager gets full portfolio oversight — every project's value. A
+	Projects Manager only sees the value of the specific project(s) they are
+	assigned to as Portal Project Manager, not the whole portfolio."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return False
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return True
+	if "Projects Manager" in roles:
+		return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
+	return False
+
+
+def get_value_visible_project_names(user=None) -> list[str]:
+	"""Project names whose monetary value `user` may see — same rule as
+	can_view_project_value, but for callers that need the whole list at once
+	(e.g. portfolio totals, the AI chat's budget/cost answers)."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return []
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return get_allowed_project_names(user)
+	if "Projects Manager" in roles:
+		return frappe.get_all("Project", filters={"portal_project_manager": user}, pluck="name")
+	return []
+
+
 def can_manage_project(project_name: str) -> bool:
 	"""Management-level action (edit, delete, team sync, sharing, folder rules, etc.).
 

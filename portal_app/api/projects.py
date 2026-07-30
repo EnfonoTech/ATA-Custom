@@ -36,7 +36,7 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_milestone_date", "portal_server_t", "portal_server_a", "portal_server_c"):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -78,6 +78,11 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		for p in projects:
 			p.pop("estimated_costing", None)
 			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
 	return {"projects": projects}
 
 
@@ -89,6 +94,8 @@ def get_project(name):
 	if not helper.has_portal_staff_project_access():
 		out.pop("estimated_costing", None)
 		out.pop("portal_project_manager", None)
+	elif not helper.can_view_project_value(name):
+		out.pop("estimated_costing", None)
 	return {"project": out}
 
 
@@ -130,16 +137,20 @@ def portfolio_dashboard():
 		as_dict=True,
 	)
 
-	cost = flt(
-		frappe.db.sql(
-			f"""
-			SELECT SUM(estimated_costing) FROM `tabProject`
-			WHERE name IN ({placeholders})
-			""",
-			names,
-		)[0][0]
-		or 0
-	)
+	value_names = helper.get_value_visible_project_names()
+	cost = 0
+	if value_names:
+		value_placeholders = ",".join(["%s"] * len(value_names))
+		cost = flt(
+			frappe.db.sql(
+				f"""
+				SELECT SUM(estimated_costing) FROM `tabProject`
+				WHERE name IN ({value_placeholders})
+				""",
+				value_names,
+			)[0][0]
+			or 0
+		)
 
 	open_tasks = frappe.db.count(
 		"Task",
@@ -201,6 +212,16 @@ def kanban_board():
 	fields = _project_fields()
 	projects = frappe.get_all("Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500)
 
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
+
 	buckets = {}
 	for p in projects:
 		key = p.get(kf) or p.get("status") or "Unknown"
@@ -244,8 +265,12 @@ def update_project(project, **kwargs):
 		if v is not None:
 			doc.set(k, v if v != "" else None)
 
+	if kwargs.get("estimated_costing") is not None and helper.can_view_project_value(project):
+		v = kwargs.get("estimated_costing")
+		doc.set("estimated_costing", v if v != "" else None)
+
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c", "portal_upcoming_milestone", "portal_milestone_date"):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v is not None:
