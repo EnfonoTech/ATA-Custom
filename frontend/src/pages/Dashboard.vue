@@ -84,6 +84,11 @@ const delayedShare = computed(() => shareOfTotal(delayedCount.value));
 // Only Active Projects and Total Team Members have an actual historical baseline.
 const projectsTrend = computed(() => data.value?.trends?.projects ?? null);
 const teamTrend     = computed(() => data.value?.trends?.team_members ?? null);
+const salesTrend    = computed(() => data.value?.trends?.sales ?? null);
+
+// ── Sales This Month / Top Projects by Revenue — real, value-visibility-scoped ──
+const salesThisMonth = computed(() => Number(data.value?.sales_this_month) || 0);
+const topProjectsByRevenue = computed(() => data.value?.top_projects_by_revenue || []);
 
 // ── Project Status Donut ───────────────────────────────────────────────────
 const statusSegments = computed(() => {
@@ -267,8 +272,8 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
 
       <!-- Loading skeleton -->
       <template v-if="loading">
-        <div class="grid gap-3 grid-cols-2 lg:grid-cols-5">
-          <div v-for="i in 5" :key="i" class="rounded-xl p-5 flex items-center gap-4"
+        <div class="grid gap-3 grid-cols-2 lg:grid-cols-6">
+          <div v-for="i in 6" :key="i" class="rounded-xl p-5 flex items-center gap-4"
                style="background:var(--portal-surface);border:1px solid var(--portal-border);">
             <SkeletonBlock w="2.5rem" h="2.5rem" rounded="9999px"/>
             <div class="flex-1 space-y-2">
@@ -296,8 +301,29 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
 
       <template v-else>
 
-        <!-- ── ROW 1 · 5 KPI CARDS ──────────────────────────────────────── -->
-        <div class="grid gap-3 grid-cols-2 lg:grid-cols-5">
+        <!-- ── ROW 1 · 6 KPI CARDS ──────────────────────────────────────── -->
+        <div class="grid gap-3 grid-cols-2 lg:grid-cols-6">
+
+          <!-- Sales This Month -->
+          <div class="rounded-xl p-4"
+               style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center gap-3">
+              <div class="h-11 w-11 rounded-full flex items-center justify-center shrink-0"
+                   style="background:rgba(16,185,129,0.15);">
+                <FeatherIcon name="dollar-sign" class="h-5 w-5" style="color:#10B981;"/>
+              </div>
+              <div class="min-w-0">
+                <p class="text-xs mb-0.5" style="color:var(--portal-muted);">Sales This Month</p>
+                <p class="text-2xl font-bold leading-none truncate" style="color:var(--portal-text);">{{ fmtSAR(salesThisMonth) }}</p>
+              </div>
+            </div>
+            <div v-if="salesTrend != null" class="mt-3 flex items-center gap-1 text-xs" :style="{ color: salesTrend >= 0 ? '#22c55e' : '#ef4444' }">
+              <FeatherIcon :name="salesTrend >= 0 ? 'trending-up' : 'trending-down'" class="h-3.5 w-3.5"/>
+              <span class="font-semibold">{{ salesTrend >= 0 ? '+' : '' }}{{ salesTrend }}%</span>
+              <span style="color:var(--portal-subtle);">from last month</span>
+            </div>
+            <p v-else class="mt-3 text-xs" style="color:var(--portal-subtle);">No prior-month data yet</p>
+          </div>
 
           <!-- Active Projects -->
           <div class="rounded-xl p-4 cursor-pointer transition hover:border-blue-500/40"
@@ -546,8 +572,8 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
           </div>
         </div>
 
-        <!-- ── ROW 3 · Status · Progress · Team Structure ────────────────── -->
-        <div class="grid gap-4 lg:grid-cols-3">
+        <!-- ── ROW 3 · Status · Progress · Top Revenue · Team Structure ──── -->
+        <div class="grid gap-4 lg:grid-cols-4">
 
           <!-- Project Status Overview -->
           <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
@@ -633,6 +659,23 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                 <text :x="61+i*55" y="133" text-anchor="middle" font-size="7.5" style="fill:var(--portal-chart-text)">{{ p.name }}</text>
               </template>
             </svg>
+          </div>
+
+          <!-- Top Projects by Revenue -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <h3 class="font-semibold text-sm mb-5" style="color:var(--portal-text);">Top Projects by Revenue</h3>
+            <p v-if="!topProjectsByRevenue.length" class="text-xs text-center py-4" style="color:var(--portal-subtle);">No project values visible to you</p>
+            <ul v-else class="space-y-3.5">
+              <li v-for="p in topProjectsByRevenue" :key="p.name" class="text-xs">
+                <div class="flex items-center justify-between mb-1 gap-2">
+                  <span class="truncate font-medium" style="color:var(--portal-text);">{{ p.project_name || p.name }}</span>
+                  <span class="shrink-0 font-semibold" style="color:var(--portal-text);">{{ fmtSAR(p.estimated_costing) }}</span>
+                </div>
+                <div class="h-1.5 rounded-full" style="background:var(--portal-surface-alt);">
+                  <div class="h-full rounded-full" :style="{ width: p.share_pct + '%', background: '#10B981' }"></div>
+                </div>
+              </li>
+            </ul>
           </div>
 
           <!-- Team Structure Overview -->

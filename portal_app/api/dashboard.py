@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import add_days, date_diff, nowdate
+from frappe.utils import add_days, date_diff, flt, get_first_day, nowdate
 
 from portal_app.api import helper
 from portal_app.api.projects import portfolio_dashboard
@@ -44,7 +44,9 @@ def get_dashboard_data():
 			"user_projects_preview": [],
 			"team_member_count": 0,
 			"recent_activity": [],
-			"trends": {"projects": None, "team_members": None},
+			"trends": {"projects": None, "team_members": None, "sales": None},
+			"sales_this_month": 0,
+			"top_projects_by_revenue": [],
 		}
 
 	portfolio = portfolio_dashboard()
@@ -159,9 +161,49 @@ def get_dashboard_data():
 			"creation": ["<=", cutoff],
 		},
 	)
+	# Sales this month / Top projects by revenue — scoped to whichever projects this
+	# user may see the *value* of (System Manager: all; Projects Manager: only their
+	# own assigned projects) — same rule as everywhere else cost data is shown.
+	value_names = helper.get_value_visible_project_names()
+	month_start = get_first_day(nowdate())
+	prev_month_end = add_days(month_start, -1)
+	prev_month_start = get_first_day(prev_month_end)
+
+	sales_this_month = 0.0
+	sales_last_month = 0.0
+	top_projects_by_revenue = []
+	if value_names:
+		placeholders = ",".join(["%s"] * len(value_names))
+		sales_this_month = flt(
+			frappe.db.sql(
+				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation >= %s",
+				value_names + [month_start],
+			)[0][0]
+			or 0
+		)
+		sales_last_month = flt(
+			frappe.db.sql(
+				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation BETWEEN %s AND %s",
+				value_names + [prev_month_start, prev_month_end],
+			)[0][0]
+			or 0
+		)
+		top_projects_by_revenue = frappe.get_all(
+			"Project",
+			filters={"name": ["in", value_names], "estimated_costing": [">", 0]},
+			fields=["name", "project_name", "estimated_costing"],
+			order_by="estimated_costing desc",
+			limit_page_length=5,
+		)
+		if top_projects_by_revenue:
+			max_val = max(flt(p.estimated_costing) for p in top_projects_by_revenue) or 1
+			for p in top_projects_by_revenue:
+				p["share_pct"] = round((flt(p.estimated_costing) / max_val) * 100)
+
 	trends = {
 		"projects": _pct_change(len(allowed), projects_prev),
 		"team_members": _pct_change(team_member_count, team_prev),
+		"sales": _pct_change(sales_this_month, sales_last_month),
 	}
 
 	recent_activity = []
@@ -217,4 +259,6 @@ def get_dashboard_data():
 		"team_member_count": team_member_count,
 		"recent_activity": recent_activity,
 		"trends": trends,
+		"sales_this_month": sales_this_month,
+		"top_projects_by_revenue": top_projects_by_revenue,
 	}
