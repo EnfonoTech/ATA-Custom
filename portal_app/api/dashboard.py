@@ -1,8 +1,16 @@
 import frappe
-from frappe.utils import add_days, date_diff, nowdate
+from frappe.utils import add_days, date_diff, flt, get_first_day, nowdate
 
 from portal_app.api import helper
 from portal_app.api.projects import portfolio_dashboard
+
+
+def _pct_change(curr, prev):
+	"""Percent change vs `prev`. None when there's no prior baseline to compare against
+	(can't express a meaningful percent change from zero)."""
+	if not prev:
+		return None
+	return round(((curr - prev) / prev) * 100, 1)
 
 
 def _planned_pct(start, end):
@@ -36,6 +44,9 @@ def get_dashboard_data():
 			"user_projects_preview": [],
 			"team_member_count": 0,
 			"recent_activity": [],
+			"trends": {"projects": None, "team_members": None, "sales": None},
+			"sales_this_month": 0,
+			"top_projects_by_revenue": [],
 		}
 
 	portfolio = portfolio_dashboard()
@@ -123,6 +134,8 @@ def get_dashboard_data():
 	)
 	for p in user_projects_preview:
 		p["planned_pct"] = _planned_pct(p.get("expected_start_date"), p.get("expected_end_date"))
+		if not helper.can_view_project_value(p["name"]):
+			p["estimated_costing"] = None
 
 	team_member_count = frappe.db.count(
 		"User",
@@ -132,6 +145,66 @@ def get_dashboard_data():
 			"name": ["not in", ["Guest", "Administrator"]],
 		},
 	)
+
+	# "vs last month" trends — the only two metrics with a real historical baseline
+	# (creation date). Project/task *status* isn't snapshotted anywhere, so a trend
+	# for On Track / At Risk / Delayed can't be computed truthfully; those cards show
+	# a share-of-total instead (see get_teams-style ratios computed on the frontend).
+	cutoff = add_days(nowdate(), -30)
+	projects_prev = frappe.db.count("Project", {"name": ["in", allowed], "creation": ["<=", cutoff]})
+	team_prev = frappe.db.count(
+		"User",
+		filters={
+			"enabled": 1,
+			"user_type": "System User",
+			"name": ["not in", ["Guest", "Administrator"]],
+			"creation": ["<=", cutoff],
+		},
+	)
+	# Sales this month / Top projects by revenue — scoped to whichever projects this
+	# user may see the *value* of (System Manager: all; Projects Manager: only their
+	# own assigned projects) — same rule as everywhere else cost data is shown.
+	value_names = helper.get_value_visible_project_names()
+	month_start = get_first_day(nowdate())
+	prev_month_end = add_days(month_start, -1)
+	prev_month_start = get_first_day(prev_month_end)
+
+	sales_this_month = 0.0
+	sales_last_month = 0.0
+	top_projects_by_revenue = []
+	if value_names:
+		placeholders = ",".join(["%s"] * len(value_names))
+		sales_this_month = flt(
+			frappe.db.sql(
+				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation >= %s",
+				value_names + [month_start],
+			)[0][0]
+			or 0
+		)
+		sales_last_month = flt(
+			frappe.db.sql(
+				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation BETWEEN %s AND %s",
+				value_names + [prev_month_start, prev_month_end],
+			)[0][0]
+			or 0
+		)
+		top_projects_by_revenue = frappe.get_all(
+			"Project",
+			filters={"name": ["in", value_names], "estimated_costing": [">", 0]},
+			fields=["name", "project_name", "estimated_costing"],
+			order_by="estimated_costing desc",
+			limit_page_length=5,
+		)
+		if top_projects_by_revenue:
+			max_val = max(flt(p.estimated_costing) for p in top_projects_by_revenue) or 1
+			for p in top_projects_by_revenue:
+				p["share_pct"] = round((flt(p.estimated_costing) / max_val) * 100)
+
+	trends = {
+		"projects": _pct_change(len(allowed), projects_prev),
+		"team_members": _pct_change(team_member_count, team_prev),
+		"sales": _pct_change(sales_this_month, sales_last_month),
+	}
 
 	recent_activity = []
 
@@ -185,4 +258,7 @@ def get_dashboard_data():
 		"user_projects_preview": user_projects_preview,
 		"team_member_count": team_member_count,
 		"recent_activity": recent_activity,
+		"trends": trends,
+		"sales_this_month": sales_this_month,
+		"top_projects_by_revenue": top_projects_by_revenue,
 	}

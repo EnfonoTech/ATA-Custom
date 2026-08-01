@@ -35,6 +35,16 @@
       <span class="text-[9px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 hidden sm:block" :style="badgeStyle">
         {{ node.office }}
       </span>
+
+      <!-- manage team (edit / add-remove members) — team-level nodes only -->
+      <button
+        v-if="depth === 0 && canManageTeams"
+        class="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-black/5"
+        title="Manage team"
+        @click.stop="$emit('manage', node.id)"
+      >
+        <FeatherIcon name="edit-2" class="h-3.5 w-3.5" :style="{ color: officeColor }" />
+      </button>
     </div>
 
     <!-- children -->
@@ -46,8 +56,10 @@
         :depth="depth + 1"
         :expanded="expanded"
         :selected-id="selectedId"
+        :can-manage-teams="canManageTeams"
         @toggle="$emit('toggle', $event)"
         @select="$emit('select', $event)"
+        @manage="$emit('manage', $event)"
       />
     </div>
   </div>
@@ -55,15 +67,17 @@
 
 <script setup>
 import { computed } from "vue";
+import { FeatherIcon } from "frappe-ui";
 
 const props = defineProps({
-  node:       { type: Object, required: true },
-  depth:      { type: Number, default: 0 },
-  expanded:   { type: Object, required: true },
-  selectedId: { type: String, default: null },
+  node:            { type: Object, required: true },
+  depth:           { type: Number, default: 0 },
+  expanded:        { type: Object, required: true },
+  selectedId:      { type: String, default: null },
+  canManageTeams:  { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["toggle", "select"]);
+const emit = defineEmits(["toggle", "select", "manage"]);
 
 const OFFICE_COLOR  = { RIYADH: "#C9A84C", LISBON: "#185FA5", MANILA: "#276749" };
 const OFFICE_BG     = { RIYADH: "rgba(201,168,76,0.12)",  LISBON: "rgba(24,95,165,0.12)",  MANILA: "rgba(39,103,73,0.12)"  };

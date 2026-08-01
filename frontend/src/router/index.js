@@ -9,7 +9,8 @@ const Dashboard     = () => import("@/pages/Dashboard.vue");
 const OrgChartPage  = () => import("@/pages/OrgChartPage.vue");
 const TeamsPage     = () => import("@/pages/TeamsPage.vue");
 const GanttChart    = () => import("@/pages/GanttChart.vue");
-const DailyGantt    = () => import("@/pages/DailyGantt.vue");
+const DailyTask     = () => import("@/pages/DailyTask.vue");
+const Contracts     = () => import("@/pages/Contracts.vue");
 const Projects      = () => import("@/pages/Projects.vue");
 const ProjectDetail = () => import("@/pages/ProjectDetail.vue");
 const Kanban        = () => import("@/pages/Kanban.vue");
@@ -42,11 +43,12 @@ const routes = [
 		component: Layout,
 		children: [
 			{ path: "", redirect: "/dashboard" },
-			{ path: "dashboard", name: "Dashboard", component: Dashboard },
-			{ path: "org-chart", name: "OrgChart", component: OrgChartPage },
-			{ path: "teams", name: "Teams", component: TeamsPage },
+			{ path: "dashboard", name: "Dashboard", component: Dashboard, meta: { requiresManager: true } },
+			{ path: "org-chart", name: "OrgChart", component: OrgChartPage, meta: { requiresManager: true } },
+			{ path: "teams", name: "Teams", component: TeamsPage, meta: { requiresManager: true } },
 			{ path: "gantt", name: "GanttChart", component: GanttChart },
-			{ path: "daily-gantt", name: "DailyGantt", component: DailyGantt },
+			{ path: "daily-task", name: "DailyTask", component: DailyTask },
+			{ path: "contracts", name: "Contracts", component: Contracts, meta: { requiresManager: true } },
 			{ path: "projects", name: "Projects", component: Projects },
 			{ path: "projects/:name", name: "ProjectDetail", component: ProjectDetail, props: true },
 			{ path: "kanban", name: "Kanban", component: Kanban },
@@ -118,6 +120,19 @@ router.beforeEach(async (to) => {
 
 	if (to.path === "/login" && isAuthenticated) {
 		return "/dashboard";
+	}
+
+	if (to.meta.requiresManager && isAuthenticated) {
+		try {
+			const caps = await call({
+				method: "portal_app.api.projects.get_capabilities",
+			});
+			if (!caps?.is_manager) {
+				return "/projects";
+			}
+		} catch {
+			return "/projects";
+		}
 	}
 
 	if (to.meta.requiresPortalAdmin && isAuthenticated) {

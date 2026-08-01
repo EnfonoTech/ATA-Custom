@@ -105,24 +105,47 @@ def assert_project_access(project_name: str) -> None:
 		frappe.throw(_("No access to this project"), frappe.PermissionError)
 
 
-def can_manage_project(project_name: str) -> bool:
-	if has_portal_staff_project_access():
-		return project_name in get_allowed_project_names()
-	if user_is_customer_portal_user():
+def can_view_project_value(project_name: str, user=None) -> bool:
+	"""Whether `user` may see this project's monetary value (Dashboard "Value" column).
+
+	System Manager gets full portfolio oversight — every project's value. A
+	Projects Manager only sees the value of the specific project(s) they are
+	assigned to as Portal Project Manager, not the whole portfolio."""
+	user = user or frappe.session.user
+	if user == "Guest":
 		return False
-	if project_name not in get_allowed_project_names():
-		return False
-	meta = frappe.get_meta("Project")
-	if meta.has_field("portal_project_manager"):
-		pm = frappe.db.get_value("Project", project_name, "portal_project_manager")
-		if pm and pm == frappe.session.user:
-			return True
-		# Desk projects often omit Portal Project Manager; treat document owner as manager when the field is blank.
-		if not pm:
-			owner = frappe.db.get_value("Project", project_name, "owner")
-			if owner == frappe.session.user:
-				return True
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return True
+	if "Projects Manager" in roles:
+		return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
 	return False
+
+
+def get_value_visible_project_names(user=None) -> list[str]:
+	"""Project names whose monetary value `user` may see — same rule as
+	can_view_project_value, but for callers that need the whole list at once
+	(e.g. portfolio totals, the AI chat's budget/cost answers)."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return []
+	roles = set(frappe.get_roles(user))
+	if "System Manager" in roles:
+		return get_allowed_project_names(user)
+	if "Projects Manager" in roles:
+		return frappe.get_all("Project", filters={"portal_project_manager": user}, pluck="name")
+	return []
+
+
+def can_manage_project(project_name: str) -> bool:
+	"""Management-level action (edit, delete, team sync, sharing, folder rules, etc.).
+
+	Restricted to System Manager / Projects Manager. Regular "Projects User" team
+	members — even a project's Lead Architect or the document owner — get read-only
+	access to projects; they cannot edit or delete them."""
+	if not has_portal_staff_project_access():
+		return False
+	return project_name in get_allowed_project_names()
 
 
 def assert_manage_project(project_name: str) -> None:

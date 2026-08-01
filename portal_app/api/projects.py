@@ -36,7 +36,7 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_milestone_date", "portal_server_t", "portal_server_a", "portal_server_c"):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -74,6 +74,15 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		order_by=f"{sort_by} {sort_order}",
 		limit_page_length=500,
 	)
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
 	return {"projects": projects}
 
 
@@ -82,6 +91,11 @@ def get_project(name):
 	helper.assert_project_access(name)
 	doc = frappe.get_doc("Project", name)
 	out = doc.as_dict()
+	if not helper.has_portal_staff_project_access():
+		out.pop("estimated_costing", None)
+		out.pop("portal_project_manager", None)
+	elif not helper.can_view_project_value(name):
+		out.pop("estimated_costing", None)
 	return {"project": out}
 
 
@@ -123,16 +137,20 @@ def portfolio_dashboard():
 		as_dict=True,
 	)
 
-	cost = flt(
-		frappe.db.sql(
-			f"""
-			SELECT SUM(estimated_costing) FROM `tabProject`
-			WHERE name IN ({placeholders})
-			""",
-			names,
-		)[0][0]
-		or 0
-	)
+	value_names = helper.get_value_visible_project_names()
+	cost = 0
+	if value_names:
+		value_placeholders = ",".join(["%s"] * len(value_names))
+		cost = flt(
+			frappe.db.sql(
+				f"""
+				SELECT SUM(estimated_costing) FROM `tabProject`
+				WHERE name IN ({value_placeholders})
+				""",
+				value_names,
+			)[0][0]
+			or 0
+		)
 
 	open_tasks = frappe.db.count(
 		"Task",
@@ -194,6 +212,16 @@ def kanban_board():
 	fields = _project_fields()
 	projects = frappe.get_all("Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500)
 
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
+
 	buckets = {}
 	for p in projects:
 		key = p.get(kf) or p.get("status") or "Unknown"
@@ -237,8 +265,12 @@ def update_project(project, **kwargs):
 		if v is not None:
 			doc.set(k, v if v != "" else None)
 
+	if kwargs.get("estimated_costing") is not None and helper.can_view_project_value(project):
+		v = kwargs.get("estimated_costing")
+		doc.set("estimated_costing", v if v != "" else None)
+
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c", "portal_upcoming_milestone", "portal_milestone_date"):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v is not None:
@@ -469,6 +501,10 @@ def get_capabilities():
 		if not effective_customer_portal
 		else False,
 		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
+		# System Manager / Projects Manager only — gates management-level views (Dashboard,
+		# Org Chart, Teams) and management-level fields (estimated cost, project manager)
+		# away from regular "Projects User" team members.
+		"is_manager": staff_project_access,
 		"portal_user": frappe.session.user,
 	}
 
@@ -924,6 +960,47 @@ def search_portal_users(txt=""):
 		]
 
 	return frappe.get_all("User", **kwargs)
+
+
+@frappe.whitelist()
+def search_projects(query=""):
+	"""Project combobox for the Tasks quick-create form — scoped to projects the
+	caller can create tasks in (same rule create_task enforces)."""
+	allowed_names = helper.get_allowed_project_names()
+	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	if not manageable:
+		return []
+
+	query = (query or "").strip()
+	safe = cstr(query).replace("%", "").replace("_", "").strip()[:100]
+	filters = {"name": ["in", manageable]}
+	or_filters = None
+	if safe:
+		or_filters = [
+			["project_name", "like", f"%{safe}%"],
+			["name", "like", f"%{safe}%"],
+		]
+		if frappe.get_meta("Project").has_field("portal_project_code"):
+			or_filters.append(["portal_project_code", "like", f"%{safe}%"])
+
+	fields = ["name", "project_name"]
+	if frappe.get_meta("Project").has_field("portal_project_code"):
+		fields.append("portal_project_code")
+
+	return frappe.get_all(
+		"Project",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="project_name asc",
+		limit_page_length=25,
+	)
+
+
+@frappe.whitelist()
+def search_assignable_users(query=""):
+	"""Assignee combobox for the Tasks quick-create form."""
+	return search_portal_users(query)
 
 
 def _task_is_assigned_to_user(task_name: str, user: str) -> bool:

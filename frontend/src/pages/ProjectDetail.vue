@@ -21,6 +21,7 @@ const canShareFolder = computed(
 		(portalCapabilities.value?.allowed_project_names || []).includes(props.name),
 );
 const canLinkCustomer = computed(() => canManage.value && !!portalCapabilities.value?.can_manage_customers);
+const isManager = computed(() => !!portalCapabilities.value?.is_manager);
 const isCustomerPortalUser = computed(() => !!portalCapabilities.value?.is_customer_portal_user);
 const sessionUser = computed(() => portalCapabilities.value?.portal_user || "");
 
@@ -665,7 +666,7 @@ async function submitNewCustomer() {
 							</p>
 						</div>
 					</div>
-					<div class="portal-kpi">
+					<div v-if="isManager" class="portal-kpi">
 						<div class="portal-kpi-icon"><FeatherIcon name="credit-card" class="h-4 w-4" /></div>
 						<div class="min-w-0">
 							<p class="portal-section-title">Estimated cost</p>

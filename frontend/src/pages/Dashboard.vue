@@ -9,6 +9,7 @@ const router = useRouter();
 const loading   = ref(true);
 const data      = ref(null);
 const loadError = ref("");
+const teams     = ref([]);
 
 const portalCapabilities = inject("portalCapabilities", ref({}));
 const canCreate      = computed(() => !!portalCapabilities.value?.can_create_project);
@@ -19,7 +20,18 @@ onMounted(async () => {
   try { data.value = await call({ method: "portal_app.api.dashboard.get_dashboard_data" }); }
   catch (e) { loadError.value = e?.responseBody?.message || "Dashboard failed to load."; }
   finally   { loading.value = false; }
+  try { teams.value = await call({ method: "portal_app.api.teams.get_teams" }); }
+  catch { teams.value = []; }
 });
+
+// ── Team Structure Overview — real teams, largest first ────────────────────
+const TEAM_COLORS = ["blue", "green", "purple"];
+const topTeams = computed(() =>
+  [...teams.value]
+    .sort((a, b) => (b.member_count || 0) - (a.member_count || 0))
+    .slice(0, 9)
+    .map((t, i) => ({ ...t, color: TEAM_COLORS[i % TEAM_COLORS.length] }))
+);
 
 // ── Formatters ─────────────────────────────────────────────────────────────
 function fmtN(n) { const x = Number(n); return Number.isFinite(x) ? x.toLocaleString() : "0"; }
@@ -46,30 +58,44 @@ const totalProjects = computed(() => Number(data.value?.totals?.projects) || 0);
 
 const onTrackCount = computed(() => {
   const rows = data.value?.by_kanban || [];
-  const n = rows.filter(r => ["Active","In Progress","Open"].includes(r.stage)).reduce((s,r)=>s+Number(r.c),0);
-  return n || Math.round((totalProjects.value||18)*0.61);
+  return rows.filter(r => ["Active","In Progress","Open"].includes(r.stage)).reduce((s,r)=>s+Number(r.c),0);
 });
 const atRiskCount = computed(() => {
   const rows = data.value?.by_kanban || [];
-  const n = rows.filter(r => ["Review","On Hold","Planning"].includes(r.stage)).reduce((s,r)=>s+Number(r.c),0);
-  return n || Math.round((totalProjects.value||18)*0.28);
+  return rows.filter(r => ["Review","On Hold","Planning"].includes(r.stage)).reduce((s,r)=>s+Number(r.c),0);
 });
 const delayedCount = computed(() => {
   const rows = data.value?.by_kanban || [];
   const n = rows.filter(r => ["Cancelled","Blocked","Overdue"].includes(r.stage)).reduce((s,r)=>s+Number(r.c),0);
-  return n || Math.max(0, (totalProjects.value||18)-onTrackCount.value-atRiskCount.value);
+  return n || Math.max(0, totalProjects.value - onTrackCount.value - atRiskCount.value);
 });
+
+// Share-of-total — the only honest "vs what" comparison for status buckets, since
+// status isn't snapshotted anywhere so a real "vs last month" trend can't be computed.
+function shareOfTotal(count) {
+  if (!totalProjects.value) return null;
+  return Math.round((count / totalProjects.value) * 100);
+}
+const onTrackShare = computed(() => shareOfTotal(onTrackCount.value));
+const atRiskShare  = computed(() => shareOfTotal(atRiskCount.value));
+const delayedShare = computed(() => shareOfTotal(delayedCount.value));
+
+// "vs last month" — real trend, backend-computed from creation-date history.
+// Only Active Projects and Total Team Members have an actual historical baseline.
+const projectsTrend = computed(() => data.value?.trends?.projects ?? null);
+const teamTrend     = computed(() => data.value?.trends?.team_members ?? null);
+const salesTrend    = computed(() => data.value?.trends?.sales ?? null);
+
+// ── Sales This Month / Top Projects by Revenue — real, value-visibility-scoped ──
+const salesThisMonth = computed(() => Number(data.value?.sales_this_month) || 0);
+const topProjectsByRevenue = computed(() => data.value?.top_projects_by_revenue || []);
 
 // ── Project Status Donut ───────────────────────────────────────────────────
 const statusSegments = computed(() => {
-  const total = totalProjects.value || 18;
-  const ot = onTrackCount.value;
-  const ar = atRiskCount.value;
-  const dl = Math.max(0, total - ot - ar);
   return [
-    { label:"On Track",  count: ot,   color:"#22c55e" },
-    { label:"At Risk",   count: ar,   color:"#f59e0b" },
-    { label:"Delayed",   count: dl,   color:"#ef4444" },
+    { label:"On Track",  count: onTrackCount.value,  color:"#22c55e" },
+    { label:"At Risk",   count: atRiskCount.value,   color:"#f59e0b" },
+    { label:"Delayed",   count: delayedCount.value,  color:"#ef4444" },
   ];
 });
 const statusDonutStyle = computed(() => {
@@ -109,7 +135,7 @@ const taskSegments = computed(() => {
     { label:"Overdue",     count:overdue,    color:"#ef4444" },
   ];
 });
-const totalTasksCount = computed(() => taskSegments.value.reduce((s,r)=>s+r.count,0) || 210);
+const totalTasksCount = computed(() => taskSegments.value.reduce((s,r)=>s+r.count,0));
 const taskDonutStyle = computed(() => {
   const segs = taskSegments.value;
   const total = segs.reduce((s,r)=>s+r.count,0) || 1;
@@ -135,6 +161,11 @@ function fmtDue(d) {
     return new Date(String(d).replace(" ","T")).toLocaleDateString(undefined, { day:"numeric", month:"short", year:"numeric" });
   } catch { return String(d); }
 }
+function fmtMoney(n) {
+  if (n == null || n === "") return "—";
+  const x = Number(n);
+  return Number.isFinite(x) ? `SAR ${x.toLocaleString()}` : String(n);
+}
 
 const recentProjects = computed(() => {
   const previews = data.value?.user_projects_preview || [];
@@ -145,6 +176,7 @@ const recentProjects = computed(() => {
     stage:    p.portal_kanban_stage || p.status || "—",
     progress: Math.round(Number(p.percent_complete) || 0),
     budget:   avgBudget != null ? Math.round(avgBudget) + "%" : "—",
+    value:    p.estimated_costing != null ? fmtMoney(p.estimated_costing) : null,
     status:   projectStatus(p),
     due:      fmtDue(p.expected_end_date),
   }));
@@ -240,8 +272,8 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
 
       <!-- Loading skeleton -->
       <template v-if="loading">
-        <div class="grid gap-3 grid-cols-2 lg:grid-cols-5">
-          <div v-for="i in 5" :key="i" class="rounded-xl p-5 flex items-center gap-4"
+        <div class="grid gap-3 grid-cols-2 lg:grid-cols-6">
+          <div v-for="i in 6" :key="i" class="rounded-xl p-5 flex items-center gap-4"
                style="background:var(--portal-surface);border:1px solid var(--portal-border);">
             <SkeletonBlock w="2.5rem" h="2.5rem" rounded="9999px"/>
             <div class="flex-1 space-y-2">
@@ -269,8 +301,29 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
 
       <template v-else>
 
-        <!-- ── ROW 1 · 5 KPI CARDS ──────────────────────────────────────── -->
-        <div class="grid gap-3 grid-cols-2 lg:grid-cols-5">
+        <!-- ── ROW 1 · 6 KPI CARDS ──────────────────────────────────────── -->
+        <div class="grid gap-3 grid-cols-2 lg:grid-cols-6">
+
+          <!-- Sales This Month -->
+          <div class="rounded-xl p-4"
+               style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <div class="flex items-center gap-3">
+              <div class="h-11 w-11 rounded-full flex items-center justify-center shrink-0"
+                   style="background:rgba(16,185,129,0.15);">
+                <FeatherIcon name="dollar-sign" class="h-5 w-5" style="color:#10B981;"/>
+              </div>
+              <div class="min-w-0">
+                <p class="text-xs mb-0.5" style="color:var(--portal-muted);">Sales This Month</p>
+                <p class="text-2xl font-bold leading-none truncate" style="color:var(--portal-text);">{{ fmtSAR(salesThisMonth) }}</p>
+              </div>
+            </div>
+            <div v-if="salesTrend != null" class="mt-3 flex items-center gap-1 text-xs" :style="{ color: salesTrend >= 0 ? '#22c55e' : '#ef4444' }">
+              <FeatherIcon :name="salesTrend >= 0 ? 'trending-up' : 'trending-down'" class="h-3.5 w-3.5"/>
+              <span class="font-semibold">{{ salesTrend >= 0 ? '+' : '' }}{{ salesTrend }}%</span>
+              <span style="color:var(--portal-subtle);">from last month</span>
+            </div>
+            <p v-else class="mt-3 text-xs" style="color:var(--portal-subtle);">No prior-month data yet</p>
+          </div>
 
           <!-- Active Projects -->
           <div class="rounded-xl p-4 cursor-pointer transition hover:border-blue-500/40"
@@ -283,14 +336,15 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
               </div>
               <div>
                 <p class="text-xs mb-0.5" style="color:var(--portal-muted);">Active Projects</p>
-                <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalProjects||18) }}</p>
+                <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalProjects) }}</p>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-1 text-xs" style="color:#22c55e;">
-              <FeatherIcon name="trending-up" class="h-3.5 w-3.5"/>
-              <span class="font-semibold">+12%</span>
+            <div v-if="projectsTrend != null" class="mt-3 flex items-center gap-1 text-xs" :style="{ color: projectsTrend >= 0 ? '#22c55e' : '#ef4444' }">
+              <FeatherIcon :name="projectsTrend >= 0 ? 'trending-up' : 'trending-down'" class="h-3.5 w-3.5"/>
+              <span class="font-semibold">{{ projectsTrend >= 0 ? '+' : '' }}{{ projectsTrend }}%</span>
               <span style="color:var(--portal-subtle);">from last month</span>
             </div>
+            <p v-else class="mt-3 text-xs" style="color:var(--portal-subtle);">No prior-month data yet</p>
           </div>
 
           <!-- Projects On Track -->
@@ -306,11 +360,7 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                 <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(onTrackCount) }}</p>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-1 text-xs" style="color:#22c55e;">
-              <FeatherIcon name="trending-up" class="h-3.5 w-3.5"/>
-              <span class="font-semibold">+10%</span>
-              <span style="color:var(--portal-subtle);">from last month</span>
-            </div>
+            <p class="mt-3 text-xs" style="color:var(--portal-subtle);">{{ onTrackShare != null ? onTrackShare + '% of total projects' : '—' }}</p>
           </div>
 
           <!-- Projects At Risk -->
@@ -326,11 +376,7 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                 <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(atRiskCount) }}</p>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-1 text-xs" style="color:#f59e0b;">
-              <FeatherIcon name="trending-up" class="h-3.5 w-3.5"/>
-              <span class="font-semibold">+25%</span>
-              <span style="color:var(--portal-subtle);">from last month</span>
-            </div>
+            <p class="mt-3 text-xs" style="color:var(--portal-subtle);">{{ atRiskShare != null ? atRiskShare + '% of total projects' : '—' }}</p>
           </div>
 
           <!-- Projects Delayed -->
@@ -343,14 +389,10 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
               </div>
               <div>
                 <p class="text-xs mb-0.5" style="color:var(--portal-muted);">Projects Delayed</p>
-                <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(delayedCount||2) }}</p>
+                <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(delayedCount) }}</p>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-1 text-xs" style="color:#ef4444;">
-              <FeatherIcon name="trending-down" class="h-3.5 w-3.5"/>
-              <span class="font-semibold">-33%</span>
-              <span style="color:var(--portal-subtle);">from last month</span>
-            </div>
+            <p class="mt-3 text-xs" style="color:var(--portal-subtle);">{{ delayedShare != null ? delayedShare + '% of total projects' : '—' }}</p>
           </div>
 
           <!-- Total Team Members -->
@@ -367,11 +409,12 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                 <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(teamMemberCount) }}</p>
               </div>
             </div>
-            <div class="mt-3 flex items-center gap-1 text-xs" style="color:#22c55e;">
-              <FeatherIcon name="trending-up" class="h-3.5 w-3.5"/>
-              <span class="font-semibold">+8%</span>
+            <div v-if="teamTrend != null" class="mt-3 flex items-center gap-1 text-xs" :style="{ color: teamTrend >= 0 ? '#22c55e' : '#ef4444' }">
+              <FeatherIcon :name="teamTrend >= 0 ? 'trending-up' : 'trending-down'" class="h-3.5 w-3.5"/>
+              <span class="font-semibold">{{ teamTrend >= 0 ? '+' : '' }}{{ teamTrend }}%</span>
               <span style="color:var(--portal-subtle);">from last month</span>
             </div>
+            <p v-else class="mt-3 text-xs" style="color:var(--portal-subtle);">No prior-month data yet</p>
           </div>
         </div>
 
@@ -529,8 +572,8 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
           </div>
         </div>
 
-        <!-- ── ROW 3 · Status · Progress · Team Structure ────────────────── -->
-        <div class="grid gap-4 lg:grid-cols-3">
+        <!-- ── ROW 3 · Status · Progress · Top Revenue · Team Structure ──── -->
+        <div class="grid gap-4 lg:grid-cols-4">
 
           <!-- Project Status Overview -->
           <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
@@ -559,7 +602,7 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                 <div class="absolute inset-0 rounded-full" :style="statusDonutStyle"></div>
                 <div class="absolute inset-[22px] rounded-full flex flex-col items-center justify-center"
                      style="background:var(--portal-surface);">
-                  <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalProjects||18) }}</p>
+                  <p class="text-2xl font-bold leading-none" style="color:var(--portal-text);">{{ fmtN(totalProjects) }}</p>
                   <p class="text-[10px] mt-0.5 text-center" style="color:var(--portal-muted);">Total Projects</p>
                 </div>
               </div>
@@ -618,6 +661,23 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
             </svg>
           </div>
 
+          <!-- Top Projects by Revenue -->
+          <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
+            <h3 class="font-semibold text-sm mb-5" style="color:var(--portal-text);">Top Projects by Revenue</h3>
+            <p v-if="!topProjectsByRevenue.length" class="text-xs text-center py-4" style="color:var(--portal-subtle);">No project values visible to you</p>
+            <ul v-else class="space-y-3.5">
+              <li v-for="p in topProjectsByRevenue" :key="p.name" class="text-xs">
+                <div class="flex items-center justify-between mb-1 gap-2">
+                  <span class="truncate font-medium" style="color:var(--portal-text);">{{ p.project_name || p.name }}</span>
+                  <span class="shrink-0 font-semibold" style="color:var(--portal-text);">{{ fmtSAR(p.estimated_costing) }}</span>
+                </div>
+                <div class="h-1.5 rounded-full" style="background:var(--portal-surface-alt);">
+                  <div class="h-full rounded-full" :style="{ width: p.share_pct + '%', background: '#10B981' }"></div>
+                </div>
+              </li>
+            </ul>
+          </div>
+
           <!-- Team Structure Overview -->
           <div class="rounded-xl p-5" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
             <div class="flex items-center justify-between mb-5">
@@ -628,61 +688,25 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
               </span>
             </div>
 
-            <!-- Top teams -->
-            <div class="flex justify-around gap-2 mb-3">
-              <div class="rounded-xl px-3 py-2.5 text-center flex-1"
-                   style="background:var(--portal-team-blue-bg);border:1px solid var(--portal-team-blue-border);">
-                <p class="text-xs font-semibold" style="color:var(--portal-text);">CD Team</p>
-                <p class="text-xs mt-0.5" style="color:var(--portal-muted);">👥 46</p>
+            <p v-if="!topTeams.length" class="text-xs text-center py-4" style="color:var(--portal-muted);">No teams found</p>
+            <template v-else>
+              <!-- Top 3 teams (by member count) -->
+              <div class="flex justify-around gap-2 mb-3">
+                <div v-for="t in topTeams.slice(0, 3)" :key="t.name" class="rounded-xl px-3 py-2.5 text-center flex-1"
+                     :style="`background:var(--portal-team-${t.color}-bg);border:1px solid var(--portal-team-${t.color}-border);`">
+                  <p class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ t.department_name }}</p>
+                  <p class="text-xs mt-0.5" style="color:var(--portal-muted);">👥 {{ t.member_count }}</p>
+                </div>
               </div>
-              <div class="rounded-xl px-3 py-2.5 text-center flex-1"
-                   style="background:var(--portal-team-green-bg);border:1px solid var(--portal-team-green-border);">
-                <p class="text-xs font-semibold" style="color:var(--portal-text);">DD Team</p>
-                <p class="text-xs mt-0.5" style="color:var(--portal-muted);">👥 42</p>
-              </div>
-              <div class="rounded-xl px-3 py-2.5 text-center flex-1"
-                   style="background:var(--portal-team-purple-bg);border:1px solid var(--portal-team-purple-border);">
-                <p class="text-xs font-semibold" style="color:var(--portal-text);">TD Team</p>
-                <p class="text-xs mt-0.5" style="color:var(--portal-muted);">👥 40</p>
-              </div>
-            </div>
 
-            <!-- Sub-teams -->
-            <div class="flex justify-around gap-2">
-              <!-- CD sub-teams -->
-              <div class="flex flex-col gap-1.5 flex-1">
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">ID Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 23</p>
-                </div>
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">LA Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 23</p>
+              <!-- Remaining teams -->
+              <div v-if="topTeams.length > 3" class="grid grid-cols-3 gap-1.5">
+                <div v-for="t in topTeams.slice(3, 9)" :key="t.name" class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
+                  <p class="text-[10px] font-medium truncate" style="color:var(--portal-muted);">{{ t.department_name }}</p>
+                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 {{ t.member_count }}</p>
                 </div>
               </div>
-              <!-- DD sub-teams -->
-              <div class="flex flex-col gap-1.5 flex-1">
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">ID Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 21</p>
-                </div>
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">LA Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 21</p>
-                </div>
-              </div>
-              <!-- TD sub-teams -->
-              <div class="flex flex-col gap-1.5 flex-1">
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">ID Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 20</p>
-                </div>
-                <div class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium" style="color:var(--portal-muted);">LA Team</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 20</p>
-                </div>
-              </div>
-            </div>
+            </template>
 
             <div class="mt-4 pt-3 flex items-center justify-between" style="border-top:1px solid var(--portal-border);">
               <span class="text-xs" style="color:var(--portal-muted);">Total Members</span>
@@ -709,6 +733,7 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                   <th class="text-left pb-3 pr-6 text-xs font-semibold" style="color:var(--portal-subtle);">Stage</th>
                   <th class="text-left pb-3 pr-6 text-xs font-semibold" style="color:var(--portal-subtle);">Overall Progress</th>
                   <th class="text-left pb-3 pr-6 text-xs font-semibold" style="color:var(--portal-subtle);">Budget Utilization</th>
+                  <th class="text-left pb-3 pr-6 text-xs font-semibold" style="color:var(--portal-subtle);">Value</th>
                   <th class="text-left pb-3 pr-6 text-xs font-semibold" style="color:var(--portal-subtle);">Status</th>
                   <th class="text-left pb-3 pr-2 text-xs font-semibold" style="color:var(--portal-subtle);">Due Date</th>
                   <th class="pb-3 w-8"></th>
@@ -736,7 +761,10 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
                     </div>
                   </td>
                   <td class="py-3 pr-6">
-                    <span class="text-xs" style="color:var(--portal-muted);">{{ p.budget }}%</span>
+                    <span class="text-xs" style="color:var(--portal-muted);">{{ p.budget }}</span>
+                  </td>
+                  <td class="py-3 pr-6">
+                    <span class="text-xs font-medium" style="color:var(--portal-text);">{{ p.value || "—" }}</span>
                   </td>
                   <td class="py-3 pr-6">
                     <span class="rounded-full px-2.5 py-1 text-xs font-semibold"
