@@ -12,7 +12,7 @@
   "sequence_id": 20.0,
   "for_user": "",
   "parent_page": "",
-  "content": "[{\"id\": \"pa-hdr-1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Project Portal</b></span>\", \"col\": 12}}, {\"id\": \"pa-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Open Portal\", \"col\": 3}}, {\"id\": \"pa-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Project\", \"col\": 3}}, {\"id\": \"pa-sc-3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Task\", \"col\": 3}}, {\"id\": \"pa-sc-4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Portal Project Settings\", \"col\": 3}}, {\"id\": \"pa-sp-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"pa-hdr-2\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Configuration</b></span>\", \"col\": 12}}, {\"id\": \"pa-cd-1\", \"type\": \"card\", \"data\": {\"card_name\": \"Portal Setup\", \"col\": 4}}, {\"id\": \"pa-cd-2\", \"type\": \"card\", \"data\": {\"card_name\": \"Files & Sharing\", \"col\": 4}}, {\"id\": \"pa-cd-3\", \"type\": \"card\", \"data\": {\"card_name\": \"Projects\", \"col\": 4}}]",
+  "content": "[{\"id\": \"pa-hdr-1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Project Portal</b></span>\", \"col\": 12}}, {\"id\": \"pa-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Open Portal\", \"col\": 3}}, {\"id\": \"pa-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Project\", \"col\": 3}}, {\"id\": \"pa-sc-3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Task\", \"col\": 3}}, {\"id\": \"pa-sc-4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Portal Project Settings\", \"col\": 3}}, {\"id\": \"pa-sc-5\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"User Guide\", \"col\": 3}}, {\"id\": \"pa-sp-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"pa-hdr-2\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Configuration</b></span>\", \"col\": 12}}, {\"id\": \"pa-cd-1\", \"type\": \"card\", \"data\": {\"card_name\": \"Portal Setup\", \"col\": 4}}, {\"id\": \"pa-cd-2\", \"type\": \"card\", \"data\": {\"card_name\": \"Files & Sharing\", \"col\": 4}}, {\"id\": \"pa-cd-3\", \"type\": \"card\", \"data\": {\"card_name\": \"Projects\", \"col\": 4}}]",
   "shortcuts": [
    {
     "type": "URL",
@@ -41,6 +41,13 @@
     "link_to": "Portal Project Settings",
     "doc_view": "",
     "color": "Grey"
+   },
+   {
+    "type": "URL",
+    "label": "User Guide",
+    "url": "/user-guide",
+    "color": "Blue",
+    "doc_view": ""
    }
   ],
   "links": [
