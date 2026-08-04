@@ -367,7 +367,10 @@ class PortalDemoSeedRun(Document):
 		company = _ensure_company()
 		meta = frappe.get_meta("Project")
 
-		for pj in DEMO_PROJECTS:
+		# The docx importer passes its parsed list on the document instead of
+		# reassigning the module global, which raced between concurrent requests and
+		# could leave one admin's imported list installed for every later seed.
+		for pj in (self.flags.get("projects_override") or DEMO_PROJECTS):
 			code = pj["code"]
 			existing = frappe.db.get_value("Project", {"portal_project_code": code}, "name")
 			if existing:
@@ -515,12 +518,29 @@ class PortalDemoSeedRun(Document):
 
 	# =========================================================== cleanup steps
 
+	def _recorded_names(self, *kinds) -> set:
+		"""Every (doctype, name) this run actually created — `skipped` rows excluded."""
+		out = set()
+		for kind in kinds:
+			for row in self.get(kind) or []:
+				if int(row.skipped or 0):
+					continue
+				if row.record_doctype and row.record_name:
+					out.add((row.record_doctype, row.record_name))
+		return out
+
 	def _cleanup(self, best_effort: bool = False):
 		"""Delete recorded records in reverse-dependency order.
 
 		Order matters: files → tasks → projects → customers → users. Within each
 		category, records flagged `skipped` are left alone (they pre-existed).
 		"""
+		# Cascades are restricted to what this run recorded. Deleting a seeded Project
+		# used to wipe EVERY File and Task under it, so any real document a staff member
+		# uploaded into a demo project during a walkthrough was destroyed with it.
+		recorded = self._recorded_names(
+			"created_files", "created_tasks", "created_projects", "created_customers", "created_users"
+		)
 		for kind in ("created_files", "created_tasks", "created_projects", "created_customers", "created_users"):
 			rows = list(self.get(kind) or [])
 			# Delete Project File records before File records to avoid FK constraint issues.
@@ -536,10 +556,10 @@ class PortalDemoSeedRun(Document):
 						continue
 					if dt == "Project":
 						# Cascade attached files + project tasks not already removed.
-						_cascade_project(dn)
+						_cascade_project(dn, recorded)
 					if dt == "User":
 						# Detach this user from any Project users table they were on.
-						_detach_user_from_projects(dn)
+						_detach_user_from_projects(dn, recorded)
 					frappe.delete_doc(dt, dn, force=1, ignore_permissions=True, ignore_missing=True)
 				except Exception:
 					if best_effort:
@@ -555,31 +575,55 @@ class PortalDemoSeedRun(Document):
 			pass
 
 
-def _cascade_project(project_name: str):
-	"""Delete all File rows + Tasks attached to the project, before the project itself."""
+def _cascade_project(project_name: str, recorded: set):
+	"""Delete the Files/Tasks THIS RUN created under the project, before the project.
+
+	Anything not in `recorded` is real data someone added to the project after seeding
+	and is deliberately left in place. If that leaves children behind, the Project
+	delete below fails and is logged — far better than silently destroying it.
+	"""
+	left_behind = []
 	for f in frappe.get_all(
 		"File",
 		filters={"attached_to_doctype": "Project", "attached_to_name": project_name},
 		pluck="name",
 	):
+		if ("File", f) not in recorded:
+			left_behind.append("File/" + f)
+			continue
 		try:
 			frappe.delete_doc("File", f, force=1, ignore_permissions=True, ignore_missing=True)
 		except Exception:
 			frappe.log_error(traceback.format_exc(), f"Portal Demo Seed cascade File/{f}")
 	for t in frappe.get_all("Task", filters={"project": project_name}, pluck="name"):
+		if ("Task", t) not in recorded:
+			left_behind.append("Task/" + t)
+			continue
 		try:
 			frappe.delete_doc("Task", t, force=1, ignore_permissions=True, ignore_missing=True)
 		except Exception:
 			frappe.log_error(traceback.format_exc(), f"Portal Demo Seed cascade Task/{t}")
-	# Drop any DocShare rows pointing at the project (avoids dangling shares).
+
+	if left_behind:
+		frappe.log_error(
+			"Left in place (not created by this seed run):\n" + "\n".join(left_behind),
+			f"Portal Demo Seed cleanup kept real data under {project_name}",
+		)
+
+	# Drop DocShare rows pointing at this seeded project only.
 	try:
 		frappe.db.delete("DocShare", {"share_doctype": "Project", "share_name": project_name})
 	except Exception:
 		pass
 
 
-def _detach_user_from_projects(user_id: str):
-	"""Remove the user from every Project Users child table before deleting the User."""
+def _detach_user_from_projects(user_id: str, recorded: set):
+	"""Remove the user from Project Users rows before deleting the User.
+
+	DocShare removal is limited to shares on projects this run created. Deleting every
+	DocShare belonging to the user, as this previously did, would revoke real access on
+	real projects if the demo account had ever been shared anything else.
+	"""
 	rows = frappe.get_all(
 		"Project User",
 		filters={"user": user_id},
@@ -590,8 +634,13 @@ def _detach_user_from_projects(user_id: str):
 			frappe.db.delete("Project User", {"name": row["name"]})
 		except Exception:
 			pass
-	# Drop DocShares attributed to the user too.
-	try:
-		frappe.db.delete("DocShare", {"user": user_id})
-	except Exception:
-		pass
+
+	seeded_projects = [n for (dt, n) in recorded if dt == "Project"]
+	if seeded_projects:
+		try:
+			frappe.db.delete(
+				"DocShare",
+				{"user": user_id, "share_doctype": "Project", "share_name": ["in", seeded_projects]},
+			)
+		except Exception:
+			pass

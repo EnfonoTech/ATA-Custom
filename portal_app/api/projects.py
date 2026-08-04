@@ -42,6 +42,32 @@ def _project_fields():
 	return base
 
 
+def _assert_may_set_project_manager(project: str, payload: dict) -> None:
+	"""Only a System Manager may hand the portal-manager role to someone else.
+
+	portal_project_manager is not a label: helper.can_view_project_value() grants a
+	Projects Manager sight of a project's money precisely when this field names them.
+	Leaving it writable by any Projects Manager therefore lets them self-grant that
+	permission on any project in the portfolio.
+	"""
+	if payload.get("portal_project_manager") is None:
+		return
+	if "System Manager" in frappe.get_roles():
+		return
+	current = frappe.db.get_value("Project", project, "portal_project_manager")
+	if current not in (None, "", frappe.session.user):
+		frappe.throw(
+			_("Only a System Manager can reassign the portal project manager."),
+			frappe.PermissionError,
+		)
+
+
+def _manageable_project_names(allowed_names: list) -> list:
+	"""Equivalent to [n for n in allowed_names if can_manage_project(n)], without the
+	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call."""
+	return list(allowed_names) if helper.has_portal_staff_project_access() else []
+
+
 def _safe_order_by(sort_by: str, sort_order: str) -> str:
 	"""Allowlist the sort inputs before they reach the query.
 
@@ -288,6 +314,7 @@ def rename_project(project, project_name):
 def update_project(project, **kwargs):
 	"""Update editable project fields from the portal edit modal."""
 	helper.assert_manage_project(project)
+	_assert_may_set_project_manager(project, kwargs)
 	doc = frappe.get_doc("Project", project)
 
 	for k in ("project_name", "status", "expected_start_date", "expected_end_date", "percent_complete", "notes"):
@@ -505,7 +532,7 @@ def get_capabilities():
 				can_create = False
 
 	allowed_names = helper.get_allowed_project_names()
-	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	manageable = _manageable_project_names(allowed_names)
 	# Projects where this user is explicitly listed in the Project Users table.
 	# Used by the Projects page filter and the Shared-with-me page (so a team
 	# member sees the project as part of "what I can access").
@@ -822,6 +849,17 @@ def _assert_user_eligible_for_customer_link(user, customer):
 			),
 			frappe.ValidationError,
 		)
+	# A customer portal contact must be an external party. Linking an internal user
+	# would strip their staff scoping and pin them to one customer's portfolio, and
+	# linking Administrator would lock the superuser out of the portal entirely.
+	if user in ("Administrator", "Guest"):
+		frappe.throw(_("This account cannot be linked as a customer contact."), frappe.PermissionError)
+	if helper.has_portal_staff_project_access(user) or frappe.db.exists("Project User", {"user": user}):
+		frappe.throw(
+			_("This is an internal user and cannot be linked as a customer portal contact:") + " " + cstr(user),
+			frappe.PermissionError,
+		)
+
 	existing = frappe.db.get_value("User", user, "portal_linked_customer")
 	if existing and existing != customer:
 		frappe.throw(
@@ -912,6 +950,9 @@ def sync_customer_portal_users(project, users):
 	)
 
 	for u in new_set - old_set:
+		# Mutating an existing account's roles is a User write, not a project action.
+		if not frappe.has_permission("User", "write", user=frappe.session.user):
+			frappe.throw(_("You are not allowed to modify user accounts."), frappe.PermissionError)
 		_assert_user_eligible_for_customer_link(u, cust)
 		_attach_portal_customer_user(u, cust)
 
@@ -922,18 +963,21 @@ def sync_customer_portal_users(project, users):
 
 
 @frappe.whitelist()
-def create_customer_portal_user_from_project(project, email, full_name, password):
+def create_customer_portal_user_from_project(project, email, full_name, password=None):
 	helper.assert_manage_project(project)
+	# Managing a project is not authority to mint a login on the ERPNext site.
+	if not frappe.has_permission("User", "create", user=frappe.session.user):
+		frappe.throw(_("You are not allowed to create user accounts."), frappe.PermissionError)
 	helper.ensure_portal_customer_role()
 	helper.ensure_user_portal_linked_customer_field()
 	cust = _project_customer_required(project)
 
-	email = (email or "").strip().lower()
-	full_name = (full_name or "").strip()
-	password = password or ""
+	email = cstr(email).strip().lower()
+	full_name = cstr(full_name).strip()
+	password = cstr(password)
 
-	if not email or not full_name or len(password) < 6:
-		frappe.throw(_("Valid email, full name, and password (min 6 characters) are required"))
+	if not email or not full_name:
+		frappe.throw(_("Valid email and full name are required"))
 
 	if frappe.db.exists("User", email):
 		_assert_user_eligible_for_customer_link(email, cust)
@@ -950,20 +994,22 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 		"first_name": first_name,
 		"last_name": last_name,
 		"enabled": 1,
-		"send_welcome_email": 0,
-		"user_type": "System User",
+		# No password supplied -> send the standard welcome/set-password email instead
+		# of having a manager choose someone else's credential.
+		"send_welcome_email": 0 if password else 1,
+		"user_type": "Website User",
 	}
 	if frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = cust
+	if password:
+		# new_password runs Frappe's own password policy and strength scoring on insert.
+		# frappe.utils.password.update_password(), used previously, bypasses both.
+		user_dict["new_password"] = password
 
 	doc = frappe.get_doc(user_dict)
 	doc.append("roles", {"role": helper.PORTAL_CUSTOMER_ROLE})
 	doc.flags.ignore_permissions = True
 	doc.insert()
-
-	from frappe.utils.password import update_password
-
-	update_password(email, password)
 
 	return {"name": doc.name, "email": email, "created": True, "attached": True}
 
@@ -1004,7 +1050,7 @@ def search_projects(query=""):
 	"""Project combobox for the Tasks quick-create form — scoped to projects the
 	caller can create tasks in (same rule create_task enforces)."""
 	allowed_names = helper.get_allowed_project_names()
-	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	manageable = _manageable_project_names(allowed_names)
 	if not manageable:
 		return []
 
