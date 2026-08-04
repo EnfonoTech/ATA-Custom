@@ -1,0 +1,177 @@
+[
+ {
+  "doctype": "Workspace",
+  "name": "Project Portal",
+  "label": "Project Portal",
+  "title": "Project Portal",
+  "module": "Project Portal",
+  "public": 1,
+  "is_hidden": 0,
+  "icon": "project",
+  "indicator_color": "blue",
+  "sequence_id": 20.0,
+  "for_user": "",
+  "parent_page": "",
+  "content": "[{\"id\": \"pa-hdr-1\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Project Portal</b></span>\", \"col\": 12}}, {\"id\": \"pa-sc-1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Open Portal\", \"col\": 3}}, {\"id\": \"pa-sc-2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Project\", \"col\": 3}}, {\"id\": \"pa-sc-3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Task\", \"col\": 3}}, {\"id\": \"pa-sc-4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Portal Project Settings\", \"col\": 3}}, {\"id\": \"pa-sp-1\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"pa-hdr-2\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>Configuration</b></span>\", \"col\": 12}}, {\"id\": \"pa-cd-1\", \"type\": \"card\", \"data\": {\"card_name\": \"Portal Setup\", \"col\": 4}}, {\"id\": \"pa-cd-2\", \"type\": \"card\", \"data\": {\"card_name\": \"Files & Sharing\", \"col\": 4}}, {\"id\": \"pa-cd-3\", \"type\": \"card\", \"data\": {\"card_name\": \"Projects\", \"col\": 4}}]",
+  "shortcuts": [
+   {
+    "type": "URL",
+    "label": "Open Portal",
+    "url": "/portal-app",
+    "color": "Blue",
+    "doc_view": ""
+   },
+   {
+    "type": "DocType",
+    "label": "Project",
+    "link_to": "Project",
+    "doc_view": "List",
+    "color": "Grey"
+   },
+   {
+    "type": "DocType",
+    "label": "Task",
+    "link_to": "Task",
+    "doc_view": "List",
+    "color": "Grey"
+   },
+   {
+    "type": "DocType",
+    "label": "Portal Project Settings",
+    "link_to": "Portal Project Settings",
+    "doc_view": "",
+    "color": "Grey"
+   }
+  ],
+  "links": [
+   {
+    "type": "Card Break",
+    "label": "Portal Setup",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 3,
+    "onboard": 0
+   },
+   {
+    "type": "Link",
+    "label": "Portal Project Settings",
+    "link_type": "DocType",
+    "link_to": "Portal Project Settings",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 1,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "Portal File Type",
+    "link_type": "DocType",
+    "link_to": "Portal File Type",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "Portal Demo Seed Run",
+    "link_type": "DocType",
+    "link_to": "Portal Demo Seed Run",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Card Break",
+    "label": "Files & Sharing",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 3,
+    "onboard": 0
+   },
+   {
+    "type": "Link",
+    "label": "Portal Folder Share",
+    "link_type": "DocType",
+    "link_to": "Portal Folder Share",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "Portal Folder Route Rule",
+    "link_type": "DocType",
+    "link_to": "Portal Folder Route Rule",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "File",
+    "link_type": "DocType",
+    "link_to": "File",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Card Break",
+    "label": "Projects",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 3,
+    "onboard": 0
+   },
+   {
+    "type": "Link",
+    "label": "Project",
+    "link_type": "DocType",
+    "link_to": "Project",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 1,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "Task",
+    "link_type": "DocType",
+    "link_to": "Task",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   },
+   {
+    "type": "Link",
+    "label": "Customer",
+    "link_type": "DocType",
+    "link_to": "Customer",
+    "hidden": 0,
+    "is_query_report": 0,
+    "link_count": 0,
+    "onboard": 0,
+    "dependencies": ""
+   }
+  ],
+  "roles": [],
+  "charts": [],
+  "number_cards": [],
+  "custom_blocks": [],
+  "quick_lists": []
+ }
+]

@@ -17,6 +17,16 @@ website_route_rules = [
 
 required_apps = ["erpnext"]
 
+# Fixtures
+# ------------------
+# Shipped so a fresh install / migrate recreates them on every site. The desk
+# Workspace is what makes the app reachable from the sidebar for back-office staff;
+# without it the doctypes exist but nothing links to them.
+
+fixtures = [
+	{"dt": "Workspace", "filters": [["module", "=", "Project Portal"]]},
+]
+
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
 # 	{

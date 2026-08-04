@@ -48,6 +48,11 @@ def _assigned_users_by_department(dept_names):
 
 @frappe.whitelist()
 def get_teams():
+    # Returns every member's login email — staff-only. Non-staff portal users get an
+    # empty list rather than an error so the shared Dashboard widget still renders.
+    helper.assert_portal_user()
+    if not helper.can_manage_teams():
+        return []
     departments = frappe.get_all(
         "Department",
         filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
@@ -81,6 +86,10 @@ def get_teams():
 
 @frappe.whitelist()
 def get_team_summary():
+    # Headcount is staff-only; the sidebar widget degrades to zeros for everyone else.
+    helper.assert_portal_user()
+    if not helper.can_manage_teams():
+        return {"total": 0, "departments": []}
     total = frappe.db.count("Employee", {"status": "Active"})
 
     departments = frappe.get_all(
@@ -106,6 +115,8 @@ def get_team_summary():
 
 @frappe.whitelist()
 def get_offices():
+    # Office labels only (no PII) — every portal user needs them for filter dropdowns.
+    helper.assert_portal_user()
     rows = frappe.get_all(
         "Department",
         filters={"portal_office": ["!=", ""]},
@@ -161,10 +172,14 @@ def get_assignable_users(team=None):
 def get_user_groups():
     """User Groups available for the "assign the whole group at once" picker, with member counts.
 
-    Read-only lookup (like get_offices) — any logged-in portal user can see group names/counts.
-    Callers that actually mutate assignments (add_team_member, sync_project_team, ...) enforce
-    their own permission check.
+    Staff-only: the picker is a team-management control, and group names/sizes describe
+    internal org structure. Non-staff portal users get an empty list so the ProjectDetail
+    modal still renders. Callers that mutate assignments (add_team_member,
+    sync_project_team, ...) enforce their own permission check on top of this.
     """
+    helper.assert_portal_user()
+    if not helper.can_manage_teams():
+        return []
     groups = frappe.get_all("User Group", fields=["name"], order_by="name asc")
     if not groups:
         return []
@@ -181,6 +196,8 @@ def get_user_groups():
 @frappe.whitelist()
 def get_user_group_members(user_group):
     """Member user IDs of a User Group, for pickers that add a whole group at once."""
+    # Returns login emails; only callers who may actually assign members should see them.
+    helper.assert_manage_teams()
     return frappe.get_all("User Group Member", filters={"parent": user_group}, pluck="user")
 
 

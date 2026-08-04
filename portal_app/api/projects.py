@@ -42,6 +42,22 @@ def _project_fields():
 	return base
 
 
+def _safe_order_by(sort_by: str, sort_order: str) -> str:
+	"""Allowlist the sort inputs before they reach the query.
+
+	Frappe's DatabaseQuery.validate_order_by_and_group_by() does reject sub-queries
+	and blacklisted functions, so this is not an injection hole today — but relying on
+	the framework's sanitiser as the only defence is fragile, and an unknown column
+	otherwise surfaces to the user as a 500. Pin both halves to known values instead.
+	"""
+	allowed_fields = set(_project_fields()) | {"modified", "creation"}
+	field = cstr(sort_by).strip() or "modified"
+	if field not in allowed_fields:
+		field = "modified"
+	direction = "asc" if cstr(sort_order).strip().lower() == "asc" else "desc"
+	return field + " " + direction
+
+
 @frappe.whitelist()
 def list_projects(sort_by="modified", sort_order="desc", status=None, customer=None, search=None):
 	if frappe.session.user == "Guest":
@@ -71,7 +87,7 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		filters=filters,
 		or_filters=or_filters,
 		fields=_project_fields(),
-		order_by=f"{sort_by} {sort_order}",
+		order_by=_safe_order_by(sort_by, sort_order),
 		limit_page_length=500,
 	)
 	if not helper.has_portal_staff_project_access():
@@ -191,8 +207,22 @@ def project_dashboard(name):
 	if p.get("customer"):
 		cust_display = frappe.db.get_value("Customer", p.customer, "customer_name") or p.customer
 
+	# as_dict() would ship the whole Project row, including the monetary fields that
+	# list_projects/portfolio_dashboard deliberately strip. Apply the same rule here so
+	# a Portal Customer cannot read a project's value just by opening its detail page.
+	project_data = p.as_dict()
+	if not helper.can_view_project_value(name):
+		project_data.pop("estimated_costing", None)
+		project_data.pop("total_costing_amount", None)
+		project_data.pop("total_billable_amount", None)
+		project_data.pop("total_billed_amount", None)
+		project_data.pop("gross_margin", None)
+		project_data.pop("per_gross_margin", None)
+	if not helper.has_portal_staff_project_access():
+		project_data.pop("portal_project_manager", None)
+
 	return {
-		"project": p.as_dict(),
+		"project": project_data,
 		"tasks": tasks,
 		"kanban_stage": stage,
 		"customer_display_name": cust_display,
@@ -282,7 +312,14 @@ def update_project(project, **kwargs):
 
 @frappe.whitelist()
 def get_portal_users():
-	"""Return enabled non-guest users for Lead Architect dropdown."""
+	"""Return enabled non-guest users for Lead Architect dropdown.
+
+	This is a full user directory (login email + name), so it is staff-only. Every
+	caller already tolerates an empty list, so non-staff get [] instead of an error.
+	"""
+	helper.assert_portal_user()
+	if not helper.has_portal_staff_project_access():
+		return []
 	users = frappe.get_all(
 		"User",
 		filters={"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]},

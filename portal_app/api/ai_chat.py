@@ -1,14 +1,52 @@
-import frappe
 import re
-from datetime import datetime, timedelta
+
+import frappe
+from frappe import _
+from frappe.utils import add_days, cint, cstr, flt, nowdate
 
 from portal_app.api import helper
+
+
+def _scoped_file_rows(allowed, since=None, limit=20):
+    """Recent files, restricted to projects the caller may see.
+
+    Never query `tabFile` unscoped — a portal user must not learn the filenames of
+    projects (or of HR/accounting attachments) they have no access to.
+    """
+    if not allowed:
+        return []
+    placeholders = ",".join(["%s"] * len(allowed))
+    params = list(allowed)
+    date_clause = ""
+    if since:
+        date_clause = " AND creation >= %s"
+        params.append(since)
+    return frappe.db.sql(
+        f"""SELECT file_name, file_size, creation FROM `tabFile`
+           WHERE is_folder = 0 AND attached_to_doctype = 'Project'
+             AND attached_to_name IN ({placeholders}){date_clause}
+           ORDER BY creation DESC LIMIT {cint(limit)}""",
+        params,
+        as_dict=True,
+    )
+
+
+def _scoped_file_count(allowed):
+    if not allowed:
+        return 0
+    return frappe.db.count(
+        "File",
+        {"is_folder": 0, "attached_to_doctype": "Project", "attached_to_name": ["in", allowed]},
+    )
 
 
 @frappe.whitelist()
 def ask(question):
     """Query project database with natural language and return a structured answer."""
-    q = (question or "").strip()
+    if not helper.user_can_use_portal():
+        frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+    q = cstr(question).strip()
     if not q:
         return {"answer": "Please ask me a question about your projects or files.", "data": [], "type": "text"}
 
@@ -78,12 +116,11 @@ def ask(question):
             days = 1
         elif "month" in ql:
             days = 30
-        since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
-        rows = frappe.db.sql(
-            "SELECT file_name, file_size, creation FROM `tabFile` WHERE is_folder=0 AND creation >= %s ORDER BY creation DESC LIMIT 20",
-            since,
-            as_dict=True,
-        )
+        if not allowed:
+            return {"type": "text", "answer": "You don't have access to any projects yet."}
+        # nowdate() is site-timezone aware; datetime.now() would use the server's clock (usually UTC).
+        since = add_days(nowdate(), -days)
+        rows = _scoped_file_rows(allowed, since=since, limit=20)
         period = "today" if days == 1 else ("this month" if days == 30 else "this week")
         return {
             "type": "list",
@@ -93,10 +130,10 @@ def ask(question):
 
     # ── Total files ──────────────────────────────────────────────────────────
     if any(k in ql for k in ["how many file", "total file", "file count", "number of file"]):
-        c = frappe.db.count("File", {"is_folder": 0}) or 0
+        c = _scoped_file_count(allowed)
         return {
             "type": "stat",
-            "answer": f"The system contains **{c:,} files** in total.",
+            "answer": f"There are **{c:,} files** across the projects you can access.",
             "data": [],
         }
 
@@ -136,10 +173,13 @@ def ask(question):
             f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders})",
             value_visible,
         )[0][0] or 0
-        items = [f"{r.get('portal_project_code') or ''} {r.project_name}: SAR {int(r.estimated_costing or 0):,}".strip() for r in rows]
+        items = [
+            f"{r.get('portal_project_code') or ''} {r.project_name}: SAR {flt(r.estimated_costing):,.2f}".strip()
+            for r in rows
+        ]
         return {
             "type": "list",
-            "answer": f"Total estimated portfolio value: **SAR {int(total):,}**",
+            "answer": f"Total estimated portfolio value: **SAR {flt(total):,.2f}**",
             "data": items if items else ["No budget data set on projects yet."],
         }
 
@@ -167,7 +207,7 @@ def ask(question):
 
     # ── Fallback: general DB summary ─────────────────────────────────────────
     proj_count = len(allowed)
-    file_count = frappe.db.count("File", {"is_folder": 0}) or 0
+    file_count = _scoped_file_count(allowed)
     task_count = frappe.db.count("Task", {"project": ["in", allowed]}) if allowed else 0
     return {
         "type": "summary",
@@ -177,13 +217,13 @@ def ask(question):
             {"label": "Tasks",      "value": task_count},
             {"label": "Files",      "value": file_count},
         ],
-        "hint": "Try: "How many active projects?", "Show tasks", "Find projects with Villa", "Budget overview"",
+        "hint": 'Try: "How many active projects?", "Show tasks", "Find projects with Villa", "Budget overview"',
     }
 
 
 def _fmt_size(n):
     try:
-        n = int(n or 0)
+        n = cint(n)
         if n >= 1_048_576:
             return f"{n/1_048_576:.1f} MB"
         if n >= 1024:

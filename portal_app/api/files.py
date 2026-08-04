@@ -201,6 +201,37 @@ def ensure_project_folders(project: str) -> dict:
 	return {"project_root": project_root, "subfolders": subfolders}
 
 
+# Extensions that execute (or can be made to execute) in the browser when served
+# from the site's own origin. A stored .html/.svg becomes same-origin script against
+# the portal session, so they are rejected at upload time regardless of privacy flag.
+_BLOCKED_UPLOAD_EXTENSIONS = frozenset({
+	".html", ".htm", ".xhtml", ".shtml", ".xht",
+	".svg", ".svgz", ".xml", ".xsl", ".xslt",
+	".js", ".mjs", ".cjs", ".jse", ".vbs", ".hta",
+	".php", ".phtml", ".php3", ".php4", ".php5", ".phar",
+	".jsp", ".asp", ".aspx", ".cgi", ".pl", ".py", ".sh", ".bash",
+	".exe", ".dll", ".scr", ".com", ".bat", ".cmd", ".msi", ".jar",
+})
+
+
+def _safe_upload_filename(raw_name: str) -> str:
+	"""Reduce an uploaded name to a bare, safe basename.
+
+	A multipart filename is fully attacker-controlled. Strip any directory
+	component (both separators — a Windows client sends backslashes) and reject
+	traversal so the name can never influence the path a file is written to.
+	"""
+	name = cstr(raw_name).replace("\\", "/").split("/")[-1]
+	name = name.replace("\x00", "").strip()
+	if not name or name in (".", ".."):
+		frappe.throw(_("Invalid file name."))
+	ext = ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+	if ext in _BLOCKED_UPLOAD_EXTENSIONS:
+		msg = _("This file type cannot be uploaded to the portal:")
+		frappe.throw(msg + " " + ext, frappe.ValidationError)
+	return name
+
+
 def _b64url(data: bytes) -> str:
 	return base64.urlsafe_b64encode(data).decode().rstrip("=")
 
@@ -539,8 +570,12 @@ def upload_project_files_zip(project, target_folder):
 			dest_folder = _zip_resolve_folder(target_folder, rel_dir, folder_cache)
 
 			try:
+				file_name = _safe_upload_filename(file_name)
 				data = zf.read(entry.filename)
-				fdoc = save_file(file_name, data, "Project", project, folder=dest_folder, is_private=0)
+				# Project documents are confidential (title deeds, client IDs). is_private=1
+				# keeps them out of sites/<site>/public/files, which Frappe serves with no
+				# session check. Link-share recipients read them via download_shared_file.
+				fdoc = save_file(file_name, data, "Project", project, folder=dest_folder, is_private=1)
 				if fdoc:
 					uploaded_files.append({"name": fdoc.name, "file_name": file_name})
 			except Exception as e:
@@ -596,11 +631,11 @@ def cron_revoke_expired_shares():
 	now_dt = now_datetime()
 	rows = frappe.get_all(
 		"Portal Folder Share",
-		filters={
-			"revoked": 0,
-			"expires_at": ["is", "set"],
-			"expires_at": ["<", now_dt],
-		},
+		filters=[
+			["revoked", "=", 0],
+			["expires_at", "is", "set"],
+			["expires_at", "<", now_dt],
+		],
 		fields=["name", "project", "folder_path", "user", "share_kind"],
 		limit_page_length=2000,
 		ignore_permissions=True,
@@ -1858,13 +1893,20 @@ def get_shared_folder_files(token):
 		filters={
 			"attached_to_doctype": "Project",
 			"attached_to_name": project,
-			"is_private": 0,
 			"is_folder": 0,
 		},
 		or_filters=[["folder", "=", folder], ["folder", "like", folder + "/%"]],
-		fields=["name", "file_name", "file_url", "creation", "file_size"],
+		fields=["name", "file_name", "creation", "file_size"],
 		order_by="creation desc",
 	)
+	# Never hand a guest a raw file_url: a private one 403s and a public one would be
+	# readable forever, even after the share is revoked. Proxy every download through
+	# the token instead, so revocation and expiry actually take effect.
+	for f in files:
+		f["file_url"] = (
+			"/api/method/portal_app.api.files.download_shared_file"
+			"?token=" + quote(token) + "&file=" + quote(f["name"])
+		)
 	project_title = frappe.db.get_value("Project", project, "project_name") or project
 	return {
 		"project": project,
@@ -1874,6 +1916,41 @@ def get_shared_folder_files(token):
 		"files": files,
 		"expires_at": int(payload.get("exp") or 0),
 	}
+
+
+@frappe.whitelist(allow_guest=True)
+def download_shared_file(token, file):
+	"""Stream one file to a share-link holder, scoped to that link's folder.
+
+	Files are stored private, so a guest cannot fetch /private/files/... directly.
+	This is the only guest read path: it re-verifies the signature, re-checks that
+	the share is neither revoked nor expired on every single download, and confirms
+	the requested File really sits inside the shared folder subtree before serving
+	any bytes. Revoking a share therefore kills existing links immediately.
+	"""
+	payload = _verify_share_token(token)
+	project = cstr(payload.get("p")).strip()
+	folder = cstr(payload.get("f")).strip()
+	if not project or not folder:
+		frappe.throw(_("Invalid share link payload"), frappe.PermissionError)
+
+	rec = _share_record_for_token(token)
+	if rec is not None and not _share_record_active(rec):
+		frappe.throw(_("This share link has been revoked or expired."), frappe.PermissionError)
+
+	doc = frappe.get_doc("File", cstr(file))
+
+	# The File must belong to the shared project AND live at or under the shared folder.
+	if doc.attached_to_doctype != "Project" or doc.attached_to_name != project or doc.is_folder:
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	doc_folder = cstr(doc.folder).replace("\\", "/")
+	folder_norm = folder.replace("\\", "/")
+	if doc_folder != folder_norm and not doc_folder.startswith(folder_norm + "/"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	frappe.local.response.filename = doc.file_name
+	frappe.local.response.filecontent = doc.get_content()
+	frappe.local.response.type = "download"
 
 
 @frappe.whitelist()
@@ -1906,8 +1983,10 @@ def upload_project_file():
 	if not content:
 		frappe.throw(_("Empty file"))
 
-	fname = upload.filename or "upload"
-	is_private = cint(frappe.form_dict.get("is_private", 0))
+	fname = _safe_upload_filename(upload.filename or "upload")
+	# Default to PRIVATE. A public File is served from /files/<name> with no session
+	# check at all, so public must be an explicit, deliberate opt-in.
+	is_private = cint(frappe.form_dict.get("is_private", 1))
 	destination = cstr(frappe.form_dict.get("destination") or "erpnext").strip().lower()
 	external_provider = cstr(frappe.form_dict.get("external_provider") or "").strip().lower()
 	target_folder = cstr(frappe.form_dict.get("target_folder") or "").strip()
@@ -2181,6 +2260,7 @@ def list_portal_file_types():
 	The frontend uses `extensions` to auto-pre-select a type based on the picked file's
 	extension, but the user can override it in the confirm modal.
 	"""
+	helper.assert_portal_user()
 	if not frappe.db.exists("DocType", "Portal File Type"):
 		return {"types": []}
 	rows = frappe.get_all(
@@ -2230,13 +2310,6 @@ def list_all_files(
 	# ── Project filter ───────────────────────────────────────────────────────
 	# Search by portal_project_code OR project_name (both fields on Project doc).
 	if project:
-		proj_filter = [
-			["name", "in", allowed],
-			{
-				"portal_project_code": ["like", f"%{project}%"],
-				"project_name":        ["like", f"%{project}%"],
-			},
-		]
 		by_code = frappe.get_all("Project",
 			filters=[["name", "in", allowed], ["portal_project_code", "like", f"%{project}%"]],
 			pluck="name")
@@ -2303,7 +2376,7 @@ def list_all_files(
 		proj  = proj_meta.get(f["attached_to_name"], {})
 		pf    = pf_map.get(f.get("file_url") or "", {})
 		fname = f.get("file_name") or ""
-		_, ext = _os.path.splitext(fname)
+		_base, ext = _os.path.splitext(fname)
 		ext = ext.lower()
 
 		# Derive relative folder path inside the project
@@ -2396,6 +2469,7 @@ _ROUTE_RULE_DOCTYPE = "Portal Folder Route Rule"
 def list_folder_route_rules():
 	"""Return all folder routing rules (enabled + disabled) for the admin UI.
 	Also called by the upload panel to load active rules for auto-routing."""
+	helper.assert_portal_user()
 	if not frappe.db.exists("DocType", _ROUTE_RULE_DOCTYPE):
 		return {"rules": []}
 	rows = frappe.get_all(
@@ -2488,6 +2562,7 @@ def list_folder_template_paths():
 	"""Return the flat list of relative folder paths from the project folder template.
 	Used by the Folder Rules page to populate pattern suggestions.
 	"""
+	helper.assert_portal_user()
 	paths = _folder_template()
 	# Also include every intermediate ancestor segment.
 	seen = set()

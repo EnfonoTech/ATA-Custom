@@ -3,3 +3,4 @@
 [post_model_sync]
 portal_app.patches.add_project_portal_fields
 portal_app.patches.add_portal_customer_access
+portal_app.patches.make_project_files_private

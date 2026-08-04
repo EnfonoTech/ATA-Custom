@@ -27,7 +27,15 @@ from frappe.utils.password import update_password
 from portal_app.api.files import ensure_project_folders
 
 
-DEMO_PASSWORD = "ChangeMe-Demo#1"
+def _new_demo_password() -> str:
+	"""A fresh random password per seed run.
+
+	This used to be a hardcoded constant in a PUBLIC repository, which meant every
+	site that had ever run the seed shared one internet-published credential for
+	accounts holding the Projects Manager role (i.e. the whole project portfolio).
+	Never reintroduce a literal here.
+	"""
+	return "Dm-" + frappe.generate_hash(length=18) + "#1"
 
 DEMO_USERS: list[dict] = [
 	{
@@ -259,7 +267,8 @@ class PortalDemoSeedRun(Document):
 		"""Run the seed; record exactly what we created."""
 		self.run_at = now_datetime()
 		self.run_by = frappe.session.user
-		self.demo_password_hint = DEMO_PASSWORD
+		demo_password = _new_demo_password()
+		self.demo_password_hint = demo_password
 		self.status = "Active"
 
 		summary = {"users": [], "customers": [], "projects": [], "tasks": [], "files": []}
@@ -328,7 +337,7 @@ class PortalDemoSeedRun(Document):
 			for r in row.get("roles") or ["Projects User"]:
 				doc.append("roles", {"role": r})
 			doc.insert(ignore_permissions=True)
-			update_password(email, DEMO_PASSWORD)
+			update_password(email, self.demo_password_hint)
 			self._record("created_users", "User", email, row["first_name"] + " " + row.get("last_name", ""))
 			summary["users"].append({"email": email, "status": "created"})
 

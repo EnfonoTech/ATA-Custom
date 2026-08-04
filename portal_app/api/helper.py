@@ -100,6 +100,18 @@ def get_allowed_project_names(user=None) -> list[str]:
 	return [r[0] for r in rows]
 
 
+def assert_portal_user(user=None) -> None:
+	"""Baseline gate for every whitelisted portal endpoint.
+
+	`@frappe.whitelist()` only proves the caller has *a* session. It does not prove
+	they are a portal user — a plain Website User, an Employee with no project, or a
+	staff member whose portal access was revoked all still reach the endpoint. Any
+	endpoint that returns portal data must call this first, even read-only lookups.
+	"""
+	if not user_can_use_portal(user):
+		frappe.throw(_("You do not have access to the project portal."), frappe.PermissionError)
+
+
 def assert_project_access(project_name: str) -> None:
 	if project_name not in get_allowed_project_names():
 		frappe.throw(_("No access to this project"), frappe.PermissionError)

@@ -2,6 +2,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from portal_app.api import helper
 
@@ -18,12 +19,20 @@ def _can_create_users() -> bool:
 
 
 def _can_run_seed_via_portal() -> bool:
+	"""System Manager PLUS an explicit opt-in on this site.
+
+	Seeding creates real, enabled login accounts and real Projects/Tasks/Files. On a
+	production site that must never be one misclick away, so it additionally requires
+	developer_mode or the "Allow portal demo seed" switch in Portal Project Settings —
+	which is what the error message shown to users has always claimed.
+	"""
 	if frappe.session.user == "Guest":
 		return False
-	# System Managers can always run the demo seed — no dev-mode or settings flag needed.
-	if "System Manager" in frappe.get_roles():
+	if "System Manager" not in frappe.get_roles():
+		return False
+	if cint(frappe.conf.get("developer_mode")):
 		return True
-	return False
+	return bool(helper.get_portal_settings_dict().get("allow_portal_demo_seed"))
 
 
 ALLOWED_PORTAL_USER_ROLES = frozenset({"Projects User", "Projects Manager", "Portal Customer"})

@@ -20,7 +20,11 @@ from frappe.utils.password import update_password
 
 from erpnext import get_default_company
 
-DEMO_PASSWORD = "ChangeMe-Demo#1"
+def _new_demo_password() -> str:
+	"""Fresh random password per seed run — never a literal (public repo)."""
+	return "Dm-" + frappe.generate_hash(length=18) + "#1"
+
+
 
 DEMO_USERS: list[dict] = [
 	{
@@ -225,7 +229,7 @@ def _meta():
 	return frappe.get_meta("Project")
 
 
-def ensure_demo_user(row: dict) -> str:
+def ensure_demo_user(row: dict, demo_password: str) -> str:
 	email = row["email"]
 	if frappe.db.exists("User", email):
 		return "skipped"
@@ -244,7 +248,7 @@ def ensure_demo_user(row: dict) -> str:
 	for role in row.get("roles") or ["Projects User"]:
 		doc.append("roles", {"role": role})
 	doc.insert(ignore_permissions=True)
-	update_password(email, DEMO_PASSWORD)
+	update_password(email, demo_password)
 	return "created"
 
 
@@ -318,7 +322,7 @@ def attach_demo_file(project_name: str) -> str:
 		"This file was created by the showcase seed script.\n"
 		f"Demo login passwords are documented in docs/END_USER_GUIDE.md (Demo section).\n"
 	).encode("utf-8")
-	save_file("portal-demo-readme.txt", body, "Project", project_name, is_private=0)
+	save_file("portal-demo-readme.txt", body, "Project", project_name, is_private=1)
 	return "created"
 
 
@@ -329,9 +333,10 @@ def run_seed() -> dict:
 		return {"ok": False, "error": "Set a default Company before seeding (ERPNext)."}
 
 	summary = {"users": [], "projects": [], "tasks": [], "files": []}
+	demo_password = _new_demo_password()
 
 	for row in DEMO_USERS:
-		summary["users"].append({"email": row["email"], "status": ensure_demo_user(row)})
+		summary["users"].append({"email": row["email"], "status": ensure_demo_user(row, demo_password)})
 
 	for pj in DEMO_PROJECTS:
 		name, st = ensure_demo_project(pj, company)
@@ -349,7 +354,7 @@ def run_seed() -> dict:
 	frappe.db.commit()
 	return {
 		"ok": True,
-		"demo_password_hint": DEMO_PASSWORD,
+		"demo_password_hint": demo_password,
 		"summary": summary,
 	}
 
