@@ -242,7 +242,20 @@ def _b64url_decode(data: str) -> bytes:
 
 
 def _share_secret() -> str:
-	return cstr(frappe.conf.get("encryption_key") or frappe.conf.get("secret") or "portal_app_share_secret")
+	"""Site signing key for share tokens. Fails closed.
+
+	This used to fall back to a literal string when neither key was configured. On
+	such a site the key is public knowledge (it is in this repo), so anyone could
+	forge a token for any project/folder and read it as an unauthenticated guest.
+	Refuse to sign or verify rather than do it with a known key.
+	"""
+	secret = cstr(frappe.conf.get("encryption_key") or frappe.conf.get("secret"))
+	if not secret:
+		frappe.throw(
+			_("Folder sharing is unavailable: this site has no encryption_key configured."),
+			frappe.ValidationError,
+		)
+	return secret
 
 
 def _sign_share_payload(payload: dict) -> str:
@@ -1859,8 +1872,12 @@ def get_shared_folder_files(token):
 
 	# If a Portal Folder Share record exists for this token (newer flow),
 	# verify it is still active. Older tokens without a record remain valid until expiry.
+	# Fail CLOSED. Previously a missing Portal Folder Share row was treated as a valid
+	# "legacy token", so deleting the share row (or revoking via the desk) made the link
+	# work forever instead of killing it. A token is only honoured while its share record
+	# exists and is active.
 	rec = _share_record_for_token(token)
-	if rec is not None and not _share_record_active(rec):
+	if not _share_record_active(rec):
 		frappe.throw(_("This share link has been revoked or expired."), frappe.PermissionError)
 
 	# Best-effort access tracking.
