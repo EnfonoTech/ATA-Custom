@@ -75,9 +75,7 @@ class TestShareTokenFailsClosed(FrappeTestCase):
 			files_api._verify_share_token(forged)
 
 	def test_expired_token_is_rejected(self):
-		token = files_api._sign_share_payload(
-			{"p": "PROJ-TEST", "f": "Home/Attachments/PROJ-TEST", "exp": 1}
-		)
+		token = files_api._sign_share_payload({"p": "PROJ-TEST", "f": "Home/Attachments/PROJ-TEST", "exp": 1})
 		with self.assertRaises(frappe.PermissionError):
 			files_api._verify_share_token(token)
 

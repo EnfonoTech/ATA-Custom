@@ -27,7 +27,9 @@ def get_my_profile():
 		cust = u.get("portal_linked_customer")
 		out["portal_linked_customer"] = cust
 		if cust:
-			out["portal_linked_customer_name"] = frappe.db.get_value("Customer", cust, "customer_name") or cust
+			out["portal_linked_customer_name"] = (
+				frappe.db.get_value("Customer", cust, "customer_name") or cust
+			)
 	return out
 
 

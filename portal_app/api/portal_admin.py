@@ -51,7 +51,9 @@ def get_portal_admin_capabilities():
 
 
 @frappe.whitelist()
-def create_portal_user(email, full_name, password, roles_json=None, send_welcome_email=0, portal_linked_customer=None):
+def create_portal_user(
+	email, full_name, password, roles_json=None, send_welcome_email=0, portal_linked_customer=None
+):
 	if not _can_create_users():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
@@ -133,7 +135,9 @@ def run_demo_seed():
 	"""
 	if not _can_run_seed_via_portal():
 		frappe.throw(
-			_("Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."),
+			_(
+				"Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."
+			),
 			frappe.PermissionError,
 		)
 
@@ -145,7 +149,9 @@ def run_demo_seed():
 def _assert_can_run_demo_seed():
 	if not _can_run_seed_via_portal():
 		frappe.throw(
-			_("Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."),
+			_(
+				"Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."
+			),
 			frappe.PermissionError,
 		)
 
@@ -338,6 +344,7 @@ def create_demo_seed_run_from_docx(
 		frappe.throw(_("Run `bench migrate` to install the Portal Demo Seed Run doctype."))
 
 	import json as _json
+
 	try:
 		raw_projects = _json.loads(projects_json or "[]")
 	except Exception:
@@ -347,10 +354,10 @@ def create_demo_seed_run_from_docx(
 	from portal_app.project_portal.doctype.portal_demo_seed_run import portal_demo_seed_run as _mod
 	from frappe.utils import add_days, today as _today
 
-	_STAGE_PCT  = _mod._STAGE_PCT
+	_STAGE_PCT = _mod._STAGE_PCT
 	_STAGE_STATUS = _mod._STAGE_STATUS
-	_MANAGERS   = _mod._MANAGERS
-	_TEAMS      = _mod._TEAMS
+	_MANAGERS = _mod._MANAGERS
+	_TEAMS = _mod._TEAMS
 
 	def _year_from_code(code):
 		if code.startswith("CDB-"):
@@ -361,10 +368,14 @@ def create_demo_seed_run_from_docx(
 			return 2024
 
 	def _stage_for_year(year):
-		if year <= 2022: return "Done"
-		if year == 2023: return "On Hold"
-		if year == 2024: return "Review"
-		if year == 2025: return "Active"
+		if year <= 2022:
+			return "Done"
+		if year == 2023:
+			return "On Hold"
+		if year == 2024:
+			return "Review"
+		if year == 2025:
+			return "Active"
 		return "Planning"
 
 	generated = []
@@ -373,29 +384,33 @@ def create_demo_seed_run_from_docx(
 		name = str(p.get("name") or "").strip()
 		if not code or not name:
 			continue
-		year  = _year_from_code(code)
+		year = _year_from_code(code)
 		stage = _stage_for_year(year)
-		generated.append({
-			"project_name": f"{code} – {name}",
-			"code":         f"ATA-{code}",
-			"stage":        stage,
-			"year":         year,
-			"manager":      _MANAGERS[i % len(_MANAGERS)],
-			"team":         _TEAMS[i % len(_TEAMS)],
-			"cost":         0,
-			"tasks":        [],
-			"attach_readme": False,
-		})
+		generated.append(
+			{
+				"project_name": f"{code} – {name}",
+				"code": f"ATA-{code}",
+				"stage": stage,
+				"year": year,
+				"manager": _MANAGERS[i % len(_MANAGERS)],
+				"team": _TEAMS[i % len(_TEAMS)],
+				"cost": 0,
+				"tasks": [],
+				"attach_readme": False,
+			}
+		)
 
-	doc = frappe.get_doc({
-		"doctype": "Portal Demo Seed Run",
-		"run_label": (run_label or "Portal demo run").strip()[:140] or "Portal demo run",
-		"include_users":     cint(include_users),
-		"include_customers": 0,
-		"include_projects":  1,
-		"include_tasks":     0,
-		"include_files":     cint(include_files),
-	})
+	doc = frappe.get_doc(
+		{
+			"doctype": "Portal Demo Seed Run",
+			"run_label": (run_label or "Portal demo run").strip()[:140] or "Portal demo run",
+			"include_users": cint(include_users),
+			"include_customers": 0,
+			"include_projects": 1,
+			"include_tasks": 0,
+			"include_files": cint(include_files),
+		}
+	)
 	# Pass the parsed list on the document. Reassigning the module-level DEMO_PROJECTS
 	# (the previous approach) raced across concurrent requests in the same worker and
 	# could permanently leave one admin's import installed for every later seed.

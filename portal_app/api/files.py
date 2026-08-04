@@ -35,6 +35,7 @@ def _bypass_max_attachments():
 	finally:
 		_File.validate_attachment_limit = original
 
+
 PROJ_FOLD_DEFAULT = [
 	"01-DOCUMENTS/01-CLIENT DATA/01-BUSINESS CARD",
 	"01-DOCUMENTS/01-CLIENT DATA/02-TITLE DEED",
@@ -150,16 +151,16 @@ def get_project_folders(project: str) -> dict:
 	)
 	prefix = project_root + "/"
 	subfolders = [
-		{"name": r["name"], "label": r["name"][len(prefix):]}
-		for r in rows
-		if r["name"].startswith(prefix)
+		{"name": r["name"], "label": r["name"][len(prefix) :]} for r in rows if r["name"].startswith(prefix)
 	]
 	subfolders.sort(key=lambda d: d["label"])
 	return {"project_root": project_root, "subfolders": subfolders}
 
 
 def _folder_template_uncached() -> list[str]:
-	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists("DocType", "Portal Project Settings"):
+	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists(
+		"DocType", "Portal Project Settings"
+	):
 		try:
 			doc = frappe.get_single("Portal Project Settings")
 			rows = doc.get("folder_template") or []
@@ -248,14 +249,48 @@ def ensure_project_folders(project: str) -> dict:
 # Extensions that execute (or can be made to execute) in the browser when served
 # from the site's own origin. A stored .html/.svg becomes same-origin script against
 # the portal session, so they are rejected at upload time regardless of privacy flag.
-_BLOCKED_UPLOAD_EXTENSIONS = frozenset({
-	".html", ".htm", ".xhtml", ".shtml", ".xht",
-	".svg", ".svgz", ".xml", ".xsl", ".xslt",
-	".js", ".mjs", ".cjs", ".jse", ".vbs", ".hta",
-	".php", ".phtml", ".php3", ".php4", ".php5", ".phar",
-	".jsp", ".asp", ".aspx", ".cgi", ".pl", ".py", ".sh", ".bash",
-	".exe", ".dll", ".scr", ".com", ".bat", ".cmd", ".msi", ".jar",
-})
+_BLOCKED_UPLOAD_EXTENSIONS = frozenset(
+	{
+		".html",
+		".htm",
+		".xhtml",
+		".shtml",
+		".xht",
+		".svg",
+		".svgz",
+		".xml",
+		".xsl",
+		".xslt",
+		".js",
+		".mjs",
+		".cjs",
+		".jse",
+		".vbs",
+		".hta",
+		".php",
+		".phtml",
+		".php3",
+		".php4",
+		".php5",
+		".phar",
+		".jsp",
+		".asp",
+		".aspx",
+		".cgi",
+		".pl",
+		".py",
+		".sh",
+		".bash",
+		".exe",
+		".dll",
+		".scr",
+		".com",
+		".bat",
+		".cmd",
+		".msi",
+		".jar",
+	}
+)
 
 
 # Ceilings for ZIP import/export. The archive is handled in memory inside a web
@@ -556,7 +591,8 @@ def download_files_zip(project, file_names=None, folder_path=None):
 			_("Too many files selected for a single ZIP. Select fewer files, or download folder by folder.")
 		)
 	total_size = sum(
-		flt(r.file_size) for r in frappe.get_all("File", filters={"name": ["in", names]}, fields=["file_size"])
+		flt(r.file_size)
+		for r in frappe.get_all("File", filters={"name": ["in", names]}, fields=["file_size"])
 	)
 	if total_size > _ZIP_DOWNLOAD_MAX_BYTES:
 		frappe.throw(_("This selection is too large to download as a single ZIP."))
@@ -637,10 +673,9 @@ def upload_project_files_zip(project, target_folder):
 
 	# All non-directory entries, excluding macOS garbage and hidden files.
 	entries = [
-		e for e in zf.infolist()
-		if not e.is_dir()
-		and not e.filename.startswith("__MACOSX")
-		and not e.filename.startswith(".")
+		e
+		for e in zf.infolist()
+		if not e.is_dir() and not e.filename.startswith("__MACOSX") and not e.filename.startswith(".")
 	]
 	if not entries:
 		frappe.throw(_("ZIP contains no uploadable files."))
@@ -671,7 +706,7 @@ def upload_project_files_zip(project, target_folder):
 		for entry in entries:
 			rel = entry.filename
 			if strip_prefix and rel.startswith(strip_prefix):
-				rel = rel[len(strip_prefix):]
+				rel = rel[len(strip_prefix) :]
 
 			# Reject traversal / absolute / drive-qualified members before the path is
 			# used to build the File folder tree. Skip rather than throw, matching the
@@ -734,9 +769,7 @@ def _zip_resolve_folder(base_folder: str, rel_dir: str, cache: dict) -> str:
 		if child_key in cache:
 			current = cache[child_key]
 			continue
-		existing = frappe.db.get_value(
-			"File", {"folder": current, "is_folder": 1, "file_name": part}, "name"
-		)
+		existing = frappe.db.get_value("File", {"folder": current, "is_folder": 1, "file_name": part}, "name")
 		folder_doc_name = existing if existing else _ensure_folder(current, part)
 		cache[child_key] = folder_doc_name
 		current = folder_doc_name
@@ -1561,15 +1594,13 @@ def list_shared_with_me():
 	# Hydrate projects with metadata + the actual files visible per folder.
 	projects_out = []
 	for project, folders in folders_by_project.items():
-		project_meta = (
-			frappe.db.get_value(
-				"Project",
-				project,
-				["name", "project_name", "status", "customer"],
-				as_dict=True,
-			)
-			or {"name": project, "project_name": project}
-		)
+		project_meta = frappe.db.get_value(
+			"Project",
+			project,
+			["name", "project_name", "status", "customer"],
+			as_dict=True,
+		) or {"name": project, "project_name": project}
+
 		# Sort: membership row first, share rows in folder order, owner row last.
 		def _sort_key(f):
 			et = f.get("entry_type")
@@ -1614,7 +1645,16 @@ def list_shared_with_me():
 						"is_folder": 0,
 					},
 					or_filters=[["folder", "=", fpath], ["folder", "like", fpath + "/%"]],
-					fields=["name", "file_name", "file_url", "folder", "file_size", "is_private", "creation", "owner"],
+					fields=[
+						"name",
+						"file_name",
+						"file_url",
+						"folder",
+						"file_size",
+						"is_private",
+						"creation",
+						"owner",
+					],
 					order_by="creation desc",
 					limit_page_length=400,
 					ignore_permissions=True,
@@ -1799,9 +1839,7 @@ def list_managed_shares():
 			# Skip duplicates (same user, same folder, already from Portal Folder Share).
 			if any(s.get("user") == r["user"] for s in folder_entry["user_shares"]):
 				continue
-			user_row = frappe.db.get_value(
-				"User", r["user"], ["email", "full_name"], as_dict=True
-			) or {}
+			user_row = frappe.db.get_value("User", r["user"], ["email", "full_name"], as_dict=True) or {}
 			folder_entry["user_shares"].append(
 				{
 					"share_name": r["name"],
@@ -1910,12 +1948,9 @@ def list_managed_shares():
 	# Hydrate each project with metadata + flatten folder dict to list.
 	projects_out = []
 	for pj, payload in by_project.items():
-		meta = (
-			frappe.db.get_value(
-				"Project", pj, ["name", "project_name", "status", "customer"], as_dict=True
-			)
-			or {"name": pj, "project_name": pj}
-		)
+		meta = frappe.db.get_value(
+			"Project", pj, ["name", "project_name", "status", "customer"], as_dict=True
+		) or {"name": pj, "project_name": pj}
 		folders_list = list(payload["folders"].values())
 		# Drop the synthetic file-share rows — those are inlined as `shares` on the
 		# corresponding file row inside the parent folder.
@@ -1927,9 +1962,7 @@ def list_managed_shares():
 			f["share_count"] = len(f["user_shares"]) + len(f["link_shares"])
 			# Sum per-file share counts so the folder header can show "+N file shares"
 			f["file_share_count"] = sum(len(x.get("shares") or []) for x in f["files"])
-		folders_list.sort(
-			key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower())
-		)
+		folders_list.sort(key=lambda f: (f["folder_label"].count("/"), f["folder_label"].lower()))
 		total_user = sum(len(f["user_shares"]) for f in folders_list)
 		total_link = sum(len(f["link_shares"]) for f in folders_list)
 		total_file_shares = sum(f.get("file_share_count", 0) for f in folders_list)
@@ -2017,9 +2050,7 @@ def get_shared_folder_files(token):
 	# Guest must not run ensure_project_folders. Derive label from path / project id.
 	norm = folder.replace("\\", "/") if folder else ""
 	last = norm.split("/")[-1] if norm else ""
-	folder_label_resolved = (
-		_("Project folder (all files)") if last == project else last
-	)
+	folder_label_resolved = _("Project folder (all files)") if last == project else last
 	# Files directly in this folder or in nested folders under it.
 	files = frappe.get_all(
 		"File",
@@ -2036,10 +2067,9 @@ def get_shared_folder_files(token):
 	# readable forever, even after the share is revoked. Proxy every download through
 	# the token instead, so revocation and expiry actually take effect.
 	for f in files:
-		f["file_url"] = (
-			"/api/method/portal_app.api.files.download_shared_file"
-			"?token=" + quote(token) + "&file=" + quote(f["name"])
-		)
+		f["file_url"] = "/api/method/portal_app.api.files.download_shared_file" "?token=" + quote(
+			token
+		) + "&file=" + quote(f["name"])
 	project_title = frappe.db.get_value("Project", project, "project_name") or project
 	return {
 		"project": project,
@@ -2168,13 +2198,13 @@ def upload_project_file():
 		if not external_provider:
 			frappe.throw(_("Select an external provider for external upload mode."))
 		if not _provider_enabled(external_provider):
-			frappe.throw(_("{0} is not enabled in Portal Project Settings.").format(_provider_label(external_provider)))
+			frappe.throw(
+				_("{0} is not enabled in Portal Project Settings.").format(_provider_label(external_provider))
+			)
 		webhook = _provider_webhook(external_provider)
 		if not webhook:
 			frappe.throw(
-				_(
-					"External webhook is not configured for {0}. Set it in Portal Project Settings."
-				).format(
+				_("External webhook is not configured for {0}. Set it in Portal Project Settings.").format(
 					_provider_label(external_provider),
 				)
 			)
@@ -2193,7 +2223,9 @@ def upload_project_file():
 		resp = requests.post(webhook, files=files, data=data, timeout=30)
 		if resp.status_code >= 400:
 			frappe.throw(
-				_("External upload failed for {0}: HTTP {1}").format(_provider_label(external_provider), resp.status_code)
+				_("External upload failed for {0}: HTTP {1}").format(
+					_provider_label(external_provider), resp.status_code
+				)
 			)
 		try:
 			payload = resp.json()
@@ -2271,7 +2303,9 @@ def upload_project_file():
 			# real write failure is still reported instead of being read as "not migrated".
 			if frappe.get_meta("File").has_field("portal_file_type"):
 				try:
-					frappe.db.set_value("File", doc.name, "portal_file_type", portal_file_type, update_modified=False)
+					frappe.db.set_value(
+						"File", doc.name, "portal_file_type", portal_file_type, update_modified=False
+					)
 					doc.portal_file_type = portal_file_type
 				except Exception:
 					frappe.log_error(frappe.get_traceback(), "Portal: stamp portal_file_type")
@@ -2281,34 +2315,41 @@ def upload_project_file():
 		if doc and file_classification and frappe.db.exists("DocType", "Project File"):
 			try:
 				import os as _os
+
 				file_sub_category = cstr(frappe.form_dict.get("file_sub_category") or "").strip()
 				document_type = cstr(frappe.form_dict.get("document_type") or "").strip()
 				_base, ext = _os.path.splitext(fname)
 
 				# Resolve the ATA project code and human name from the ERPNext Project record
-				proj_data = frappe.db.get_value(
-					"Project", project,
-					["portal_project_code", "project_name", "portal_kanban_stage"],
-					as_dict=True,
-				) or {}
+				proj_data = (
+					frappe.db.get_value(
+						"Project",
+						project,
+						["portal_project_code", "project_name", "portal_kanban_stage"],
+						as_dict=True,
+					)
+					or {}
+				)
 				ata_code = proj_data.get("portal_project_code") or project
 				proj_name = proj_data.get("project_name") or project
 				stage = proj_data.get("portal_kanban_stage") or ""
 
-				pf = frappe.get_doc({
-					"doctype": "Project File",
-					"project_code": ata_code,
-					"project_name": proj_name,
-					"project_stage": stage,
-					"file_attachment": doc.file_url,
-					"file_name": fname,
-					"file_extension": ext.lower(),
-					"file_category": file_classification,
-					"file_sub_category": file_sub_category,
-					"document_type": document_type,
-					"uploaded_by": frappe.session.user,
-					"upload_date": frappe.utils.today(),
-				})
+				pf = frappe.get_doc(
+					{
+						"doctype": "Project File",
+						"project_code": ata_code,
+						"project_name": proj_name,
+						"project_stage": stage,
+						"file_attachment": doc.file_url,
+						"file_name": fname,
+						"file_extension": ext.lower(),
+						"file_category": file_classification,
+						"file_sub_category": file_sub_category,
+						"document_type": document_type,
+						"uploaded_by": frappe.session.user,
+						"upload_date": frappe.utils.today(),
+					}
+				)
 				pf.insert(ignore_permissions=True)
 			except Exception:
 				# Fail soft — classification record is supplementary; upload must succeed.
@@ -2362,6 +2403,7 @@ def prepare_folder_upload():
 	# If the caller already included a numeric prefix (legacy), strip it first.
 	name_part = folder_name
 	import re as _re
+
 	if _re.match(r"^\d{2}_", name_part):
 		name_part = name_part[3:]  # strip old "NN_" prefix so backend controls it
 
@@ -2426,9 +2468,15 @@ def get_file_download_url(file_name):
 
 @frappe.whitelist()
 def list_all_files(
-	project=None, category=None, sub_category=None,
-	document_type=None, tags=None, search=None,
-	folder_search=None, page=1, per_page=50,
+	project=None,
+	category=None,
+	sub_category=None,
+	document_type=None,
+	tags=None,
+	search=None,
+	folder_search=None,
+	page=1,
+	per_page=50,
 ):
 	"""List project files with filters.
 
@@ -2442,6 +2490,7 @@ def list_all_files(
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	from portal_app.api.helper import get_allowed_project_names
+
 	allowed = get_allowed_project_names()
 	if not allowed:
 		return {"files": [], "total": 0, "categories": _DEFAULT_CATS, "sub_categories": [], "doc_types": []}
@@ -2449,19 +2498,30 @@ def list_all_files(
 	# ── Project filter ───────────────────────────────────────────────────────
 	# Search by portal_project_code OR project_name (both fields on Project doc).
 	if project:
-		by_code = frappe.get_all("Project",
+		by_code = frappe.get_all(
+			"Project",
 			filters=[["name", "in", allowed], ["portal_project_code", "like", f"%{project}%"]],
-			pluck="name")
-		by_name = frappe.get_all("Project",
+			pluck="name",
+		)
+		by_name = frappe.get_all(
+			"Project",
 			filters=[["name", "in", allowed], ["project_name", "like", f"%{project}%"]],
-			pluck="name")
+			pluck="name",
+		)
 		allowed = list(set(by_code + by_name))
 		if not allowed:
-			return {"files": [], "total": 0, "categories": _DEFAULT_CATS, "sub_categories": [], "doc_types": []}
+			return {
+				"files": [],
+				"total": 0,
+				"categories": _DEFAULT_CATS,
+				"sub_categories": [],
+				"doc_types": [],
+			}
 
 	# ── Project metadata lookup ──────────────────────────────────────────────
 	proj_meta = {
-		r["name"]: r for r in frappe.get_all(
+		r["name"]: r
+		for r in frappe.get_all(
 			"Project",
 			filters=[["name", "in", allowed]],
 			fields=["name", "portal_project_code", "project_name", "portal_kanban_stage"],
@@ -2479,7 +2539,7 @@ def list_all_files(
 	if folder_search:
 		file_filters.append(["folder", "like", f"%{folder_search}%"])
 
-	page     = max(1, cint(page) or 1)
+	page = max(1, cint(page) or 1)
 	per_page = min(200, max(10, cint(per_page) or 50))
 
 	# Count all (before category post-filter) for accurate total when no category filter
@@ -2504,49 +2564,57 @@ def list_all_files(
 			for pf in frappe.get_all(
 				"Project File",
 				filters=[["file_attachment", "in", urls]],
-				fields=["file_attachment", "file_category", "file_sub_category",
-				        "tags_field", "document_type", "project_stage"],
+				fields=[
+					"file_attachment",
+					"file_category",
+					"file_sub_category",
+					"tags_field",
+					"document_type",
+					"project_stage",
+				],
 			):
 				pf_map[pf["file_attachment"]] = pf
 
 	# ── Build rows with auto-classification fallback ─────────────────────────
 	rows = []
 	for f in raw_files:
-		proj  = proj_meta.get(f["attached_to_name"], {})
-		pf    = pf_map.get(f.get("file_url") or "", {})
+		proj = proj_meta.get(f["attached_to_name"], {})
+		pf = pf_map.get(f.get("file_url") or "", {})
 		fname = f.get("file_name") or ""
 		_base, ext = _os.path.splitext(fname)
 		ext = ext.lower()
 
 		# Derive relative folder path inside the project
 		raw_folder = f.get("folder") or ""
-		proj_root  = f"Home/Attachments/{f['attached_to_name']}"
+		proj_root = f"Home/Attachments/{f['attached_to_name']}"
 		if raw_folder == proj_root:
 			rel_folder = ""
 		elif raw_folder.startswith(proj_root + "/"):
-			rel_folder = raw_folder[len(proj_root) + 1:]
+			rel_folder = raw_folder[len(proj_root) + 1 :]
 		else:
 			rel_folder = raw_folder
 
 		auto_cat = _classify_ext(ext)
 		file_cat = pf.get("file_category") or auto_cat
 
-		rows.append({
-			"name":              f["name"],
-			"file_name":         fname,
-			"file_attachment":   f.get("file_url") or "",
-			"file_size":         _fmt_size(f.get("file_size") or 0),
-			"file_extension":    ext,
-			"project_code":      proj.get("portal_project_code") or f["attached_to_name"],
-			"project_name":      proj.get("project_name") or "",
-			"project_stage":     pf.get("project_stage") or proj.get("portal_kanban_stage") or "",
-			"file_category":     file_cat,
-			"file_sub_category": pf.get("file_sub_category") or "",
-			"tags_field":        pf.get("tags_field") or "",
-			"document_type":     pf.get("document_type") or "",
-			"upload_date":       str(f["creation"].date()) if f.get("creation") else "",
-			"folder_path":       rel_folder,
-		})
+		rows.append(
+			{
+				"name": f["name"],
+				"file_name": fname,
+				"file_attachment": f.get("file_url") or "",
+				"file_size": _fmt_size(f.get("file_size") or 0),
+				"file_extension": ext,
+				"project_code": proj.get("portal_project_code") or f["attached_to_name"],
+				"project_name": proj.get("project_name") or "",
+				"project_stage": pf.get("project_stage") or proj.get("portal_kanban_stage") or "",
+				"file_category": file_cat,
+				"file_sub_category": pf.get("file_sub_category") or "",
+				"tags_field": pf.get("tags_field") or "",
+				"document_type": pf.get("document_type") or "",
+				"upload_date": str(f["creation"].date()) if f.get("creation") else "",
+				"folder_path": rel_folder,
+			}
+		)
 
 	# ── Category post-filter (applied after enrichment) ─────────────────────
 	if category:
@@ -2554,25 +2622,41 @@ def list_all_files(
 		total_raw = len(rows)
 		# Apply pagination manually
 		start = (page - 1) * per_page
-		rows  = rows[start : start + per_page]
+		rows = rows[start : start + per_page]
 
 	# ── Distinct categories for filter dropdown ───────────────────────────────
 	cats = set(_DEFAULT_CATS)
 	if has_pf:
 		cats.update(
-			v for v in frappe.db.get_all("Project File", fields=["file_category"], distinct=True, pluck="file_category") if v
+			v
+			for v in frappe.db.get_all(
+				"Project File", fields=["file_category"], distinct=True, pluck="file_category"
+			)
+			if v
 		)
 
 	return {
-		"files":          rows,
-		"total":          total_raw,
-		"categories":     sorted(cats),
+		"files": rows,
+		"total": total_raw,
+		"categories": sorted(cats),
 		"sub_categories": sorted(
-			v for v in frappe.db.get_all("Project File", fields=["file_sub_category"], distinct=True, pluck="file_sub_category") if v
-		) if has_pf else [],
+			v
+			for v in frappe.db.get_all(
+				"Project File", fields=["file_sub_category"], distinct=True, pluck="file_sub_category"
+			)
+			if v
+		)
+		if has_pf
+		else [],
 		"doc_types": sorted(
-			v for v in frappe.db.get_all("Project File", fields=["document_type"], distinct=True, pluck="document_type") if v
-		) if has_pf else [],
+			v
+			for v in frappe.db.get_all(
+				"Project File", fields=["document_type"], distinct=True, pluck="document_type"
+			)
+			if v
+		)
+		if has_pf
+		else [],
 	}
 
 
@@ -2590,14 +2674,35 @@ _DEFAULT_CATS = [
 def _classify_ext(ext: str) -> str:
 	"""Auto-classify a file extension into a Project File category."""
 	ext = (ext or "").lower()
-	if ext in (".ppt", ".pptx"):                                       return "Presentation Files"
-	if ext in (".dwg", ".dxf"):                                        return "Drawing / Layout Files"
-	if ext in (".skp", ".rvt", ".rfa", ".max", ".ls", ".ls12", ".ls13",
-	           ".ls14", ".ls15", ".3dm", ".fbx", ".obj", ".dae", ".exe"): return "3D Model Files"
-	if ext in (".xls", ".xlsx", ".xlsm", ".csv"):                      return "Feasibility / Area Calculation Files"
-	if ext in (".psd", ".psb", ".ai", ".indd", ".idml"):               return "Editable Design Source Files"
-	if ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):              return "Rendering / Image Files"
-	if ext == ".pdf":                                                   return "Presentation Files"
+	if ext in (".ppt", ".pptx"):
+		return "Presentation Files"
+	if ext in (".dwg", ".dxf"):
+		return "Drawing / Layout Files"
+	if ext in (
+		".skp",
+		".rvt",
+		".rfa",
+		".max",
+		".ls",
+		".ls12",
+		".ls13",
+		".ls14",
+		".ls15",
+		".3dm",
+		".fbx",
+		".obj",
+		".dae",
+		".exe",
+	):
+		return "3D Model Files"
+	if ext in (".xls", ".xlsx", ".xlsm", ".csv"):
+		return "Feasibility / Area Calculation Files"
+	if ext in (".psd", ".psb", ".ai", ".indd", ".idml"):
+		return "Editable Design Source Files"
+	if ext in (".jpg", ".jpeg", ".png", ".tif", ".tiff"):
+		return "Rendering / Image Files"
+	if ext == ".pdf":
+		return "Presentation Files"
 	return ""
 
 
@@ -2614,10 +2719,15 @@ def list_folder_route_rules():
 	rows = frappe.get_all(
 		_ROUTE_RULE_DOCTYPE,
 		fields=[
-			"name", "enabled", "rule_name", "rule_type",
+			"name",
+			"enabled",
+			"rule_name",
+			"rule_type",
 			"file_classification",
-			"source_folder_pattern", "source_match_mode",
-			"target_folder_pattern", "target_match_mode",
+			"source_folder_pattern",
+			"source_match_mode",
+			"target_folder_pattern",
+			"target_match_mode",
 			"notes",
 		],
 		order_by="creation asc",
@@ -2632,11 +2742,16 @@ def list_folder_route_rules():
 
 @frappe.whitelist()
 def save_folder_route_rule(
-	name="", rule_name="", rule_type="Cross-route",
+	name="",
+	rule_name="",
+	rule_type="Cross-route",
 	file_classification="",
-	source_folder_pattern="", source_match_mode="contains",
-	target_folder_pattern="", target_match_mode="contains",
-	enabled=1, notes="",
+	source_folder_pattern="",
+	source_match_mode="contains",
+	target_folder_pattern="",
+	target_match_mode="contains",
+	enabled=1,
+	notes="",
 ):
 	"""Create or update a Portal Folder Route Rule. Admin-only."""
 	if not helper.has_portal_staff_project_access():
@@ -2659,15 +2774,15 @@ def save_folder_route_rule(
 	rname = cstr(rule_name).strip() or auto_name
 
 	fields = {
-		"enabled":               cint(enabled),
-		"rule_name":             rname,
-		"rule_type":             rule_type,
-		"file_classification":   cstr(file_classification).strip(),
+		"enabled": cint(enabled),
+		"rule_name": rname,
+		"rule_type": rule_type,
+		"file_classification": cstr(file_classification).strip(),
 		"source_folder_pattern": src,
-		"source_match_mode":     cstr(source_match_mode).strip() or "contains",
+		"source_match_mode": cstr(source_match_mode).strip() or "contains",
 		"target_folder_pattern": tgt,
-		"target_match_mode":     cstr(target_match_mode).strip() or "contains",
-		"notes":                 cstr(notes).strip(),
+		"target_match_mode": cstr(target_match_mode).strip() or "contains",
+		"notes": cstr(notes).strip(),
 	}
 
 	existing = cstr(name).strip()

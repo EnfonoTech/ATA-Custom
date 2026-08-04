@@ -120,9 +120,15 @@ def get_dashboard_data():
 		budget_health["max_pct"] = round(max(pct_samples), 1)
 
 	project_fields = [
-		"name", "project_name", "status", "customer",
-		"expected_start_date", "expected_end_date",
-		"estimated_costing", "percent_complete", "modified",
+		"name",
+		"project_name",
+		"status",
+		"customer",
+		"expected_start_date",
+		"expected_end_date",
+		"estimated_costing",
+		"percent_complete",
+		"modified",
 	]
 	meta_proj = frappe.get_meta("Project")
 	for fn in ("portal_kanban_stage", "portal_project_code", "portal_project_manager"):
@@ -225,13 +231,15 @@ def get_dashboard_data():
 		order_by="creation desc",
 		limit_page_length=8,
 	):
-		recent_activity.append({
-			"type": "file",
-			"title": f"Uploaded: {f.file_name}",
-			"detail": f.attached_to_name,
-			"user": f.owner,
-			"time": str(f.creation),
-		})
+		recent_activity.append(
+			{
+				"type": "file",
+				"title": f"Uploaded: {f.file_name}",
+				"detail": f.attached_to_name,
+				"user": f.owner,
+				"time": str(f.creation),
+			}
+		)
 
 	for t in frappe.get_all(
 		"Task",
@@ -243,14 +251,16 @@ def get_dashboard_data():
 		order_by="modified desc",
 		limit_page_length=8,
 	):
-		recent_activity.append({
-			"type": "task",
-			"title": t.subject or t.name,
-			"detail": t.project,
-			"status": t.status,
-			"user": t.owner,
-			"time": str(t.modified),
-		})
+		recent_activity.append(
+			{
+				"type": "task",
+				"title": t.subject or t.name,
+				"detail": t.project,
+				"status": t.status,
+				"user": t.owner,
+				"time": str(t.modified),
+			}
+		)
 
 	recent_activity.sort(key=lambda x: x["time"], reverse=True)
 	recent_activity = recent_activity[:8]

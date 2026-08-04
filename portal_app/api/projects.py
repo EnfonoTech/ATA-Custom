@@ -36,7 +36,19 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_milestone_date", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for fn in (
+		"portal_project_code",
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_office",
+		"portal_phase",
+		"portal_project_server",
+		"portal_upcoming_milestone",
+		"portal_milestone_date",
+		"portal_server_t",
+		"portal_server_a",
+		"portal_server_c",
+	):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
@@ -266,7 +278,9 @@ def kanban_board():
 
 	kf = helper.kanban_fieldname()
 	fields = _project_fields()
-	projects = frappe.get_all("Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500)
+	projects = frappe.get_all(
+		"Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500
+	)
 
 	if not helper.has_portal_staff_project_access():
 		for p in projects:
@@ -317,7 +331,14 @@ def update_project(project, **kwargs):
 	_assert_may_set_project_manager(project, kwargs)
 	doc = frappe.get_doc("Project", project)
 
-	for k in ("project_name", "status", "expected_start_date", "expected_end_date", "percent_complete", "notes"):
+	for k in (
+		"project_name",
+		"status",
+		"expected_start_date",
+		"expected_end_date",
+		"percent_complete",
+		"notes",
+	):
 		v = kwargs.get(k)
 		if v is not None:
 			doc.set(k, v if v != "" else None)
@@ -327,7 +348,17 @@ def update_project(project, **kwargs):
 		doc.set("estimated_costing", v if v != "" else None)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c", "portal_upcoming_milestone", "portal_milestone_date"):
+	for k in (
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_office",
+		"portal_phase",
+		"portal_server_t",
+		"portal_server_a",
+		"portal_server_c",
+		"portal_upcoming_milestone",
+		"portal_milestone_date",
+	):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v is not None:
@@ -600,7 +631,13 @@ def create_project(project_name, company=None, **kwargs):
 			doc.set(k, v)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_phase", "portal_office"):
+	for k in (
+		"portal_project_code",
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_phase",
+		"portal_office",
+	):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v not in (None, ""):
@@ -858,7 +895,9 @@ def _assert_user_eligible_for_customer_link(user, customer):
 		frappe.throw(_("This account cannot be linked as a customer contact."), frappe.PermissionError)
 	if helper.has_portal_staff_project_access(user) or frappe.db.exists("Project User", {"user": user}):
 		frappe.throw(
-			_("This is an internal user and cannot be linked as a customer portal contact:") + " " + cstr(user),
+			_("This is an internal user and cannot be linked as a customer portal contact:")
+			+ " "
+			+ cstr(user),
 			frappe.PermissionError,
 		)
 
@@ -1199,7 +1238,9 @@ def update_task(task, status=None, priority=None, progress=None, exp_start_date=
 
 	can_edit = helper.can_manage_project(project) or _task_is_assigned_to_user(task, frappe.session.user)
 	if not can_edit:
-		frappe.throw(_("Only project managers or assigned users can update this task."), frappe.PermissionError)
+		frappe.throw(
+			_("Only project managers or assigned users can update this task."), frappe.PermissionError
+		)
 
 	doc = frappe.get_doc("Task", task)
 	if status not in (None, ""):
