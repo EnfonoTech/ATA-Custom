@@ -375,6 +375,8 @@ def get_portal_folder_template():
 def save_portal_folder_template(rows=None):
 	"""Replace folder template rows (company-wide). Empty list falls back to site config / built-in default."""
 	helper.assert_can_edit_portal_folder_template()
+	# files._folder_template() memoises on frappe.local for the duration of the request.
+	frappe.local._portal_folder_template = None
 	if not frappe.db.exists("DocType", "Portal Project Settings"):
 		frappe.throw(_("Portal Project Settings is not installed on this site."))
 

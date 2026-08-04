@@ -2,6 +2,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 from frappe.utils import cstr
+from frappe.utils import flt
 import json
 import base64
 import hashlib
@@ -117,7 +118,47 @@ def _normalize_template_path(raw: str) -> str:
 
 
 def _folder_template() -> list[str]:
-	"""Order: Portal Project Settings table → site_config JSON → built-in default."""
+	"""Order: Portal Project Settings table → site_config JSON → built-in default.
+
+	Memoised per request: this runs two db.exists calls plus a get_single, and is hit
+	once per project inside listing loops.
+	"""
+	cached = getattr(frappe.local, "_portal_folder_template", None)
+	if cached is not None:
+		return cached
+	result = _folder_template_uncached()
+	frappe.local._portal_folder_template = result
+	return result
+
+
+def get_project_folders(project: str) -> dict:
+	"""Read-only sibling of ensure_project_folders — never writes.
+
+	ensure_project_folders() creates every missing folder row, which is ~200-300
+	queries plus inserts. Calling it from a listing endpoint made read-only page loads
+	do writes, and made list_managed_shares do that once per project on the site.
+	Listing paths use this instead; provisioning stays in the upload/create paths.
+	"""
+	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+	project_root = attachments_root + "/" + project
+	rows = frappe.get_all(
+		"File",
+		filters={"is_folder": 1, "name": ["like", project_root + "/%"]},
+		fields=["name"],
+		limit_page_length=0,
+		ignore_permissions=True,
+	)
+	prefix = project_root + "/"
+	subfolders = [
+		{"name": r["name"], "label": r["name"][len(prefix):]}
+		for r in rows
+		if r["name"].startswith(prefix)
+	]
+	subfolders.sort(key=lambda d: d["label"])
+	return {"project_root": project_root, "subfolders": subfolders}
+
+
+def _folder_template_uncached() -> list[str]:
 	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists("DocType", "Portal Project Settings"):
 		try:
 			doc = frappe.get_single("Portal Project Settings")
@@ -146,7 +187,10 @@ def _folder_template() -> list[str]:
 				if out:
 					return out
 		except Exception:
-			pass
+			# A malformed PORTAL_PROJECT_FOLD_TEMPLATE_JSON in site_config used to fall
+			# through to the built-in default with no trace, so an operator's typo looked
+			# like the setting being ignored.
+			frappe.log_error(frappe.get_traceback(), "Portal: bad PORTAL_PROJECT_FOLD_TEMPLATE_JSON")
 	return list(PROJ_FOLD_DEFAULT)
 
 
@@ -212,6 +256,38 @@ _BLOCKED_UPLOAD_EXTENSIONS = frozenset({
 	".jsp", ".asp", ".aspx", ".cgi", ".pl", ".py", ".sh", ".bash",
 	".exe", ".dll", ".scr", ".com", ".bat", ".cmd", ".msi", ".jar",
 })
+
+
+# Ceilings for ZIP import/export. The archive is handled in memory inside a web
+# request, so without these one upload can exhaust a worker.
+_ZIP_MAX_ENTRIES = 2000
+_ZIP_MAX_TOTAL_BYTES = 500 * 1024 * 1024
+_ZIP_DOWNLOAD_MAX_FILES = 500
+_ZIP_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
+
+
+def _assert_valid_share_recipient(uid: str, project: str) -> None:
+	"""A share recipient must be someone entitled to this project's data.
+
+	Sharing previously accepted ANY User on the site, so a project member could hand
+	persistent read access to an unrelated account -- including a Portal Customer
+	belonging to a different customer, which is a cross-tenant leak.
+	"""
+	if helper.has_portal_staff_project_access(uid):
+		return
+	linked_customer = helper.get_portal_linked_customer(uid)
+	if linked_customer:
+		# Customer contact: only for their own customer's projects.
+		if frappe.db.get_value("Project", project, "customer") != linked_customer:
+			frappe.throw(
+				_("That user belongs to a different customer and cannot be given access."),
+				frappe.PermissionError,
+			)
+		return
+	if frappe.db.exists("Project User", {"parent": project, "user": uid}):
+		return
+	if not helper.user_can_use_portal(uid):
+		frappe.throw(_("That user does not have access to the project portal."), frappe.PermissionError)
 
 
 def _safe_upload_filename(raw_name: str) -> str:
@@ -286,7 +362,7 @@ def _verify_share_token(token: str) -> dict:
 @frappe.whitelist()
 def list_project_files(project):
 	helper.assert_project_access(project)
-	folders = ensure_project_folders(project)
+	folders = get_project_folders(project)
 	files = frappe.get_all(
 		"File",
 		filters={"attached_to_doctype": "Project", "attached_to_name": project},
@@ -455,7 +531,7 @@ def download_files_zip(project, file_names=None, folder_path=None):
 				continue
 			names.append(n)
 	elif folder_path:
-		canonical, _label = _resolve_share_folder(project, cstr(folder_path).strip())
+		canonical, _folder_label = _resolve_share_folder(project, cstr(folder_path).strip())
 		rows = frappe.get_all(
 			"File",
 			filters={
@@ -473,13 +549,29 @@ def download_files_zip(project, file_names=None, folder_path=None):
 	if not names:
 		frappe.throw(_("No files to download in this selection."))
 
+	# The archive is assembled in server memory inside the request thread, so bound it.
+	# Without a cap, one "select all" on a large project can exhaust a worker.
+	if len(names) > _ZIP_DOWNLOAD_MAX_FILES:
+		frappe.throw(
+			_("Too many files selected for a single ZIP. Select fewer files, or download folder by folder.")
+		)
+	total_size = sum(
+		flt(r.file_size) for r in frappe.get_all("File", filters={"name": ["in", names]}, fields=["file_size"])
+	)
+	if total_size > _ZIP_DOWNLOAD_MAX_BYTES:
+		frappe.throw(_("This selection is too large to download as a single ZIP."))
+
 	buf = io.BytesIO()
+	written_bytes = 0
 	with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
 		seen = set()
 		for n in names:
 			doc = frappe.get_doc("File", n)
 			try:
 				content = doc.get_content()
+				written_bytes += len(content or b"")
+				if written_bytes > _ZIP_DOWNLOAD_MAX_BYTES:
+					frappe.throw(_("This selection is too large to download as a single ZIP."))
 				# Avoid duplicate entries.
 				arcname = (doc.folder or "").replace("Home/Attachments/", "").rstrip("/")
 				arcname = f"{arcname}/{doc.file_name}" if arcname else doc.file_name
@@ -553,6 +645,14 @@ def upload_project_files_zip(project, target_folder):
 	if not entries:
 		frappe.throw(_("ZIP contains no uploadable files."))
 
+	# Bound the archive before extracting anything. file_size is attacker-controlled
+	# central-directory metadata, so it is only a cheap pre-filter; _ZIP_MAX_TOTAL_BYTES
+	# is enforced again against bytes actually read in the extraction loop below.
+	if len(entries) > _ZIP_MAX_ENTRIES:
+		frappe.throw(_("This ZIP contains too many files to import in one go."))
+	if sum(e.file_size for e in entries) > _ZIP_MAX_TOTAL_BYTES:
+		frappe.throw(_("This ZIP expands to too much data to import in one go."))
+
 	# Strip a common single top-level directory prefix (e.g. "MyFolder/a.pdf" → "a.pdf").
 	filenames = [e.filename for e in entries]
 	tops = {fn.split("/")[0] for fn in filenames}
@@ -565,12 +665,24 @@ def upload_project_files_zip(project, target_folder):
 	folder_cache: dict = {}
 	uploaded_files = []
 	failed = []
+	extracted_bytes = 0
 
 	with _bypass_max_attachments():
 		for entry in entries:
 			rel = entry.filename
 			if strip_prefix and rel.startswith(strip_prefix):
 				rel = rel[len(strip_prefix):]
+
+			# Reject traversal / absolute / drive-qualified members before the path is
+			# used to build the File folder tree. Skip rather than throw, matching the
+			# loop's tolerant handling of other unusable entries.
+			rel = rel.replace("\\", "/")
+			if rel.startswith("/") or ":" in rel.split("/")[0]:
+				failed.append({"file": entry.filename, "error": "unsafe path"})
+				continue
+			if any(seg in (".", "..") for seg in rel.split("/")):
+				failed.append({"file": entry.filename, "error": "unsafe path"})
+				continue
 
 			# Split into directory path and file name.
 			parts = rel.rsplit("/", 1)
@@ -585,6 +697,9 @@ def upload_project_files_zip(project, target_folder):
 			try:
 				file_name = _safe_upload_filename(file_name)
 				data = zf.read(entry.filename)
+				extracted_bytes += len(data)
+				if extracted_bytes > _ZIP_MAX_TOTAL_BYTES:
+					frappe.throw(_("This ZIP expands to too much data to import in one go."))
 				# Project documents are confidential (title deeds, client IDs). is_private=1
 				# keeps them out of sites/<site>/public/files, which Frappe serves with no
 				# session check. Link-share recipients read them via download_shared_file.
@@ -744,6 +859,7 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30, notif
 		frappe.throw(_("User {0} not found.").format(uid))
 	if uid in {"Guest", "Administrator"}:
 		frappe.throw(_("Cannot share folder with {0}.").format(uid))
+	_assert_valid_share_recipient(uid, project)
 
 	try:
 		expires_days = max(1, min(365, int(expires_days)))
@@ -1715,7 +1831,7 @@ def list_managed_shares():
 	# under the file row.
 	for pj in manageable:
 		try:
-			folder_ctx = ensure_project_folders(pj)
+			folder_ctx = get_project_folders(pj)
 		except Exception:
 			folder_ctx = {"project_root": f"Home/Attachments/{pj}", "subfolders": []}
 		project_root = folder_ctx.get("project_root") or f"Home/Attachments/{pj}"
@@ -1896,7 +2012,7 @@ def get_shared_folder_files(token):
 			)
 			frappe.db.commit()
 		except Exception:
-			pass
+			frappe.log_error(frappe.get_traceback(), "Portal: share access tracking")
 
 	# Guest must not run ensure_project_folders. Derive label from path / project id.
 	norm = folder.replace("\\", "/") if folder else ""
@@ -2147,12 +2263,14 @@ def upload_project_file():
 			doc.folder = resolved_target
 		# Stamp the file-type tag without re-saving the doc (avoids hooks).
 		if doc and portal_file_type:
-			try:
-				frappe.db.set_value("File", doc.name, "portal_file_type", portal_file_type, update_modified=False)
-				doc.portal_file_type = portal_file_type
-			except Exception:
-				# Custom field not yet migrated — fail soft so uploads still work.
-				pass
+			# Gate on the field actually existing rather than catching everything, so a
+			# real write failure is still reported instead of being read as "not migrated".
+			if frappe.get_meta("File").has_field("portal_file_type"):
+				try:
+					frappe.db.set_value("File", doc.name, "portal_file_type", portal_file_type, update_modified=False)
+					doc.portal_file_type = portal_file_type
+				except Exception:
+					frappe.log_error(frappe.get_traceback(), "Portal: stamp portal_file_type")
 
 		# Create a Project File classification record when classification data is provided.
 		file_classification = cstr(frappe.form_dict.get("file_classification") or "").strip()
@@ -2357,8 +2475,8 @@ def list_all_files(
 	if folder_search:
 		file_filters.append(["folder", "like", f"%{folder_search}%"])
 
-	page     = max(1, int(page or 1))
-	per_page = min(200, max(10, int(per_page or 50)))
+	page     = max(1, cint(page) or 1)
+	per_page = min(200, max(10, cint(per_page) or 50))
 
 	# Count all (before category post-filter) for accurate total when no category filter
 	total_raw = frappe.db.count("File", file_filters)
