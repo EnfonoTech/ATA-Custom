@@ -112,6 +112,7 @@ font-weight:600;margin-left:6px}
   </div>
   <nav class="sidebar-nav">
         <div class="nav-group-label">Before you start</div>
+    <a href="#live-warning">&#9888; Read this first</a>
     <a href="#how">How to use this</a>
     <a href="#accounts">Test accounts</a>
     <a href="#fixtures">Test data to prepare</a>
@@ -144,6 +145,24 @@ font-weight:600;margin-left:6px}
   </header>
 
   <div class="content">
+
+    <section id="live-warning">
+      <div class="warn" style="border-left-width:6px">
+        <strong style="font-size:15px">This page is open to anyone, and the logins below are real</strong>
+        <p style="margin:6px 0 0">This is a pre-handover test site, so the tester logins are shown openly for
+        convenience. Anyone who reaches this address can sign in with them.</p>
+        <p style="margin:6px 0 0"><strong>Before this site holds any real client data, two things must happen:</strong></p>
+        <ol style="margin:6px 0 0 20px">
+          <li>Delete every <code>@ata-test.local</code> account listed below.</li>
+          <li>Clear the config key so this page stops showing logins:
+              <code>bench --site ata.enfonoerp.com set-config ata_uat_accounts "[]"</code>
+              then <code>bench --site ata.enfonoerp.com clear-website-cache</code>.</li>
+        </ol>
+        <p style="margin:6px 0 0">Leaving accounts behind is not hypothetical. Five <code>@demo.local</code>
+        accounts from the demo-data tool are still enabled on this site right now with a password that is
+        published publicly, and one of them can see every project.</p>
+      </div>
+    </section>
 
     <section id="how">
       <h2><span class="anum">i</span>How to use this guide</h2>
