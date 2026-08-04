@@ -2,6 +2,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.utils import cint
 
 from portal_app.api import helper
 
@@ -18,12 +19,20 @@ def _can_create_users() -> bool:
 
 
 def _can_run_seed_via_portal() -> bool:
+	"""System Manager PLUS an explicit opt-in on this site.
+
+	Seeding creates real, enabled login accounts and real Projects/Tasks/Files. On a
+	production site that must never be one misclick away, so it additionally requires
+	developer_mode or the "Allow portal demo seed" switch in Portal Project Settings —
+	which is what the error message shown to users has always claimed.
+	"""
 	if frappe.session.user == "Guest":
 		return False
-	# System Managers can always run the demo seed — no dev-mode or settings flag needed.
-	if "System Manager" in frappe.get_roles():
+	if "System Manager" not in frappe.get_roles():
+		return False
+	if cint(frappe.conf.get("developer_mode")):
 		return True
-	return False
+	return bool(helper.get_portal_settings_dict().get("allow_portal_demo_seed"))
 
 
 ALLOWED_PORTAL_USER_ROLES = frozenset({"Projects User", "Projects Manager", "Portal Customer"})
@@ -42,7 +51,9 @@ def get_portal_admin_capabilities():
 
 
 @frappe.whitelist()
-def create_portal_user(email, full_name, password, roles_json=None, send_welcome_email=0, portal_linked_customer=None):
+def create_portal_user(
+	email, full_name, password, roles_json=None, send_welcome_email=0, portal_linked_customer=None
+):
 	if not _can_create_users():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
@@ -54,8 +65,8 @@ def create_portal_user(email, full_name, password, roles_json=None, send_welcome
 	password = password or ""
 	portal_linked_customer = (portal_linked_customer or "").strip()
 
-	if not email or not full_name or len(password) < 6:
-		frappe.throw(_("Valid email, full name, and password (min 6 characters) are required"))
+	if not email or not full_name or not password:
+		frappe.throw(_("Valid email, full name, and password are required"))
 
 	if frappe.db.exists("User", email):
 		frappe.throw(_("User already exists"))
@@ -92,8 +103,15 @@ def create_portal_user(email, full_name, password, roles_json=None, send_welcome
 		"first_name": first_name,
 		"last_name": last_name,
 		"enabled": 1,
-		"send_welcome_email": int(send_welcome_email or 0),
-		"user_type": "System User",
+		"send_welcome_email": cint(send_welcome_email),
+		# A Portal Customer has no desk access, so it is a Website User. Frappe would
+		# rewrite this anyway; being explicit keeps headcount queries honest and avoids
+		# consuming a System User licence seat per client contact.
+		"user_type": "Website User" if roles == ["Portal Customer"] else "System User",
+		# new_password runs the site Password Policy and strength scoring during insert.
+		# frappe.utils.password.update_password(), used previously, bypasses both, so a
+		# 6-character password was accepted on a site that requires far more.
+		"new_password": password,
 	}
 	if portal_linked_customer and frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = portal_linked_customer
@@ -104,20 +122,22 @@ def create_portal_user(email, full_name, password, roles_json=None, send_welcome
 
 	doc.insert(ignore_permissions=True)
 
-	from frappe.utils.password import update_password
-
-	update_password(email, password)
-
 	return {"ok": True, "name": doc.name, "email": email}
 
 
-@frappe.whitelist()
 def run_demo_seed():
-	"""Legacy seed entry point. Kept for backward compatibility — prefer
-	`create_demo_seed_run` which records what it created so it can be cleaned up."""
+	"""Legacy seed entry point — deliberately NOT whitelisted.
+
+	This path creates users and projects without recording what it created, so there
+	is no teardown: cleaning up afterwards means hand-writing a bench script and
+	guessing which rows were seeded. `create_demo_seed_run` supersedes it and tracks
+	every document. Reachable via `bench execute` only.
+	"""
 	if not _can_run_seed_via_portal():
 		frappe.throw(
-			_("Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."),
+			_(
+				"Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."
+			),
 			frappe.PermissionError,
 		)
 
@@ -129,7 +149,9 @@ def run_demo_seed():
 def _assert_can_run_demo_seed():
 	if not _can_run_seed_via_portal():
 		frappe.throw(
-			_("Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."),
+			_(
+				"Demo seed is only for System Managers, and requires Developer Mode or Allow portal demo seed in settings."
+			),
 			frappe.PermissionError,
 		)
 
@@ -156,11 +178,11 @@ def create_demo_seed_run(
 		{
 			"doctype": "Portal Demo Seed Run",
 			"run_label": (run_label or "Portal demo run").strip()[:140] or "Portal demo run",
-			"include_users": int(include_users or 0),
-			"include_customers": int(include_customers or 0),
-			"include_projects": int(include_projects or 0),
-			"include_tasks": int(include_tasks or 0),
-			"include_files": int(include_files or 0),
+			"include_users": cint(include_users),
+			"include_customers": cint(include_customers),
+			"include_projects": cint(include_projects),
+			"include_tasks": cint(include_tasks),
+			"include_files": cint(include_files),
 			"notes": notes or "",
 		}
 	)
@@ -235,10 +257,20 @@ def parse_project_list_docx():
 	if not content:
 		frappe.throw(_("Uploaded file is empty."))
 
+	# Cap the upload before parsing: the whole archive is buffered in memory and the
+	# XML is expanded, so an unbounded file is a trivial memory-exhaustion vector.
+	if len(content) > 20 * 1024 * 1024:
+		frappe.throw(_("File is too large. The project list must be under 20 MB."))
+
 	try:
 		zf = zipfile.ZipFile(io.BytesIO(content))
-	except Exception as e:
-		frappe.throw(_(f"Could not open file as ZIP/DOCX: {e}"))
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Portal: docx parse")
+		frappe.throw(_("Could not open the uploaded file. Make sure it is a valid .docx."))
+
+	# Reject a decompression bomb before any member is read.
+	if sum(i.file_size for i in zf.infolist()) > 200 * 1024 * 1024:
+		frappe.throw(_("The uploaded document expands to too much data."))
 
 	# Support both .docx (word/document.xml) and plain XML files.
 	xml_bytes = None
@@ -312,6 +344,7 @@ def create_demo_seed_run_from_docx(
 		frappe.throw(_("Run `bench migrate` to install the Portal Demo Seed Run doctype."))
 
 	import json as _json
+
 	try:
 		raw_projects = _json.loads(projects_json or "[]")
 	except Exception:
@@ -321,10 +354,10 @@ def create_demo_seed_run_from_docx(
 	from portal_app.project_portal.doctype.portal_demo_seed_run import portal_demo_seed_run as _mod
 	from frappe.utils import add_days, today as _today
 
-	_STAGE_PCT  = _mod._STAGE_PCT
+	_STAGE_PCT = _mod._STAGE_PCT
 	_STAGE_STATUS = _mod._STAGE_STATUS
-	_MANAGERS   = _mod._MANAGERS
-	_TEAMS      = _mod._TEAMS
+	_MANAGERS = _mod._MANAGERS
+	_TEAMS = _mod._TEAMS
 
 	def _year_from_code(code):
 		if code.startswith("CDB-"):
@@ -335,10 +368,14 @@ def create_demo_seed_run_from_docx(
 			return 2024
 
 	def _stage_for_year(year):
-		if year <= 2022: return "Done"
-		if year == 2023: return "On Hold"
-		if year == 2024: return "Review"
-		if year == 2025: return "Active"
+		if year <= 2022:
+			return "Done"
+		if year == 2023:
+			return "On Hold"
+		if year == 2024:
+			return "Review"
+		if year == 2025:
+			return "Active"
 		return "Planning"
 
 	generated = []
@@ -347,37 +384,39 @@ def create_demo_seed_run_from_docx(
 		name = str(p.get("name") or "").strip()
 		if not code or not name:
 			continue
-		year  = _year_from_code(code)
+		year = _year_from_code(code)
 		stage = _stage_for_year(year)
-		generated.append({
-			"project_name": f"{code} – {name}",
-			"code":         f"ATA-{code}",
-			"stage":        stage,
-			"year":         year,
-			"manager":      _MANAGERS[i % len(_MANAGERS)],
-			"team":         _TEAMS[i % len(_TEAMS)],
-			"cost":         0,
-			"tasks":        [],
-			"attach_readme": False,
-		})
+		generated.append(
+			{
+				"project_name": f"{code} – {name}",
+				"code": f"ATA-{code}",
+				"stage": stage,
+				"year": year,
+				"manager": _MANAGERS[i % len(_MANAGERS)],
+				"team": _TEAMS[i % len(_TEAMS)],
+				"cost": 0,
+				"tasks": [],
+				"attach_readme": False,
+			}
+		)
 
-	# Temporarily override DEMO_PROJECTS
-	original = _mod.DEMO_PROJECTS
-	_mod.DEMO_PROJECTS = generated
-	try:
-		doc = frappe.get_doc({
+	doc = frappe.get_doc(
+		{
 			"doctype": "Portal Demo Seed Run",
 			"run_label": (run_label or "Portal demo run").strip()[:140] or "Portal demo run",
-			"include_users":     int(include_users or 0),
+			"include_users": cint(include_users),
 			"include_customers": 0,
-			"include_projects":  1,
-			"include_tasks":     0,
-			"include_files":     int(include_files or 0),
-		})
-		doc.insert(ignore_permissions=True)
-		frappe.db.commit()
-	finally:
-		_mod.DEMO_PROJECTS = original
+			"include_projects": 1,
+			"include_tasks": 0,
+			"include_files": cint(include_files),
+		}
+	)
+	# Pass the parsed list on the document. Reassigning the module-level DEMO_PROJECTS
+	# (the previous approach) raced across concurrent requests in the same worker and
+	# could permanently leave one admin's import installed for every later seed.
+	doc.flags.projects_override = generated
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
 
 	return _serialize_run(doc)
 

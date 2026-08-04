@@ -540,17 +540,10 @@ const openLogoutModal = () => {
 const handleLogout = async () => {
 	loggingOut.value = true;
 	try {
-		const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
-		const csrf = csrfMatch ? decodeURIComponent(csrfMatch[1]) : "";
-		await fetch("/api/method/logout", {
-			method: "POST",
-			credentials: "include",
-			headers: {
-				"Content-Type": "application/json",
-				...(csrf ? { "X-Frappe-CSRF-Token": csrf } : {}),
-			},
-			body: "{}",
-		});
+		// Must go through call(): Frappe does not set a `csrf_token` cookie, so reading
+		// document.cookie always yielded "" and the POST was rejected as a CSRF failure.
+		// The error was swallowed, so the server session stayed alive after "logging out".
+		await call({ method: "logout", type: "POST" });
 	} catch (err) {
 		console.error("Logout failed:", err);
 	} finally {

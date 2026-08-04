@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import cstr
 
 from portal_app.api import helper
 
@@ -26,7 +27,9 @@ def get_my_profile():
 		cust = u.get("portal_linked_customer")
 		out["portal_linked_customer"] = cust
 		if cust:
-			out["portal_linked_customer_name"] = frappe.db.get_value("Customer", cust, "customer_name") or cust
+			out["portal_linked_customer_name"] = (
+				frappe.db.get_value("Customer", cust, "customer_name") or cust
+			)
 	return out
 
 
@@ -95,9 +98,11 @@ def mark_notifications_read(names=None):
 				"UPDATE `tabNotification Log` SET `read`=1 WHERE for_user=%s",
 				frappe.session.user,
 			)
-		frappe.db.commit()
 	except Exception:
+		# Previously this swallowed the failure and still returned ok:True, so the UI
+		# cleared the badge while the rows stayed unread.
 		frappe.log_error(frappe.get_traceback(), "Portal: mark notifications read")
+		frappe.throw(_("Could not mark notifications as read. Please try again."))
 	return {"ok": True}
 
 
@@ -108,7 +113,12 @@ def update_my_profile(full_name=None, mobile_no=None, language=None, time_zone=N
 
 	doc = frappe.get_doc("User", frappe.session.user)
 	if full_name is not None:
-		doc.full_name = full_name
+		# User.full_name is derived by User.validate() from first/middle/last name, so
+		# assigning it directly was silently discarded on save and the rename never took.
+		parts = cstr(full_name).strip().split(None, 1)
+		if parts:
+			doc.first_name = parts[0]
+			doc.last_name = parts[1] if len(parts) > 1 else ""
 	if mobile_no is not None:
 		doc.mobile_no = mobile_no
 	if language is not None:

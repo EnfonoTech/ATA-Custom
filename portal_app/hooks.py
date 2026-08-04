@@ -17,16 +17,28 @@ website_route_rules = [
 
 required_apps = ["erpnext"]
 
-# Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "portal_app",
-# 		"logo": "/assets/portal_app/logo.png",
-# 		"title": "Portal App",
-# 		"route": "/portal-app",
-# 		"has_permission": "portal_app.api.permission.has_app_permission"
-# 	}
-# ]
+# Fixtures
+# ------------------
+# Shipped so a fresh install / migrate recreates them on every site. The desk
+# Workspace is what makes the app reachable from the sidebar for back-office staff;
+# without it the doctypes exist but nothing links to them.
+
+fixtures = [
+	{"dt": "Workspace", "filters": [["module", "=", "Project Portal"]]},
+]
+
+# Shown as a tile on /apps so staff can reach the portal from the desk.
+# No has_permission handler is declared: the SPA's own endpoints all gate on
+# helper.assert_portal_user(), and auth.check_portal_access() logs out a caller who
+# is not entitled to the portal, so an extra desk-side gate would only duplicate it.
+add_to_apps_screen = [
+	{
+		"name": "portal_app",
+		"logo": "/assets/portal_app/ama-logo.png",
+		"title": "Project Portal",
+		"route": "/portal-app",
+	}
+]
 
 # Includes in <head>
 # ------------------

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch, inject, computed, nextTick } from "vue";
-import { call, uploadFile } from "@/api";
+import { call, uploadFile, ensureCsrfReady } from "@/api";
 import { useRoute } from "vue-router";
 import { FeatherIcon } from "frappe-ui";
 
@@ -46,7 +46,11 @@ const loading = ref(false);
 const uploadBusy = ref(false);
 const uploadError = ref("");
 const uploadInfo = ref("");
-const isPrivateUpload = ref(false);
+// Default to PRIVATE. A public File is served from /files/<name> with no session
+// check at all, so publishing a project document must be a deliberate opt-out.
+// The SPA always sends this field explicitly, so the server-side default alone
+// would never take effect for uploads made through the portal.
+const isPrivateUpload = ref(true);
 const dragOver = ref(false);
 const fileInput = ref(null);
 const folderInput = ref(null);
@@ -347,14 +351,13 @@ async function downloadSelectedZip() {
 		const fd = new FormData();
 		fd.append("project", project.value);
 		fd.append("file_names", JSON.stringify(selectedFileNames.value));
-		const csrf = document.cookie
-			.split("; ")
-			.find((c) => c.startsWith("csrf_token="))
-			?.split("=")[1];
+		// Frappe never sets a csrf_token cookie, so reading document.cookie always
+		// produced undefined and this POST was rejected as a CSRF failure every time.
+		const csrf = await ensureCsrfReady();
 		const res = await fetch(url, {
 			method: "POST",
 			credentials: "include",
-			headers: csrf ? { "X-Frappe-CSRF-Token": decodeURIComponent(csrf) } : {},
+			headers: csrf ? { "X-Frappe-CSRF-Token": csrf } : {},
 			body: fd,
 		});
 		if (!res.ok) throw new Error("ZIP download failed");

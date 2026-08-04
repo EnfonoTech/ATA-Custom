@@ -118,7 +118,9 @@ def ensure_project_portal_custom_fields():
 					"label": "Portal Team",
 					"fieldtype": "Link",
 					"options": "Department",
-					"insert_after": "portal_office",
+					# Chained after portal_phase, not portal_office: two fields claiming the
+					# same insert_after makes the resulting field order non-deterministic.
+					"insert_after": "portal_phase",
 					"description": "Team (Department) this project belongs to — groups it on the portal Gantt Chart",
 				},
 			]
@@ -234,11 +236,47 @@ def seed_default_portal_file_types():
 		doc.insert(ignore_permissions=True)
 
 
+def ensure_daily_task_custom_fields():
+	"""Event fields backing the Daily Task board.
+
+	These used to be created lazily from the whitelisted Daily Task endpoints, which
+	meant any portal user could trigger Custom Field DDL on a core doctype by loading
+	a page, and two concurrent first-hits raced each other. Schema belongs here.
+	"""
+	if not frappe.db.exists("DocType", "Event"):
+		return
+
+	create_custom_fields(
+		{
+			"Event": [
+				{
+					"fieldname": "is_portal_daily_task",
+					"label": "Is Portal Daily Task",
+					"fieldtype": "Check",
+					"default": "0",
+					"insert_after": "subject",
+					"hidden": 1,
+				},
+				{
+					"fieldname": "portal_assigned_to",
+					"label": "Portal Assigned To",
+					"fieldtype": "Link",
+					"options": "User",
+					"insert_after": "is_portal_daily_task",
+				},
+			]
+		},
+		update=True,
+	)
+	frappe.clear_cache(doctype="Event")
+
+
 def after_install():
 	ensure_department_portal_custom_fields()
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
+	ensure_daily_task_custom_fields()
 	ensure_portal_file_type_field()
 	seed_default_portal_file_types()
 
@@ -249,5 +287,6 @@ def after_migrate():
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
 	lift_project_attachment_limit()
+	ensure_daily_task_custom_fields()
 	ensure_portal_file_type_field()
 	seed_default_portal_file_types()

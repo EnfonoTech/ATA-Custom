@@ -27,7 +27,16 @@ from frappe.utils.password import update_password
 from portal_app.api.files import ensure_project_folders
 
 
-DEMO_PASSWORD = "ChangeMe-Demo#1"
+def _new_demo_password() -> str:
+	"""A fresh random password per seed run.
+
+	This used to be a hardcoded constant in a PUBLIC repository, which meant every
+	site that had ever run the seed shared one internet-published credential for
+	accounts holding the Projects Manager role (i.e. the whole project portfolio).
+	Never reintroduce a literal here.
+	"""
+	return "Dm-" + frappe.generate_hash(length=18) + "#1"
+
 
 DEMO_USERS: list[dict] = [
 	{
@@ -92,8 +101,15 @@ def _year_from_code(code: str) -> int:
 		return 2024
 
 
-def _p(code: str, name: str, stage: str, idx: int = 0, cost: int = 0,
-       tasks: list | None = None, attach: bool = False) -> dict:
+def _p(
+	code: str,
+	name: str,
+	stage: str,
+	idx: int = 0,
+	cost: int = 0,
+	tasks: list | None = None,
+	attach: bool = False,
+) -> dict:
 	return {
 		"project_name": f"{code} – {name}",
 		"code": f"ATA-{code}",
@@ -109,131 +125,160 @@ def _p(code: str, name: str, stage: str, idx: int = 0, cost: int = 0,
 
 DEMO_PROJECTS: list[dict] = [
 	# ── 2022 (2201–2237) ─────────────────────────────────────────────────────
-	_p("2201", "AL BASSAM",                           "Done",   0, 350000, [("Concept Design", "Completed"), ("Schematic Design", "Completed")], True),
-	_p("2202", "WALEED BIN SAEDAN RESORT",             "Done",   1, 1800000),
-	_p("2203", "AL BUKAYRIYAH -2",                    "Done",   2, 420000),
-	_p("2204", "AL MAJED TOWER",                      "Done",   3, 1200000),
-	_p("2205", "AL MAJED OFFICES",                    "Done",   0, 950000),
-	_p("2206", "KHALID AL AJLAAN",                    "Done",   1, 380000),
-	_p("2207", "AL GAMMAS DIWANIYAH",                 "Done",   2, 290000),
-	_p("2208", "AL MAJEEDIYA",                        "Done",   3, 460000),
-	_p("2209", "AFRAS ROW LAND (AL KHOYOOL ARABIA-3)","Done",   0, 320000),
-	_p("2210", "AL QASSIM-6",                         "Done",   1, 400000),
-	_p("2211", "AL QASSIM-7",                         "Done",   2, 400000),
-	_p("2212", "OUD EDITION",                         "Done",   3, 550000),
-	_p("2213", "ABDULLAH ALNIMER",                    "Done",   0, 310000),
-	_p("2214", "SIKKAH 2",                            "Done",   1, 280000),
-	_p("2215", "AL MAJEEDIYA 2",                      "Done",   2, 460000),
-	_p("2216", "AL HASSAN PALACE",                    "Done",   3, 2100000),
-	_p("2217", "MANAL PALACE",                        "Done",   0, 1750000),
-	_p("2218", "TURKI ALKOSIR",                       "Done",   1, 340000),
-	_p("2219", "ZOOD (GAMMAS)",                       "Done",   2, 370000),
-	_p("2220", "AL ZALAL",                            "Done",   3, 490000),
-	_p("2221", "GHAIMA 2",                            "Done",   0, 360000),
-	_p("2222", "NMR TOWER",                           "Done",   1, 1100000),
-	_p("2223", "YAMANY TOWER",                        "Done",   2, 980000),
-	_p("2224", "AL KHURAJI GARDEN 1",                 "Done",   3, 430000),
-	_p("2225", "AL KHURAJI GARDEN 2",                 "Done",   0, 430000),
-	_p("2226", "AL BASATEEN COMMERCIAL (AL SHGREY)",  "Done",   1, 870000),
-	_p("2227", "SAMEEM TOWER",                        "Done",   2, 1050000),
-	_p("2228", "AGNA 2",                              "Done",   3, 390000),
-	_p("2229", "FIRST AVENUE 2",                      "Done",   0, 720000),
-	_p("2230", "ASEEL AR RAWDAH (RAFEN)",             "Done",   1, 410000),
-	_p("2231", "ZOOD -2 (RESIDENTIAL)",               "Done",   2, 380000),
-	_p("2232", "SBS (SULTAN BIN SALMAN)",             "Done",   3, 1600000),
-	_p("2233", "AL DOHAYAN",                          "Done",   0, 330000),
-	_p("2234", "SAMEEM 2",                            "Done",   1, 510000),
-	_p("2235", "AGNA 3",                              "Done",   2, 400000),
-	_p("2236", "SALEH ALMAHROOS",                     "Done",   3, 350000),
-	_p("2237", "TAMASOK 2",                           "Done",   0, 480000),
+	_p(
+		"2201",
+		"AL BASSAM",
+		"Done",
+		0,
+		350000,
+		[("Concept Design", "Completed"), ("Schematic Design", "Completed")],
+		True,
+	),
+	_p("2202", "WALEED BIN SAEDAN RESORT", "Done", 1, 1800000),
+	_p("2203", "AL BUKAYRIYAH -2", "Done", 2, 420000),
+	_p("2204", "AL MAJED TOWER", "Done", 3, 1200000),
+	_p("2205", "AL MAJED OFFICES", "Done", 0, 950000),
+	_p("2206", "KHALID AL AJLAAN", "Done", 1, 380000),
+	_p("2207", "AL GAMMAS DIWANIYAH", "Done", 2, 290000),
+	_p("2208", "AL MAJEEDIYA", "Done", 3, 460000),
+	_p("2209", "AFRAS ROW LAND (AL KHOYOOL ARABIA-3)", "Done", 0, 320000),
+	_p("2210", "AL QASSIM-6", "Done", 1, 400000),
+	_p("2211", "AL QASSIM-7", "Done", 2, 400000),
+	_p("2212", "OUD EDITION", "Done", 3, 550000),
+	_p("2213", "ABDULLAH ALNIMER", "Done", 0, 310000),
+	_p("2214", "SIKKAH 2", "Done", 1, 280000),
+	_p("2215", "AL MAJEEDIYA 2", "Done", 2, 460000),
+	_p("2216", "AL HASSAN PALACE", "Done", 3, 2100000),
+	_p("2217", "MANAL PALACE", "Done", 0, 1750000),
+	_p("2218", "TURKI ALKOSIR", "Done", 1, 340000),
+	_p("2219", "ZOOD (GAMMAS)", "Done", 2, 370000),
+	_p("2220", "AL ZALAL", "Done", 3, 490000),
+	_p("2221", "GHAIMA 2", "Done", 0, 360000),
+	_p("2222", "NMR TOWER", "Done", 1, 1100000),
+	_p("2223", "YAMANY TOWER", "Done", 2, 980000),
+	_p("2224", "AL KHURAJI GARDEN 1", "Done", 3, 430000),
+	_p("2225", "AL KHURAJI GARDEN 2", "Done", 0, 430000),
+	_p("2226", "AL BASATEEN COMMERCIAL (AL SHGREY)", "Done", 1, 870000),
+	_p("2227", "SAMEEM TOWER", "Done", 2, 1050000),
+	_p("2228", "AGNA 2", "Done", 3, 390000),
+	_p("2229", "FIRST AVENUE 2", "Done", 0, 720000),
+	_p("2230", "ASEEL AR RAWDAH (RAFEN)", "Done", 1, 410000),
+	_p("2231", "ZOOD -2 (RESIDENTIAL)", "Done", 2, 380000),
+	_p("2232", "SBS (SULTAN BIN SALMAN)", "Done", 3, 1600000),
+	_p("2233", "AL DOHAYAN", "Done", 0, 330000),
+	_p("2234", "SAMEEM 2", "Done", 1, 510000),
+	_p("2235", "AGNA 3", "Done", 2, 400000),
+	_p("2236", "SALEH ALMAHROOS", "Done", 3, 350000),
+	_p("2237", "TAMASOK 2", "Done", 0, 480000),
 	# ── 2023 (2301–2328) ─────────────────────────────────────────────────────
-	_p("2301", "MOHAMED HABIB RESIDENTIAL LAND",      "Done",   1, 290000, [("Site Survey", "Completed"), ("Concept Approval", "Completed")]),
-	_p("2302", "ZOOD COMPLEX (2219 + 2231)",          "Done",   2, 750000),
-	_p("2303", "ASEEL AR RAWDAH",                     "Done",   3, 420000),
-	_p("2304", "SALEH AL MAHROOS",                    "Done",   0, 360000),
-	_p("2305", "SALEH AL SALEH",                      "Done",   1, 340000),
-	_p("2306", "ALMUSA TOWER",                        "Done",   2, 1150000),
-	_p("2307", "AL RAMZE",                            "Done",   3, 380000),
-	_p("2308", "ALHADAB (60MX60M)",                   "Done",   0, 520000),
-	_p("2309", "AL BASATEEN HOUSES",                  "Done",   1, 460000),
-	_p("2310", "AGNA 04 (UNIVERSITY)",                "Done",   2, 430000),
-	_p("2311", "AL FAQIH -2",                         "Done",   3, 370000),
-	_p("2312", "AL NEGAIR-2",                         "Done",   0, 390000),
-	_p("2313", "AGNA 5 AL TAKHASSUSI",                "Done",   1, 410000),
-	_p("2314", "AL TUWAIRY",                          "Done",   2, 320000),
-	_p("2315", "ARAK (KING SAUD UNIVERSITY)",         "On Hold",3, 680000),
-	_p("2316", "ALHATLAN -2 (MARHABA COMPANY)",       "On Hold",0, 450000),
-	_p("2317", "AL QASSIM-8",                         "On Hold",1, 410000),
-	_p("2318", "AL QASSIM-6 B",                       "On Hold",2, 410000),
-	_p("2319", "AL RUGAIB",                           "On Hold",3, 350000),
-	_p("2320", "ZOOD KING SALMAN",                    "On Hold",0, 390000),
-	_p("2321", "AL JASSER COMPLEX",                   "On Hold",1, 820000),
+	_p(
+		"2301",
+		"MOHAMED HABIB RESIDENTIAL LAND",
+		"Done",
+		1,
+		290000,
+		[("Site Survey", "Completed"), ("Concept Approval", "Completed")],
+	),
+	_p("2302", "ZOOD COMPLEX (2219 + 2231)", "Done", 2, 750000),
+	_p("2303", "ASEEL AR RAWDAH", "Done", 3, 420000),
+	_p("2304", "SALEH AL MAHROOS", "Done", 0, 360000),
+	_p("2305", "SALEH AL SALEH", "Done", 1, 340000),
+	_p("2306", "ALMUSA TOWER", "Done", 2, 1150000),
+	_p("2307", "AL RAMZE", "Done", 3, 380000),
+	_p("2308", "ALHADAB (60MX60M)", "Done", 0, 520000),
+	_p("2309", "AL BASATEEN HOUSES", "Done", 1, 460000),
+	_p("2310", "AGNA 04 (UNIVERSITY)", "Done", 2, 430000),
+	_p("2311", "AL FAQIH -2", "Done", 3, 370000),
+	_p("2312", "AL NEGAIR-2", "Done", 0, 390000),
+	_p("2313", "AGNA 5 AL TAKHASSUSI", "Done", 1, 410000),
+	_p("2314", "AL TUWAIRY", "Done", 2, 320000),
+	_p("2315", "ARAK (KING SAUD UNIVERSITY)", "On Hold", 3, 680000),
+	_p("2316", "ALHATLAN -2 (MARHABA COMPANY)", "On Hold", 0, 450000),
+	_p("2317", "AL QASSIM-8", "On Hold", 1, 410000),
+	_p("2318", "AL QASSIM-6 B", "On Hold", 2, 410000),
+	_p("2319", "AL RUGAIB", "On Hold", 3, 350000),
+	_p("2320", "ZOOD KING SALMAN", "On Hold", 0, 390000),
+	_p("2321", "AL JASSER COMPLEX", "On Hold", 1, 820000),
 	_p("2322", "AL QASSIM CHAMBER COMMERCIAL AND INDUSTRY", "On Hold", 2, 1900000),
-	_p("2323", "NAWAT",                               "On Hold",3, 370000),
-	_p("2324", "NMR MOSQUE",                          "On Hold",0, 280000),
-	_p("2325", "LAFEEF -2",                           "On Hold",1, 440000),
-	_p("2326", "AL ABDULKAREEM",                      "On Hold",2, 350000),
-	_p("2327", "AL NARJIS OFFICES (IBRAHIM ALMOUSA)", "On Hold",3, 490000),
-	_p("2328", "RAFED-02",                            "On Hold",0, 380000),
+	_p("2323", "NAWAT", "On Hold", 3, 370000),
+	_p("2324", "NMR MOSQUE", "On Hold", 0, 280000),
+	_p("2325", "LAFEEF -2", "On Hold", 1, 440000),
+	_p("2326", "AL ABDULKAREEM", "On Hold", 2, 350000),
+	_p("2327", "AL NARJIS OFFICES (IBRAHIM ALMOUSA)", "On Hold", 3, 490000),
+	_p("2328", "RAFED-02", "On Hold", 0, 380000),
 	# ── 2024 (2401–2422) ─────────────────────────────────────────────────────
-	_p("2401", "ALTHEYAB TOWER",                      "Review", 1, 1250000, [("Design Development", "Open"), ("Municipality Submission", "Open")]),
-	_p("2402", "THERA MOUNTAIN",                      "Review", 2, 2200000),
-	_p("2403", "AL HAMDAN-1",                         "Review", 3, 430000),
-	_p("2404", "REFAD",                               "Review", 0, 390000),
-	_p("2405", "MAWRITH (TANMIYAT)",                  "Review", 1, 560000),
-	_p("2406", "AL QASSIM TOWER",                     "Review", 2, 1100000),
-	_p("2407", "AL RAKHEES",                          "Review", 3, 380000),
-	_p("2408", "SAMEEM-2",                            "Review", 0, 530000),
-	_p("2409", "TARAKUM OFFICE (MADAM LAMYA)",        "Review", 1, 670000),
-	_p("2410", "ADEL ALMOSA 1",                       "Active", 2, 450000),
-	_p("2411", "AL HADAB-2 (AL NAKHIL)",              "Active", 3, 540000),
-	_p("2412", "TAMIM AL SALEM 2 COMMERCIAL",         "Active", 0, 780000),
-	_p("2413", "AL RUGAIB 2",                         "Active", 1, 400000),
-	_p("2414", "AL QASEEM RESIDENCE",                 "Active", 2, 360000),
-	_p("2415", "MUSAB AL MAGED",                      "Active", 3, 390000),
-	_p("2416", "SBS",                                 "Active", 0, 1650000),
-	_p("2417", "SMSA",                                "Active", 1, 920000),
-	_p("2418", "NAIF ALMOUSA",                        "Active", 2, 410000),
-	_p("2419", "MAKAN MALL",                          "Active", 3, 2400000),
-	_p("2420", "AL SALMAN-THALIA",                    "Active", 0, 370000),
-	_p("2421", "TAMIM AL SALEM 3 RESIDENTIAL",        "Active", 1, 480000),
-	_p("2422", "AL EKRESH",                           "Active", 2, 340000),
+	_p(
+		"2401",
+		"ALTHEYAB TOWER",
+		"Review",
+		1,
+		1250000,
+		[("Design Development", "Open"), ("Municipality Submission", "Open")],
+	),
+	_p("2402", "THERA MOUNTAIN", "Review", 2, 2200000),
+	_p("2403", "AL HAMDAN-1", "Review", 3, 430000),
+	_p("2404", "REFAD", "Review", 0, 390000),
+	_p("2405", "MAWRITH (TANMIYAT)", "Review", 1, 560000),
+	_p("2406", "AL QASSIM TOWER", "Review", 2, 1100000),
+	_p("2407", "AL RAKHEES", "Review", 3, 380000),
+	_p("2408", "SAMEEM-2", "Review", 0, 530000),
+	_p("2409", "TARAKUM OFFICE (MADAM LAMYA)", "Review", 1, 670000),
+	_p("2410", "ADEL ALMOSA 1", "Active", 2, 450000),
+	_p("2411", "AL HADAB-2 (AL NAKHIL)", "Active", 3, 540000),
+	_p("2412", "TAMIM AL SALEM 2 COMMERCIAL", "Active", 0, 780000),
+	_p("2413", "AL RUGAIB 2", "Active", 1, 400000),
+	_p("2414", "AL QASEEM RESIDENCE", "Active", 2, 360000),
+	_p("2415", "MUSAB AL MAGED", "Active", 3, 390000),
+	_p("2416", "SBS", "Active", 0, 1650000),
+	_p("2417", "SMSA", "Active", 1, 920000),
+	_p("2418", "NAIF ALMOUSA", "Active", 2, 410000),
+	_p("2419", "MAKAN MALL", "Active", 3, 2400000),
+	_p("2420", "AL SALMAN-THALIA", "Active", 0, 370000),
+	_p("2421", "TAMIM AL SALEM 3 RESIDENTIAL", "Active", 1, 480000),
+	_p("2422", "AL EKRESH", "Active", 2, 340000),
 	# ── 2025 (2501–2518) ─────────────────────────────────────────────────────
-	_p("2501", "AL NAKHEEL MOSQUE",                   "Active", 3, 310000, [("Concept Design", "Open"), ("Client Presentation", "Open")]),
-	_p("2502", "AL MUHANNA",                          "Active", 0, 380000),
-	_p("2503", "ABDULRAHMAN ALMUSA 2",                "Active", 1, 420000),
-	_p("2504", "WABEEL TOWER (AL TUWAJRI)",           "Active", 2, 1300000),
-	_p("2505", "YAQEEN",                              "Active", 3, 360000),
-	_p("2506", "PRINCE ABDULAZIZ MASHOUR",            "Active", 0, 1900000),
-	_p("2507", "ENMA ALRWABI",                        "Active", 1, 440000),
-	_p("2508", "AHMED ALTHEYAB REST HOUSES",          "Active", 2, 560000),
-	_p("2509", "NMR PAPILON ID",                      "Active", 3, 390000),
-	_p("2510", "SAFA TOWER",                          "Active", 0, 1100000),
-	_p("2511", "RASAF TOWER",                         "Active", 1, 1050000),
-	_p("2512", "AL OBAID TOWER",                      "Planning",2, 980000),
-	_p("2513", "ALMUSA ALTAHLIYA",                    "Planning",3, 430000),
-	_p("2514", "PRINCE MUQIRIN (MIASEM)",             "Planning",0, 1700000),
-	_p("2515", "AL AJLAN 01",                         "Planning",1, 390000),
-	_p("2516", "AL AJLAN 02",                         "Planning",2, 390000),
-	_p("2517", "MITHAQ HOLDING",                      "Planning",3, 850000),
-	_p("2518", "MAJED THEYAB",                        "Planning",0, 420000),
+	_p(
+		"2501",
+		"AL NAKHEEL MOSQUE",
+		"Active",
+		3,
+		310000,
+		[("Concept Design", "Open"), ("Client Presentation", "Open")],
+	),
+	_p("2502", "AL MUHANNA", "Active", 0, 380000),
+	_p("2503", "ABDULRAHMAN ALMUSA 2", "Active", 1, 420000),
+	_p("2504", "WABEEL TOWER (AL TUWAJRI)", "Active", 2, 1300000),
+	_p("2505", "YAQEEN", "Active", 3, 360000),
+	_p("2506", "PRINCE ABDULAZIZ MASHOUR", "Active", 0, 1900000),
+	_p("2507", "ENMA ALRWABI", "Active", 1, 440000),
+	_p("2508", "AHMED ALTHEYAB REST HOUSES", "Active", 2, 560000),
+	_p("2509", "NMR PAPILON ID", "Active", 3, 390000),
+	_p("2510", "SAFA TOWER", "Active", 0, 1100000),
+	_p("2511", "RASAF TOWER", "Active", 1, 1050000),
+	_p("2512", "AL OBAID TOWER", "Planning", 2, 980000),
+	_p("2513", "ALMUSA ALTAHLIYA", "Planning", 3, 430000),
+	_p("2514", "PRINCE MUQIRIN (MIASEM)", "Planning", 0, 1700000),
+	_p("2515", "AL AJLAN 01", "Planning", 1, 390000),
+	_p("2516", "AL AJLAN 02", "Planning", 2, 390000),
+	_p("2517", "MITHAQ HOLDING", "Planning", 3, 850000),
+	_p("2518", "MAJED THEYAB", "Planning", 0, 420000),
 	# ── 2026 (2601–2602) ─────────────────────────────────────────────────────
-	_p("2601", "ABDULAZIZ AL THEYAB",                 "Planning",1, 460000, [("Brief Review", "Open")]),
-	_p("2602", "AL NAJEM",                            "Planning",2, 380000),
+	_p("2601", "ABDULAZIZ AL THEYAB", "Planning", 1, 460000, [("Brief Review", "Open")]),
+	_p("2602", "AL NAJEM", "Planning", 2, 380000),
 	# ── 2026 Concept Design Brief (CDB-01–CDB-13) ────────────────────────────
-	_p("CDB-01", "AL MEREJ",                          "Planning",3, 0),
-	_p("CDB-02", "AL RABIAH COMPLEX",                 "Planning",0, 0),
-	_p("CDB-03", "AL MOKAYMEN MOSQUE",                "Planning",1, 0),
-	_p("CDB-04", "AL JARBAE COMPOUND",                "Planning",2, 0),
-	_p("CDB-05", "ABDULAZIZ THEYAB",                  "Planning",3, 0),
-	_p("CDB-06", "LETHAM-2",                          "Planning",0, 0),
-	_p("CDB-07", "JAREED HOTEL – JEDDAH",        "Planning",1, 0),
-	_p("CDB-08", "MASHEED",                           "Planning",2, 0),
-	_p("CDB-09", "AL HOWIRINY",                       "Planning",3, 0),
-	_p("CDB-10", "AL YASEEN TOWER 1.4",               "Planning",0, 0),
-	_p("CDB-11", "NMR-LABAN",                         "Planning",1, 0),
-	_p("CDB-12", "NMR-KAFD",                          "Planning",2, 0),
-	_p("CDB-13", "MASHAR- HAIL",                      "Planning",3, 0),
+	_p("CDB-01", "AL MEREJ", "Planning", 3, 0),
+	_p("CDB-02", "AL RABIAH COMPLEX", "Planning", 0, 0),
+	_p("CDB-03", "AL MOKAYMEN MOSQUE", "Planning", 1, 0),
+	_p("CDB-04", "AL JARBAE COMPOUND", "Planning", 2, 0),
+	_p("CDB-05", "ABDULAZIZ THEYAB", "Planning", 3, 0),
+	_p("CDB-06", "LETHAM-2", "Planning", 0, 0),
+	_p("CDB-07", "JAREED HOTEL – JEDDAH", "Planning", 1, 0),
+	_p("CDB-08", "MASHEED", "Planning", 2, 0),
+	_p("CDB-09", "AL HOWIRINY", "Planning", 3, 0),
+	_p("CDB-10", "AL YASEEN TOWER 1.4", "Planning", 0, 0),
+	_p("CDB-11", "NMR-LABAN", "Planning", 1, 0),
+	_p("CDB-12", "NMR-KAFD", "Planning", 2, 0),
+	_p("CDB-13", "MASHAR- HAIL", "Planning", 3, 0),
 ]
 
 
@@ -242,6 +287,7 @@ def _ensure_company():
 	company = None
 	try:
 		from erpnext import get_default_company
+
 		company = get_default_company()
 	except Exception:
 		pass
@@ -259,7 +305,8 @@ class PortalDemoSeedRun(Document):
 		"""Run the seed; record exactly what we created."""
 		self.run_at = now_datetime()
 		self.run_by = frappe.session.user
-		self.demo_password_hint = DEMO_PASSWORD
+		demo_password = _new_demo_password()
+		self.demo_password_hint = demo_password
 		self.status = "Active"
 
 		summary = {"users": [], "customers": [], "projects": [], "tasks": [], "files": []}
@@ -311,7 +358,13 @@ class PortalDemoSeedRun(Document):
 		for row in DEMO_USERS:
 			email = row["email"]
 			if frappe.db.exists("User", email):
-				self._record("created_users", "User", email, row["first_name"] + " " + row.get("last_name", ""), skipped=True)
+				self._record(
+					"created_users",
+					"User",
+					email,
+					row["first_name"] + " " + row.get("last_name", ""),
+					skipped=True,
+				)
 				summary["users"].append({"email": email, "status": "skipped"})
 				continue
 			doc = frappe.get_doc(
@@ -328,7 +381,7 @@ class PortalDemoSeedRun(Document):
 			for r in row.get("roles") or ["Projects User"]:
 				doc.append("roles", {"role": r})
 			doc.insert(ignore_permissions=True)
-			update_password(email, DEMO_PASSWORD)
+			update_password(email, self.demo_password_hint)
 			self._record("created_users", "User", email, row["first_name"] + " " + row.get("last_name", ""))
 			summary["users"].append({"email": email, "status": "created"})
 
@@ -358,7 +411,10 @@ class PortalDemoSeedRun(Document):
 		company = _ensure_company()
 		meta = frappe.get_meta("Project")
 
-		for pj in DEMO_PROJECTS:
+		# The docx importer passes its parsed list on the document instead of
+		# reassigning the module global, which raced between concurrent requests and
+		# could leave one admin's imported list installed for every later seed.
+		for pj in self.flags.get("projects_override") or DEMO_PROJECTS:
 			code = pj["code"]
 			existing = frappe.db.get_value("Project", {"portal_project_code": code}, "name")
 			if existing:
@@ -409,9 +465,7 @@ class PortalDemoSeedRun(Document):
 	def _seed_tasks_for(self, project_name, pj, summary, project_pre_existing=False):
 		for subj, tstatus in pj.get("tasks") or []:
 			if frappe.db.exists("Task", {"project": project_name, "subject": subj}):
-				existing = frappe.db.get_value(
-					"Task", {"project": project_name, "subject": subj}, "name"
-				)
+				existing = frappe.db.get_value("Task", {"project": project_name, "subject": subj}, "name")
 				if existing:
 					self._record("created_tasks", "Task", existing, subj, skipped=True)
 					summary["tasks"].append({"name": existing, "subject": subj, "status": "skipped"})
@@ -444,16 +498,66 @@ class PortalDemoSeedRun(Document):
 		# One placeholder file per major category — covers every classification path.
 		# (filename, document_type, folder_label, notes_for_demo)
 		demo_files = [
-			("2201-concept-presentation.pptx",  "",                  "02-CONCEPT/05-PRESENTATION",              "Presentation Files / PowerPoint — classified by .pptx extension"),
-			("2201-floor-plan-ground.dwg",       "",                  "03-BALADIYA/02-BALADIYA PLANS",            "Drawing / Layout Files / AutoCAD — classified by .dwg extension"),
-			("2201-massing-model.skp",           "",                  "02-CONCEPT/02-SKETCH UP",                  "3D Model Files / SketchUp — classified by .skp extension"),
-			("2201-area-feasibility.xlsx",       "",                  "02-CONCEPT/04-FEASIBILITY STUDY/REF",      "Feasibility / Area Calc Files / Excel — classified by .xlsx extension"),
-			("2201-exterior-render-01.jpg",      "",                  "02-CONCEPT/03-PERSPECTIVES",               "Rendering / Image Files / JPEG — classified by .jpg extension"),
-			("2201-design-artwork.ai",           "",                  "02-CONCEPT/05-PRESENTATION",               "Editable Design Source Files / Illustrator — classified by .ai extension"),
-			("2201-concept-package.pdf",         "Presentation",      "02-CONCEPT/05-PRESENTATION",               "Presentation Files / PDF Presentation — Document Type = Presentation"),
-			("2201-drawing-submission.pdf",      "Drawing Sheet",     "03-BALADIYA/02-BALADIYA PLANS",            "Drawing / Layout Files / PDF Drawing — Document Type = Drawing Sheet"),
-			("2201-feasibility-report.pdf",      "Feasibility Report","02-CONCEPT/04-FEASIBILITY STUDY/REF",      "Feasibility / Area Calc Files / PDF — Document Type = Feasibility Report"),
-			("2201-issued-submission.pdf",       "Submission",        "03-BALADIYA/03-AREA STATEMENT",            "Submission Files / PDF Submission — Document Type = Submission"),
+			(
+				"2201-concept-presentation.pptx",
+				"",
+				"02-CONCEPT/05-PRESENTATION",
+				"Presentation Files / PowerPoint — classified by .pptx extension",
+			),
+			(
+				"2201-floor-plan-ground.dwg",
+				"",
+				"03-BALADIYA/02-BALADIYA PLANS",
+				"Drawing / Layout Files / AutoCAD — classified by .dwg extension",
+			),
+			(
+				"2201-massing-model.skp",
+				"",
+				"02-CONCEPT/02-SKETCH UP",
+				"3D Model Files / SketchUp — classified by .skp extension",
+			),
+			(
+				"2201-area-feasibility.xlsx",
+				"",
+				"02-CONCEPT/04-FEASIBILITY STUDY/REF",
+				"Feasibility / Area Calc Files / Excel — classified by .xlsx extension",
+			),
+			(
+				"2201-exterior-render-01.jpg",
+				"",
+				"02-CONCEPT/03-PERSPECTIVES",
+				"Rendering / Image Files / JPEG — classified by .jpg extension",
+			),
+			(
+				"2201-design-artwork.ai",
+				"",
+				"02-CONCEPT/05-PRESENTATION",
+				"Editable Design Source Files / Illustrator — classified by .ai extension",
+			),
+			(
+				"2201-concept-package.pdf",
+				"Presentation",
+				"02-CONCEPT/05-PRESENTATION",
+				"Presentation Files / PDF Presentation — Document Type = Presentation",
+			),
+			(
+				"2201-drawing-submission.pdf",
+				"Drawing Sheet",
+				"03-BALADIYA/02-BALADIYA PLANS",
+				"Drawing / Layout Files / PDF Drawing — Document Type = Drawing Sheet",
+			),
+			(
+				"2201-feasibility-report.pdf",
+				"Feasibility Report",
+				"02-CONCEPT/04-FEASIBILITY STUDY/REF",
+				"Feasibility / Area Calc Files / PDF — Document Type = Feasibility Report",
+			),
+			(
+				"2201-issued-submission.pdf",
+				"Submission",
+				"03-BALADIYA/03-AREA STATEMENT",
+				"Submission Files / PDF Submission — Document Type = Submission",
+			),
 		]
 
 		for fname, doc_type, folder_label, note in demo_files:
@@ -482,22 +586,22 @@ class PortalDemoSeedRun(Document):
 			# Create a Project File record (dsi_erp doctype) if installed.
 			if not has_pf:
 				continue
-			existing_pf = frappe.db.get_value(
-				"Project File", {"file_attachment": fdoc.file_url}, "name"
-			)
+			existing_pf = frappe.db.get_value("Project File", {"file_attachment": fdoc.file_url}, "name")
 			if existing_pf:
 				self._record("created_files", "Project File", existing_pf, fname, skipped=True)
 				continue
 			try:
-				pf = frappe.get_doc({
-					"doctype": "Project File",
-					"project_code": "2201",
-					"project_name": "AL BASSAM",
-					"project_stage": "Concept Design",
-					"document_type": doc_type or "",
-					"file_attachment": fdoc.file_url,
-					"notes": note,
-				})
+				pf = frappe.get_doc(
+					{
+						"doctype": "Project File",
+						"project_code": "2201",
+						"project_name": "AL BASSAM",
+						"project_stage": "Concept Design",
+						"document_type": doc_type or "",
+						"file_attachment": fdoc.file_url,
+						"notes": note,
+					}
+				)
 				pf.insert(ignore_permissions=True)
 				self._record("created_files", "Project File", pf.name, fname)
 				summary["files"].append({"name": pf.name, "file": fname, "status": "project_file_created"})
@@ -506,13 +610,36 @@ class PortalDemoSeedRun(Document):
 
 	# =========================================================== cleanup steps
 
+	def _recorded_names(self, *kinds) -> set:
+		"""Every (doctype, name) this run actually created — `skipped` rows excluded."""
+		out = set()
+		for kind in kinds:
+			for row in self.get(kind) or []:
+				if int(row.skipped or 0):
+					continue
+				if row.record_doctype and row.record_name:
+					out.add((row.record_doctype, row.record_name))
+		return out
+
 	def _cleanup(self, best_effort: bool = False):
 		"""Delete recorded records in reverse-dependency order.
 
 		Order matters: files → tasks → projects → customers → users. Within each
 		category, records flagged `skipped` are left alone (they pre-existed).
 		"""
-		for kind in ("created_files", "created_tasks", "created_projects", "created_customers", "created_users"):
+		# Cascades are restricted to what this run recorded. Deleting a seeded Project
+		# used to wipe EVERY File and Task under it, so any real document a staff member
+		# uploaded into a demo project during a walkthrough was destroyed with it.
+		recorded = self._recorded_names(
+			"created_files", "created_tasks", "created_projects", "created_customers", "created_users"
+		)
+		for kind in (
+			"created_files",
+			"created_tasks",
+			"created_projects",
+			"created_customers",
+			"created_users",
+		):
 			rows = list(self.get(kind) or [])
 			# Delete Project File records before File records to avoid FK constraint issues.
 			rows_sorted = sorted(rows, key=lambda r: 0 if r.record_doctype == "Project File" else 1)
@@ -527,10 +654,10 @@ class PortalDemoSeedRun(Document):
 						continue
 					if dt == "Project":
 						# Cascade attached files + project tasks not already removed.
-						_cascade_project(dn)
+						_cascade_project(dn, recorded)
 					if dt == "User":
 						# Detach this user from any Project users table they were on.
-						_detach_user_from_projects(dn)
+						_detach_user_from_projects(dn, recorded)
 					frappe.delete_doc(dt, dn, force=1, ignore_permissions=True, ignore_missing=True)
 				except Exception:
 					if best_effort:
@@ -546,31 +673,55 @@ class PortalDemoSeedRun(Document):
 			pass
 
 
-def _cascade_project(project_name: str):
-	"""Delete all File rows + Tasks attached to the project, before the project itself."""
+def _cascade_project(project_name: str, recorded: set):
+	"""Delete the Files/Tasks THIS RUN created under the project, before the project.
+
+	Anything not in `recorded` is real data someone added to the project after seeding
+	and is deliberately left in place. If that leaves children behind, the Project
+	delete below fails and is logged — far better than silently destroying it.
+	"""
+	left_behind = []
 	for f in frappe.get_all(
 		"File",
 		filters={"attached_to_doctype": "Project", "attached_to_name": project_name},
 		pluck="name",
 	):
+		if ("File", f) not in recorded:
+			left_behind.append("File/" + f)
+			continue
 		try:
 			frappe.delete_doc("File", f, force=1, ignore_permissions=True, ignore_missing=True)
 		except Exception:
 			frappe.log_error(traceback.format_exc(), f"Portal Demo Seed cascade File/{f}")
 	for t in frappe.get_all("Task", filters={"project": project_name}, pluck="name"):
+		if ("Task", t) not in recorded:
+			left_behind.append("Task/" + t)
+			continue
 		try:
 			frappe.delete_doc("Task", t, force=1, ignore_permissions=True, ignore_missing=True)
 		except Exception:
 			frappe.log_error(traceback.format_exc(), f"Portal Demo Seed cascade Task/{t}")
-	# Drop any DocShare rows pointing at the project (avoids dangling shares).
+
+	if left_behind:
+		frappe.log_error(
+			"Left in place (not created by this seed run):\n" + "\n".join(left_behind),
+			f"Portal Demo Seed cleanup kept real data under {project_name}",
+		)
+
+	# Drop DocShare rows pointing at this seeded project only.
 	try:
 		frappe.db.delete("DocShare", {"share_doctype": "Project", "share_name": project_name})
 	except Exception:
 		pass
 
 
-def _detach_user_from_projects(user_id: str):
-	"""Remove the user from every Project Users child table before deleting the User."""
+def _detach_user_from_projects(user_id: str, recorded: set):
+	"""Remove the user from Project Users rows before deleting the User.
+
+	DocShare removal is limited to shares on projects this run created. Deleting every
+	DocShare belonging to the user, as this previously did, would revoke real access on
+	real projects if the demo account had ever been shared anything else.
+	"""
 	rows = frappe.get_all(
 		"Project User",
 		filters={"user": user_id},
@@ -581,8 +732,13 @@ def _detach_user_from_projects(user_id: str):
 			frappe.db.delete("Project User", {"name": row["name"]})
 		except Exception:
 			pass
-	# Drop DocShares attributed to the user too.
-	try:
-		frappe.db.delete("DocShare", {"user": user_id})
-	except Exception:
-		pass
+
+	seeded_projects = [n for (dt, n) in recorded if dt == "Project"]
+	if seeded_projects:
+		try:
+			frappe.db.delete(
+				"DocShare",
+				{"user": user_id, "share_doctype": "Project", "share_name": ["in", seeded_projects]},
+			)
+		except Exception:
+			pass

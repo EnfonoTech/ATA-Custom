@@ -148,6 +148,9 @@ export async function uploadFile(method, file, extraFields = {}) {
 
 // Public helper so app entry can prime the CSRF cache (e.g. after login).
 export async function ensureCsrfReady() {
-	if (getCsrfToken()) return;
-	await refreshCsrfToken();
+	// Returns the token so callers doing their own fetch() can set the header.
+	// Existing callers that ignore the return value are unaffected.
+	const existing = getCsrfToken();
+	if (existing) return existing;
+	return await refreshCsrfToken();
 }
