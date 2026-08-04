@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import cstr
 
 from portal_app.api import helper
 
@@ -108,7 +109,12 @@ def update_my_profile(full_name=None, mobile_no=None, language=None, time_zone=N
 
 	doc = frappe.get_doc("User", frappe.session.user)
 	if full_name is not None:
-		doc.full_name = full_name
+		# User.full_name is derived by User.validate() from first/middle/last name, so
+		# assigning it directly was silently discarded on save and the rename never took.
+		parts = cstr(full_name).strip().split(None, 1)
+		if parts:
+			doc.first_name = parts[0]
+			doc.last_name = parts[1] if len(parts) > 1 else ""
 	if mobile_no is not None:
 		doc.mobile_no = mobile_no
 	if language is not None:

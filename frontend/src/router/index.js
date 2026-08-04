@@ -26,6 +26,7 @@ const ManageShares  = () => import("@/pages/ManageShares.vue");
 const Profile       = () => import("@/pages/Profile.vue");
 const Admin         = () => import("@/pages/Admin.vue");
 const ComingSoon    = () => import("@/pages/ComingSoon.vue");
+const AIChat        = () => import("@/pages/AIChat.vue");
 
 const routes = [
 	{
@@ -83,8 +84,13 @@ const routes = [
 				meta: { requiresPortalAdmin: true },
 			},
 			{ path: "coming-soon", name: "ComingSoon", component: ComingSoon },
+			// The sidebar has always linked to /ai-chat, but no route was registered and
+			// there is no catch-all, so the most prominent nav item rendered a blank page.
+			{ path: "ai-chat", name: "AIChat", component: AIChat },
 		],
 	},
+	// Anything unrecognised goes somewhere real instead of an empty router view.
+	{ path: "/:pathMatch(.*)*", redirect: "/dashboard" },
 ];
 
 const router = createRouter({
@@ -140,7 +146,14 @@ router.beforeEach(async (to) => {
 			const caps = await call({
 				method: "portal_app.api.portal_admin.get_portal_admin_capabilities",
 			});
-			if (!caps?.can_create_users && !caps?.can_run_demo_seed) {
+			// Must match Admin.vue's own `canShow`, which also allows folder-template
+			// admins. Without can_edit_folder_template here the guard bounced them out
+			// of a page the page itself would have rendered for them.
+			if (
+				!caps?.can_create_users &&
+				!caps?.can_run_demo_seed &&
+				!caps?.can_edit_folder_template
+			) {
 				return "/dashboard";
 			}
 		} catch {

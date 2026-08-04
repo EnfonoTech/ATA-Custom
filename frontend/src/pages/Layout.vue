@@ -1,11 +1,13 @@
 <script setup>
-import { ref, provide, onErrorCaptured, onMounted, onUnmounted } from "vue";
+import { ref, provide, watch, onErrorCaptured, onMounted, onUnmounted } from "vue";
 import Sidebar from "@/component/Sidebar.vue";
 import Header from "@/component/Header.vue";
 import Toaster from "@/component/Toaster.vue";
+import { useRoute } from "vue-router";
 import { call } from "@/api";
 import { setCurrencyLocale } from "@/utils/currency";
 
+const route = useRoute();
 const error = ref(null);
 
 const sidebarCollapsed = ref(typeof localStorage !== "undefined" && localStorage.getItem("portal_sidebar_collapsed") === "1");
@@ -67,6 +69,15 @@ onErrorCaptured((err) => {
 	error.value = err;
 	return false;
 });
+
+// Clear the latched error when the user navigates. Without this a single transient
+// render error left the whole SPA showing the error state until a hard reload.
+watch(
+	() => route.fullPath,
+	() => {
+		error.value = null;
+	}
+);
 
 onMounted(async () => {
 	try {
