@@ -13,7 +13,11 @@ const props = defineProps({
 
 const emit = defineEmits(["uploaded", "openShare"]);
 
-const isPrivateUpload = ref(false);
+// Default to PRIVATE. A public File is served from /files/<name> with no session
+// check at all, so publishing a project document must be a deliberate opt-out.
+// The SPA always sends this field explicitly, so the server-side default alone
+// would never take effect for uploads made through the portal.
+const isPrivateUpload = ref(true);
 const destination = ref("erpnext");
 const externalProvider = ref("frappe_drive");
 const targetFolder = ref("");

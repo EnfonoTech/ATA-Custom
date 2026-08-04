@@ -89,18 +89,22 @@ def get_dashboard_data():
 
 	budget_health = {"under_80": 0, "at_risk": 0, "over_100": 0, "avg_pct": 0.0, "max_pct": 0.0}
 	pct_samples = []
+	# Budget health is derived from estimated_costing, so it must obey the same
+	# value-visibility rule the rest of this function applies — otherwise a user who
+	# is not allowed to see project values still learns them in aggregate.
+	budget_visible = helper.get_value_visible_project_names()
 	for p in frappe.get_all(
 		"Project",
-		filters={"name": ["in", allowed]},
+		filters={"name": ["in", budget_visible]} if budget_visible else {"name": ["in", []]},
 		fields=cost_fields,
 		limit_page_length=200,
 	):
-		budget = float(p.get("estimated_costing") or 0)
+		budget = flt(p.get("estimated_costing"))
 		spent = 0.0
 		if has_purchase:
-			spent += float(p.get("total_purchase_cost") or 0)
+			spent += flt(p.get("total_purchase_cost"))
 		if has_expense:
-			spent += float(p.get("total_expense_claim") or 0)
+			spent += flt(p.get("total_expense_claim"))
 		if budget <= 0:
 			continue
 		ratio = (spent / budget) * 100.0
@@ -183,8 +187,10 @@ def get_dashboard_data():
 		)
 		sales_last_month = flt(
 			frappe.db.sql(
-				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation BETWEEN %s AND %s",
-				value_names + [prev_month_start, prev_month_end],
+				# Half-open interval: `creation` is a DATETIME, so BETWEEN with a date-only
+				# upper bound silently drops everything created after 00:00:00 on that day.
+				f"SELECT SUM(estimated_costing) FROM `tabProject` WHERE name IN ({placeholders}) AND creation >= %s AND creation < %s",
+				value_names + [prev_month_start, month_start],
 			)[0][0]
 			or 0
 		)

@@ -11,36 +11,19 @@ ASSIGNED_FIELD = "portal_assigned_to"
 
 
 def _ensure_fields():
-    """Lazily add the two small custom fields Daily Task needs on the standard
-    Event doctype, instead of shipping a whole new DocType for what's really
-    just a personal title + time + color reminder."""
+    """Verify the Event custom fields exist — never create them here.
+
+    Creating Custom Fields from a whitelisted endpoint means any portal user can
+    trigger DDL on a core doctype by loading a page, and two concurrent first-hits
+    race each other. install.ensure_daily_task_custom_fields() owns them now and
+    runs on install and on every migrate.
+    """
     meta = frappe.get_meta("Event")
-    if not meta.has_field(FLAG_FIELD):
-        frappe.get_doc(
-            {
-                "doctype": "Custom Field",
-                "dt": "Event",
-                "fieldname": FLAG_FIELD,
-                "label": "Is Portal Daily Task",
-                "fieldtype": "Check",
-                "default": "0",
-                "insert_after": "subject",
-                "hidden": 1,
-            }
-        ).insert(ignore_permissions=True)
-    if not meta.has_field(ASSIGNED_FIELD):
-        frappe.get_doc(
-            {
-                "doctype": "Custom Field",
-                "dt": "Event",
-                "fieldname": ASSIGNED_FIELD,
-                "label": "Portal Assigned To",
-                "fieldtype": "Link",
-                "options": "User",
-                "insert_after": FLAG_FIELD,
-            }
-        ).insert(ignore_permissions=True)
-    frappe.clear_cache(doctype="Event")
+    if meta.has_field(FLAG_FIELD) and meta.has_field(ASSIGNED_FIELD):
+        return
+    frappe.throw(
+        _("Daily Task is not set up on this site yet. Run `bench migrate` and try again.")
+    )
 
 
 def _require_portal_user():

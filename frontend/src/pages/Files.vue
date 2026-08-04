@@ -46,7 +46,11 @@ const loading = ref(false);
 const uploadBusy = ref(false);
 const uploadError = ref("");
 const uploadInfo = ref("");
-const isPrivateUpload = ref(false);
+// Default to PRIVATE. A public File is served from /files/<name> with no session
+// check at all, so publishing a project document must be a deliberate opt-out.
+// The SPA always sends this field explicitly, so the server-side default alone
+// would never take effect for uploads made through the portal.
+const isPrivateUpload = ref(true);
 const dragOver = ref(false);
 const fileInput = ref(null);
 const folderInput = ref(null);

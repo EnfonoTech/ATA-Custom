@@ -96,9 +96,11 @@ def mark_notifications_read(names=None):
 				"UPDATE `tabNotification Log` SET `read`=1 WHERE for_user=%s",
 				frappe.session.user,
 			)
-		frappe.db.commit()
 	except Exception:
+		# Previously this swallowed the failure and still returned ok:True, so the UI
+		# cleared the badge while the rows stayed unread.
 		frappe.log_error(frappe.get_traceback(), "Portal: mark notifications read")
+		frappe.throw(_("Could not mark notifications as read. Please try again."))
 	return {"ok": True}
 
 

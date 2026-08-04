@@ -2186,7 +2186,11 @@ def upload_project_file():
 			"provider": external_provider,
 			"uploaded_by": frappe.session.user,
 		}
-		resp = requests.post(webhook, files=files, data=data, timeout=90)
+		# 90s exceeded the usual nginx/gunicorn proxy timeout, so a slow provider got the
+		# worker killed mid-request and the user saw a 504 rather than a real error.
+		# This call still blocks the request thread; moving it to frappe.enqueue would
+		# change the endpoint contract (the SPA reads the provider response inline).
+		resp = requests.post(webhook, files=files, data=data, timeout=30)
 		if resp.status_code >= 400:
 			frappe.throw(
 				_("External upload failed for {0}: HTTP {1}").format(_provider_label(external_provider), resp.status_code)
