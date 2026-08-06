@@ -418,15 +418,22 @@ const handleLogout = async () => {
 	try {
 		const csrfMatch = document.cookie.match(/csrf_token=([^;]+)/);
 		const csrf = csrfMatch ? decodeURIComponent(csrfMatch[1]) : "";
-		await fetch("/api/method/logout", {
-			method: "POST",
-			credentials: "include",
-			headers: {
-				"Content-Type": "application/json",
-				...(csrf ? { "X-Frappe-CSRF-Token": csrf } : {}),
-			},
-			body: "{}",
-		});
+		const controller = new AbortController();
+		const timeout = setTimeout(() => controller.abort(), 5000);
+		try {
+			await fetch("/api/method/logout", {
+				method: "POST",
+				credentials: "include",
+				headers: {
+					"Content-Type": "application/json",
+					...(csrf ? { "X-Frappe-CSRF-Token": csrf } : {}),
+				},
+				body: "{}",
+				signal: controller.signal,
+			});
+		} finally {
+			clearTimeout(timeout);
+		}
 	} catch (err) {
 		console.error("Logout failed:", err);
 	} finally {
