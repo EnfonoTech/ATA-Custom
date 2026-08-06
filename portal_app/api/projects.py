@@ -36,10 +36,64 @@ def _project_fields():
 		"company",
 	]
 	meta = frappe.get_meta("Project")
-	for fn in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_project_server", "portal_upcoming_milestone", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for fn in (
+		"portal_project_code",
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_office",
+		"portal_phase",
+		"portal_project_server",
+		"portal_upcoming_milestone",
+		"portal_milestone_date",
+		"portal_server_t",
+		"portal_server_a",
+		"portal_server_c",
+	):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
+
+
+def _assert_may_set_project_manager(project: str, payload: dict) -> None:
+	"""Only a System Manager may hand the portal-manager role to someone else.
+
+	portal_project_manager is not a label: helper.can_view_project_value() grants a
+	Projects Manager sight of a project's money precisely when this field names them.
+	Leaving it writable by any Projects Manager therefore lets them self-grant that
+	permission on any project in the portfolio.
+	"""
+	if payload.get("portal_project_manager") is None:
+		return
+	if "System Manager" in frappe.get_roles():
+		return
+	current = frappe.db.get_value("Project", project, "portal_project_manager")
+	if current not in (None, "", frappe.session.user):
+		frappe.throw(
+			_("Only a System Manager can reassign the portal project manager."),
+			frappe.PermissionError,
+		)
+
+
+def _manageable_project_names(allowed_names: list) -> list:
+	"""Equivalent to [n for n in allowed_names if can_manage_project(n)], without the
+	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call."""
+	return list(allowed_names) if helper.has_portal_staff_project_access() else []
+
+
+def _safe_order_by(sort_by: str, sort_order: str) -> str:
+	"""Allowlist the sort inputs before they reach the query.
+
+	Frappe's DatabaseQuery.validate_order_by_and_group_by() does reject sub-queries
+	and blacklisted functions, so this is not an injection hole today — but relying on
+	the framework's sanitiser as the only defence is fragile, and an unknown column
+	otherwise surfaces to the user as a 500. Pin both halves to known values instead.
+	"""
+	allowed_fields = set(_project_fields()) | {"modified", "creation"}
+	field = cstr(sort_by).strip() or "modified"
+	if field not in allowed_fields:
+		field = "modified"
+	direction = "asc" if cstr(sort_order).strip().lower() == "asc" else "desc"
+	return field + " " + direction
 
 
 @frappe.whitelist()
@@ -71,9 +125,18 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		filters=filters,
 		or_filters=or_filters,
 		fields=_project_fields(),
-		order_by=f"{sort_by} {sort_order}",
+		order_by=_safe_order_by(sort_by, sort_order),
 		limit_page_length=500,
 	)
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
 	return {"projects": projects}
 
 
@@ -82,6 +145,11 @@ def get_project(name):
 	helper.assert_project_access(name)
 	doc = frappe.get_doc("Project", name)
 	out = doc.as_dict()
+	if not helper.has_portal_staff_project_access():
+		out.pop("estimated_costing", None)
+		out.pop("portal_project_manager", None)
+	elif not helper.can_view_project_value(name):
+		out.pop("estimated_costing", None)
 	return {"project": out}
 
 
@@ -123,16 +191,20 @@ def portfolio_dashboard():
 		as_dict=True,
 	)
 
-	cost = flt(
-		frappe.db.sql(
-			f"""
-			SELECT SUM(estimated_costing) FROM `tabProject`
-			WHERE name IN ({placeholders})
-			""",
-			names,
-		)[0][0]
-		or 0
-	)
+	value_names = helper.get_value_visible_project_names()
+	cost = 0
+	if value_names:
+		value_placeholders = ",".join(["%s"] * len(value_names))
+		cost = flt(
+			frappe.db.sql(
+				f"""
+				SELECT SUM(estimated_costing) FROM `tabProject`
+				WHERE name IN ({value_placeholders})
+				""",
+				value_names,
+			)[0][0]
+			or 0
+		)
 
 	open_tasks = frappe.db.count(
 		"Task",
@@ -173,15 +245,22 @@ def project_dashboard(name):
 	if p.get("customer"):
 		cust_display = frappe.db.get_value("Customer", p.customer, "customer_name") or p.customer
 
-	project_out = p.as_dict()
+	# as_dict() would ship the whole Project row, including the monetary fields that
+	# list_projects/portfolio_dashboard deliberately strip. Apply the same rule here so
+	# a Portal Customer cannot read a project's value just by opening its detail page.
+	project_data = p.as_dict()
+	if not helper.can_view_project_value(name):
+		project_data.pop("estimated_costing", None)
+		project_data.pop("total_costing_amount", None)
+		project_data.pop("total_billable_amount", None)
+		project_data.pop("total_billed_amount", None)
+		project_data.pop("gross_margin", None)
+		project_data.pop("per_gross_margin", None)
 	if not helper.has_portal_staff_project_access():
-		project_out.pop("estimated_costing", None)
-		project_out.pop("portal_project_manager", None)
-	elif not helper.can_view_project_value(name):
-		project_out.pop("estimated_costing", None)
+		project_data.pop("portal_project_manager", None)
 
 	return {
-		"project": project_out,
+		"project": project_data,
 		"tasks": tasks,
 		"kanban_stage": stage,
 		"customer_display_name": cust_display,
@@ -199,7 +278,19 @@ def kanban_board():
 
 	kf = helper.kanban_fieldname()
 	fields = _project_fields()
-	projects = frappe.get_all("Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500)
+	projects = frappe.get_all(
+		"Project", filters={"name": ["in", names]}, fields=fields, limit_page_length=500
+	)
+
+	if not helper.has_portal_staff_project_access():
+		for p in projects:
+			p.pop("estimated_costing", None)
+			p.pop("portal_project_manager", None)
+	else:
+		value_visible = set(helper.get_value_visible_project_names())
+		for p in projects:
+			if p["name"] not in value_visible:
+				p.pop("estimated_costing", None)
 
 	buckets = {}
 	for p in projects:
@@ -237,15 +328,37 @@ def rename_project(project, project_name):
 def update_project(project, **kwargs):
 	"""Update editable project fields from the portal edit modal."""
 	helper.assert_manage_project(project)
+	_assert_may_set_project_manager(project, kwargs)
 	doc = frappe.get_doc("Project", project)
 
-	for k in ("project_name", "status", "expected_start_date", "expected_end_date", "percent_complete", "notes"):
+	for k in (
+		"project_name",
+		"status",
+		"expected_start_date",
+		"expected_end_date",
+		"percent_complete",
+		"notes",
+	):
 		v = kwargs.get(k)
 		if v is not None:
 			doc.set(k, v if v != "" else None)
 
+	if kwargs.get("estimated_costing") is not None and helper.can_view_project_value(project):
+		v = kwargs.get("estimated_costing")
+		doc.set("estimated_costing", v if v != "" else None)
+
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_manager", "portal_kanban_stage", "portal_office", "portal_phase", "portal_server_t", "portal_server_a", "portal_server_c"):
+	for k in (
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_office",
+		"portal_phase",
+		"portal_server_t",
+		"portal_server_a",
+		"portal_server_c",
+		"portal_upcoming_milestone",
+		"portal_milestone_date",
+	):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v is not None:
@@ -267,7 +380,14 @@ def update_project(project, **kwargs):
 
 @frappe.whitelist()
 def get_portal_users():
-	"""Return enabled non-guest users for Lead Architect dropdown."""
+	"""Return enabled non-guest users for Lead Architect dropdown.
+
+	This is a full user directory (login email + name), so it is staff-only. Every
+	caller already tolerates an empty list, so non-staff get [] instead of an error.
+	"""
+	helper.assert_portal_user()
+	if not helper.has_portal_staff_project_access():
+		return []
 	users = frappe.get_all(
 		"User",
 		filters={"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]},
@@ -296,6 +416,8 @@ def get_portal_folder_template():
 def save_portal_folder_template(rows=None):
 	"""Replace folder template rows (company-wide). Empty list falls back to site config / built-in default."""
 	helper.assert_can_edit_portal_folder_template()
+	# files._folder_template() memoises on frappe.local for the duration of the request.
+	frappe.local._portal_folder_template = None
 	if not frappe.db.exists("DocType", "Portal Project Settings"):
 		frappe.throw(_("Portal Project Settings is not installed on this site."))
 
@@ -450,7 +572,7 @@ def get_capabilities():
 			can_create = True
 
 	allowed_names = helper.get_allowed_project_names()
-	manageable = [name for name in allowed_names if helper.can_manage_project(name)]
+	manageable = _manageable_project_names(allowed_names)
 	# Projects where this user is explicitly listed in the Project Users table.
 	# Used by the Projects page filter and the Shared-with-me page (so a team
 	# member sees the project as part of "what I can access").
@@ -483,6 +605,10 @@ def get_capabilities():
 		if not effective_customer_portal
 		else False,
 		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
+		# System Manager / Projects Manager only — gates management-level views (Dashboard,
+		# Org Chart, Teams) and management-level fields (estimated cost, project manager)
+		# away from regular "Projects User" team members.
+		"is_manager": staff_project_access,
 		"portal_user": frappe.session.user,
 	}
 
@@ -512,7 +638,13 @@ def create_project(project_name, company=None, **kwargs):
 			doc.set(k, v)
 
 	meta = frappe.get_meta("Project")
-	for k in ("portal_project_code", "portal_project_manager", "portal_kanban_stage", "portal_phase", "portal_office"):
+	for k in (
+		"portal_project_code",
+		"portal_project_manager",
+		"portal_kanban_stage",
+		"portal_phase",
+		"portal_office",
+	):
 		if meta.has_field(k):
 			v = kwargs.get(k)
 			if v not in (None, ""):
@@ -761,6 +893,19 @@ def _assert_user_eligible_for_customer_link(user, customer):
 			),
 			frappe.ValidationError,
 		)
+	# A customer portal contact must be an external party. Linking an internal user
+	# would strip their staff scoping and pin them to one customer's portfolio, and
+	# linking Administrator would lock the superuser out of the portal entirely.
+	if user in ("Administrator", "Guest"):
+		frappe.throw(_("This account cannot be linked as a customer contact."), frappe.PermissionError)
+	if helper.has_portal_staff_project_access(user) or frappe.db.exists("Project User", {"user": user}):
+		frappe.throw(
+			_("This is an internal user and cannot be linked as a customer portal contact:")
+			+ " "
+			+ cstr(user),
+			frappe.PermissionError,
+		)
+
 	existing = frappe.db.get_value("User", user, "portal_linked_customer")
 	if existing and existing != customer:
 		frappe.throw(
@@ -851,6 +996,9 @@ def sync_customer_portal_users(project, users):
 	)
 
 	for u in new_set - old_set:
+		# Mutating an existing account's roles is a User write, not a project action.
+		if not frappe.has_permission("User", "write", user=frappe.session.user):
+			frappe.throw(_("You are not allowed to modify user accounts."), frappe.PermissionError)
 		_assert_user_eligible_for_customer_link(u, cust)
 		_attach_portal_customer_user(u, cust)
 
@@ -861,18 +1009,21 @@ def sync_customer_portal_users(project, users):
 
 
 @frappe.whitelist()
-def create_customer_portal_user_from_project(project, email, full_name, password):
+def create_customer_portal_user_from_project(project, email, full_name, password=None):
 	helper.assert_manage_project(project)
+	# Managing a project is not authority to mint a login on the ERPNext site.
+	if not frappe.has_permission("User", "create", user=frappe.session.user):
+		frappe.throw(_("You are not allowed to create user accounts."), frappe.PermissionError)
 	helper.ensure_portal_customer_role()
 	helper.ensure_user_portal_linked_customer_field()
 	cust = _project_customer_required(project)
 
-	email = (email or "").strip().lower()
-	full_name = (full_name or "").strip()
-	password = password or ""
+	email = cstr(email).strip().lower()
+	full_name = cstr(full_name).strip()
+	password = cstr(password)
 
-	if not email or not full_name or len(password) < 6:
-		frappe.throw(_("Valid email, full name, and password (min 6 characters) are required"))
+	if not email or not full_name:
+		frappe.throw(_("Valid email and full name are required"))
 
 	if frappe.db.exists("User", email):
 		_assert_user_eligible_for_customer_link(email, cust)
@@ -889,20 +1040,22 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 		"first_name": first_name,
 		"last_name": last_name,
 		"enabled": 1,
-		"send_welcome_email": 0,
-		"user_type": "System User",
+		# No password supplied -> send the standard welcome/set-password email instead
+		# of having a manager choose someone else's credential.
+		"send_welcome_email": 0 if password else 1,
+		"user_type": "Website User",
 	}
 	if frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = cust
+	if password:
+		# new_password runs Frappe's own password policy and strength scoring on insert.
+		# frappe.utils.password.update_password(), used previously, bypasses both.
+		user_dict["new_password"] = password
 
 	doc = frappe.get_doc(user_dict)
 	doc.append("roles", {"role": helper.PORTAL_CUSTOMER_ROLE})
 	doc.flags.ignore_permissions = True
 	doc.insert()
-
-	from frappe.utils.password import update_password
-
-	update_password(email, password)
 
 	return {"name": doc.name, "email": email, "created": True, "attached": True}
 
@@ -936,6 +1089,47 @@ def search_portal_users(txt=""):
 		]
 
 	return frappe.get_all("User", **kwargs)
+
+
+@frappe.whitelist()
+def search_projects(query=""):
+	"""Project combobox for the Tasks quick-create form — scoped to projects the
+	caller can create tasks in (same rule create_task enforces)."""
+	allowed_names = helper.get_allowed_project_names()
+	manageable = _manageable_project_names(allowed_names)
+	if not manageable:
+		return []
+
+	query = (query or "").strip()
+	safe = cstr(query).replace("%", "").replace("_", "").strip()[:100]
+	filters = {"name": ["in", manageable]}
+	or_filters = None
+	if safe:
+		or_filters = [
+			["project_name", "like", f"%{safe}%"],
+			["name", "like", f"%{safe}%"],
+		]
+		if frappe.get_meta("Project").has_field("portal_project_code"):
+			or_filters.append(["portal_project_code", "like", f"%{safe}%"])
+
+	fields = ["name", "project_name"]
+	if frappe.get_meta("Project").has_field("portal_project_code"):
+		fields.append("portal_project_code")
+
+	return frappe.get_all(
+		"Project",
+		filters=filters,
+		or_filters=or_filters,
+		fields=fields,
+		order_by="project_name asc",
+		limit_page_length=25,
+	)
+
+
+@frappe.whitelist()
+def search_assignable_users(query=""):
+	"""Assignee combobox for the Tasks quick-create form."""
+	return search_portal_users(query)
 
 
 def _task_is_assigned_to_user(task_name: str, user: str) -> bool:
@@ -1049,7 +1243,9 @@ def update_task(task, status=None, priority=None, progress=None, exp_start_date=
 
 	can_edit = helper.can_manage_project(project) or _task_is_assigned_to_user(task, frappe.session.user)
 	if not can_edit:
-		frappe.throw(_("Only project managers or assigned users can update this task."), frappe.PermissionError)
+		frappe.throw(
+			_("Only project managers or assigned users can update this task."), frappe.PermissionError
+		)
 
 	doc = frappe.get_doc("Task", task)
 	if status not in (None, ""):
