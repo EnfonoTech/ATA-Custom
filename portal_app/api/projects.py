@@ -364,7 +364,17 @@ def update_project(project, **kwargs):
 			if v is not None:
 				doc.set(k, v if v != "" else None)
 
+	requested_status = kwargs.get("status")
 	doc.save(ignore_permissions=True)
+
+	# ERPNext core's Project.validate() -> update_percent_complete() unconditionally
+	# resets status to "Open" (or "Completed" at 100%) unless it's "Cancelled" —
+	# clobbering any other status (e.g. "On Hold") we just set. Re-apply the
+	# requested value directly, bypassing controller hooks, so it actually sticks.
+	if requested_status and requested_status != "Cancelled" and doc.status != requested_status:
+		frappe.db.set_value("Project", doc.name, "status", requested_status, update_modified=False)
+		doc.status = requested_status
+
 	return {"name": doc.name, "project_name": doc.project_name}
 
 
@@ -556,13 +566,10 @@ def get_capabilities():
 	roles = set(frappe.get_roles())
 	can_create = bool(settings.get("allow_any_portal_user_to_create_project"))
 	if not can_create:
+		# Deliberately do NOT fall back to ERPNext's core "Project create" permission —
+		# see helper.assert_can_create_project for why. Only these two paths may create.
 		if "Projects Manager" in roles or "System Manager" in roles:
 			can_create = True
-		else:
-			try:
-				can_create = bool(frappe.has_permission("Project", "create", user=frappe.session.user))
-			except Exception:
-				can_create = False
 
 	allowed_names = helper.get_allowed_project_names()
 	manageable = _manageable_project_names(allowed_names)
@@ -654,8 +661,6 @@ def create_project(project_name, company=None, **kwargs):
 
 	doc.insert(ignore_permissions=True)
 	doc.append("users", {"user": frappe.session.user})
-	if meta.has_field("portal_project_manager") and not doc.get("portal_project_manager"):
-		doc.portal_project_manager = frappe.session.user
 	doc.save(ignore_permissions=True)
 	try:
 		from portal_app.api.files import ensure_project_folders

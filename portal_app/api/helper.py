@@ -222,11 +222,10 @@ def assert_can_create_project() -> None:
 	settings = get_portal_settings_dict()
 	if settings.get("allow_any_portal_user_to_create_project"):
 		return
-	try:
-		if frappe.has_permission("Project", "create", user=frappe.session.user):
-			return
-	except Exception:
-		pass
+	# Deliberately do NOT fall back to ERPNext's core "Project create" permission here —
+	# the stock "Projects User" role grants that by default, which would silently let a
+	# Projects User create projects from the portal even though the spec says they can't.
+	# Only System Manager / Projects Manager (above) or the explicit opt-in setting may.
 	frappe.throw(_("You cannot create projects from the portal."), frappe.PermissionError)
 
 
