@@ -2295,7 +2295,7 @@ async function deleteProjectFile(f) {
 							<td class="px-4 py-3">
 								<a
 									v-if="f.file_url"
-									:href="f.file_url"
+									:href="`/api/method/portal_app.api.files.download_project_file?file_name=${encodeURIComponent(f.name)}`"
 									target="_blank"
 									rel="noopener"
 									class="text-[color:var(--portal-accent)] hover:underline"

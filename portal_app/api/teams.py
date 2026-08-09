@@ -226,7 +226,16 @@ def add_team_member(team, user=None, user_group=None):
 			frappe.throw(_("User not found"))
 		users = [user]
 
+	import frappe.share as _share
 	from frappe.desk.form.assign_to import add as assign_add
+
+	# assign_add() auto-shares the doc with an assignee who lacks read access to it,
+	# and that auto-share checks the CALLING user's own "share" DocPerm on Department
+	# — ignore_permissions=True does not bypass this separate, lower-level RBAC check.
+	# Pre-share it via frappe.share's own ignore_share_permission flag instead (same
+	# fix already applied to _sync_project_assignment for the equivalent Project case).
+	for u in users:
+		_share.add_docshare("Department", team, user=u, read=1, flags={"ignore_share_permission": True})
 
 	assign_add({"doctype": "Department", "name": team, "assign_to": users}, ignore_permissions=True)
 	return {"team": team, "users": users}

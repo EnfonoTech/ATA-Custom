@@ -145,6 +145,14 @@ after_migrate = "portal_app.install.after_migrate"
 # 	"Event": "frappe.desk.doctype.event.event.has_permission",
 # }
 
+has_permission = {
+	# Closes a gap where a portal-role holder (Projects User / Portal Customer) could
+	# read any project's private files via the raw /private/files/... URL, bypassing
+	# this app's own project scoping entirely (see helper.project_has_permission —
+	# registered on Project, not File; see that function's docstring for why).
+	"Project": "portal_app.api.helper.project_has_permission",
+}
+
 # DocType Class
 # ---------------
 # Override standard doctype classes

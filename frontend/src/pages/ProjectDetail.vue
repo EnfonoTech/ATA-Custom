@@ -991,7 +991,7 @@ async function submitNewCustomer() {
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
 								<a
 									v-if="f.file_url"
-									:href="f.file_url"
+									:href="`/api/method/portal_app.api.files.download_project_file?file_name=${encodeURIComponent(f.name)}`"
 									target="_blank"
 									rel="noopener"
 									class="text-[color:var(--portal-accent)] hover:underline"

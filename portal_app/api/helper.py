@@ -117,12 +117,19 @@ def assert_project_access(project_name: str) -> None:
 		frappe.throw(_("No access to this project"), frappe.PermissionError)
 
 
-def can_view_project_value(project_name: str, user=None) -> bool:
+def can_view_project_value(project_name: str, user=None, effective_portal_project_manager=None) -> bool:
 	"""Whether `user` may see this project's monetary value (Dashboard "Value" column).
 
 	System Manager gets full portfolio oversight — every project's value. A
 	Projects Manager only sees the value of the specific project(s) they are
-	assigned to as Portal Project Manager, not the whole portfolio."""
+	assigned to as Portal Project Manager, not the whole portfolio.
+
+	`effective_portal_project_manager` lets a caller pass the manager value a
+	save is ABOUT to write, instead of the stale pre-save value from the DB —
+	needed so that claiming an unassigned project and pricing it in the same
+	update_project() call is judged against who the user is about to become,
+	not who they were a moment before the save.
+	"""
 	user = user or frappe.session.user
 	if user == "Guest":
 		return False
@@ -130,7 +137,12 @@ def can_view_project_value(project_name: str, user=None) -> bool:
 	if "System Manager" in roles:
 		return True
 	if "Projects Manager" in roles:
-		return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
+		manager = (
+			effective_portal_project_manager
+			if effective_portal_project_manager is not None
+			else frappe.db.get_value("Project", project_name, "portal_project_manager")
+		)
+		return manager == user
 	return False
 
 
@@ -222,11 +234,10 @@ def assert_can_create_project() -> None:
 	settings = get_portal_settings_dict()
 	if settings.get("allow_any_portal_user_to_create_project"):
 		return
-	try:
-		if frappe.has_permission("Project", "create", user=frappe.session.user):
-			return
-	except Exception:
-		pass
+	# Deliberately do NOT fall back to ERPNext's core "Project create" permission —
+	# the stock "Projects User" role grants that by default, which would silently let a
+	# Projects User create projects from the portal even though the spec says they can't.
+	# Only System Manager / Projects Manager (above) or the explicit opt-in setting may.
 	frappe.throw(_("You cannot create projects from the portal."), frappe.PermissionError)
 
 
@@ -299,3 +310,45 @@ def get_portal_settings_dict():
 		"file_access_note": doc.get("file_access_note") or "",
 		"client_portal_intro": doc.get("client_portal_intro") or "",
 	}
+
+
+def project_has_permission(doc, ptype=None, user=None, debug=False):
+	"""Controller permission hook for the Project doctype (registered in hooks.py).
+
+	Registering this on "File" instead does NOT work: File.is_downloadable() calls the
+	file.py module's has_permission() function by direct reference, not through the
+	hook-dispatching frappe.has_permission(), so a File-scoped app hook is silently
+	never consulted for that path. Project's own `ref_doc.has_permission("read")` call
+	(used below by File's fallback), however, goes through the full dispatcher — so the
+	hook belongs on Project.
+
+	Frappe core's own File.has_permission() falls back to the attached document's
+	permission when a file has no more specific grant — so for a Project-attached
+	file, it delegates to Project's permission. ERPNext's stock role permissions give
+	"Projects User" blanket read access to every Project, with no per-project scoping.
+	That means any portal-role holder who knows (or guesses) a private file's raw
+	/private/files/<...> URL can read it directly, completely bypassing this app's own
+	project scoping (get_allowed_project_names / assert_project_access) — even after
+	being removed from a project's team, or for a project they were never on.
+
+	A controller has_permission hook can only DENY, never grant, permission beyond what
+	the standard role-based check already allows (see
+	frappe.permissions.has_controller_permissions), so this only tightens things. It
+	only applies to users who actually hold a portal-relevant role (Projects User or
+	Portal Customer) — System Manager / Projects Manager already get every project via
+	get_allowed_project_names() and are never restricted here, and any other Desk user
+	with no portal role at all (HR, Accounts, etc., who may reference Project links for
+	unrelated reasons) is left completely untouched.
+	"""
+	if ptype not in ("read", "select"):
+		return None
+	user = user or frappe.session.user
+	if user in ("Administrator", "Guest"):
+		return None
+	if has_portal_staff_project_access(user):
+		return None
+	if "Projects User" not in frappe.get_roles(user) and not user_is_customer_portal_user(user):
+		return None
+	if doc.name in get_allowed_project_names(user):
+		return None
+	return False
