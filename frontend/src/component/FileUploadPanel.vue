@@ -505,12 +505,12 @@ function onPendingDateChange(row) {
 
 function onPendingCategoryChange(row) {
 	if (!row.nameEdited) regenerateAutoName(row);
-	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
+	if (!row.crossRouteEdited) row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 }
 
 function onPendingClassificationChange(row) {
 	row.fileSubCategory = "";
-	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
+	if (!row.crossRouteEdited) row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	const suggested = suggestFolderForCategory(row.fileClassification);
 	if (suggested && suggested !== row.category) row.category = suggested;
 	if (!row.nameEdited) regenerateAutoName(row);
@@ -531,7 +531,7 @@ function onPendingDocTypeChange(row) {
 		const suggested = suggestFolderForCategory(classHint);
 		if (suggested) row.category = suggested;
 	}
-	row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
+	if (!row.crossRouteEdited) row.crossRouteTargets = crossRoutesFor(row.category, row.fileClassification, row.fileSubCategory);
 	if (!row.nameEdited) regenerateAutoName(row);
 }
 
@@ -1620,6 +1620,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 												if (v && !(row.crossRouteTargets || []).includes(v)) {
 													if (!row.crossRouteTargets) row.crossRouteTargets = [];
 													row.crossRouteTargets.push(v);
+													row.crossRouteEdited = true;
 												}
 												ev.target.value = '';
 											}"
@@ -1650,7 +1651,7 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 												class="ml-0.5 rounded-full p-0.5 text-emerald-500 transition hover:bg-red-100 hover:text-red-600"
 												:disabled="uploadBusy"
 												title="Remove this auto-route"
-												@click="row.crossRouteTargets.splice(ci, 1)"
+												@click="row.crossRouteTargets.splice(ci, 1); row.crossRouteEdited = true"
 											>
 												<FeatherIcon name="x" class="h-3 w-3" />
 											</button>

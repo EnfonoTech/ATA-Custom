@@ -751,8 +751,6 @@ def create_project(project_name, company=None, **kwargs):
 
 	doc.insert(ignore_permissions=True)
 	doc.append("users", {"user": frappe.session.user})
-	if meta.has_field("portal_project_manager") and not doc.get("portal_project_manager"):
-		doc.portal_project_manager = frappe.session.user
 	doc.save(ignore_permissions=True)
 	try:
 		from portal_app.api.files import ensure_project_folders

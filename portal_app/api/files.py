@@ -1,3 +1,5 @@
+import re
+
 import frappe
 from frappe import _
 from frappe.utils import cint
@@ -195,6 +197,12 @@ def _folder_template_uncached() -> list[str]:
 	return list(PROJ_FOLD_DEFAULT)
 
 
+def _normalize_folder_label(label: str) -> str:
+	"""Collapse spacing variants around hyphens (e.g. "06 - X" vs "06-X") so lookalike
+	folder names resolve to the same folder instead of spawning a near-duplicate."""
+	return re.sub(r"\s*-\s*", "-", cstr(label).strip()).lower()
+
+
 def _ensure_folder(parent: str, file_name: str) -> str:
 	file_name = cstr(file_name).strip().strip("/")
 	if not file_name:
@@ -202,6 +210,15 @@ def _ensure_folder(parent: str, file_name: str) -> str:
 	existing = frappe.db.get_value("File", {"folder": parent, "is_folder": 1, "file_name": file_name}, "name")
 	if existing:
 		return existing
+	# Fall back to a normalized match so "06 - CLIENT SUBMITTAL" reuses an existing
+	# "06-CLIENT SUBMITTAL" instead of creating a lookalike sibling folder.
+	target_norm = _normalize_folder_label(file_name)
+	siblings = frappe.get_all(
+		"File", filters={"folder": parent, "is_folder": 1}, fields=["name", "file_name"]
+	)
+	for sib in siblings:
+		if _normalize_folder_label(sib.file_name) == target_norm:
+			return sib.name
 	doc = frappe.get_doc(
 		{
 			"doctype": "File",
@@ -225,9 +242,38 @@ def _ensure_folder_path(parent: str, rel_path: str) -> str:
 
 
 def ensure_project_folders(project: str) -> dict:
-	"""Create and return project root + subfolders in File manager tree."""
+	"""Create and return project root + subfolders in File manager tree.
+
+	Only walks the template to create missing folders the *first* time (a fresh
+	project with no subfolders yet). Once any subfolder exists, report the real
+	current tree instead — otherwise a manager renaming a template folder (e.g.
+	"03-BALADIYA" -> "03-BALADIYA RENAMED") would get it silently re-created
+	under its old name on every subsequent page load."""
 	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
 	project_root = _ensure_folder(attachments_root, project)
+
+	existing = frappe.get_all(
+		"File",
+		filters={"folder": ["like", f"{project_root}%"], "is_folder": 1},
+		fields=["name", "folder"],
+	)
+	if existing:
+		by_name = {f.name: f for f in existing}
+
+		def _label(fname):
+			parts = []
+			cur = fname
+			while cur and cur != project_root:
+				f = by_name.get(cur)
+				if not f:
+					break
+				parts.append(f.name.rsplit("/", 1)[-1])
+				cur = f.folder
+			return "/".join(reversed(parts))
+
+		subfolders = [{"name": f.name, "label": _label(f.name)} for f in existing]
+		return {"project_root": project_root, "subfolders": subfolders}
+
 	subfolders = []
 	# Maps a template-relative path already processed in this call to the REAL
 	# File name it resolved to, so a later template row sharing that prefix can
@@ -2294,9 +2340,9 @@ def upload_project_file():
 			payload = {"raw": resp.text}
 		return payload
 
-	external_result = None
-	if destination in {"external", "both"}:
-		external_result = _send_external()
+	# NOTE: the external send is deliberately triggered AFTER the ERPNext save below (not
+	# here) so that a slow/failing external provider on a "both" upload can never prevent
+	# the ERPNext copy from being saved — see the try/except right before the return.
 
 	# Optional portal file type tag (e.g. "AutoCAD", "PDF Document"). The frontend picks
 	# this from the Portal File Type DocType list; we validate it matches an existing row
@@ -2416,6 +2462,20 @@ def upload_project_file():
 				# Fail soft — classification record is supplementary; upload must succeed.
 				frappe.log_error(frappe.get_traceback(), "Project File classification failed")
 
+	external_result = None
+	external_error = None
+	if destination in {"external", "both"}:
+		try:
+			external_result = _send_external()
+		except Exception as e:
+			if destination == "both" and doc:
+				# The ERPNext copy is already saved — don't let a slow/failing external
+				# provider undo it. Report the failure instead of raising.
+				frappe.log_error(frappe.get_traceback(), "External upload failed for {0}".format(project))
+				external_error = str(e)
+			else:
+				raise
+
 	return {
 		"name": doc.name if doc else None,
 		"file_url": doc.file_url if doc else None,
@@ -2426,6 +2486,7 @@ def upload_project_file():
 		"destination": destination,
 		"external_provider": external_provider or None,
 		"external_result": external_result,
+		"external_error": external_error,
 	}
 
 
@@ -2447,6 +2508,8 @@ def prepare_folder_upload():
 		frappe.throw(_("target_folder is required"))
 	if not folder_name:
 		frappe.throw(_("folder_name is required"))
+	if "/" in folder_name or "\\" in folder_name or ".." in folder_name:
+		frappe.throw(_("Invalid folder name. Use a single name without slashes."))
 	helper.assert_customer_portal_can_upload(project)
 
 	folder_ctx = ensure_project_folders(project)
