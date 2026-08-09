@@ -32,6 +32,12 @@ def get_dashboard_data():
 	"""Portfolio overview + portal file settings (FR-PM-002)."""
 	if frappe.session.user == "Guest":
 		frappe.throw("Not allowed", frappe.PermissionError)
+	# The Dashboard is a manager-only page (Sidebar.vue's managerOnlyPaths) — hidden from
+	# both Portal Customers and regular Projects User staff. The menu hid it, but calling
+	# this function directly was never gated, and it also ships portal_project_manager
+	# (an internal-staff field) unconditionally in user_projects_preview.
+	if not helper.has_portal_staff_project_access():
+		frappe.throw("Not allowed", frappe.PermissionError)
 
 	allowed = helper.get_allowed_project_names()
 	if not allowed:

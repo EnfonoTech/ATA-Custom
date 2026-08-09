@@ -81,10 +81,16 @@ const groups = computed(() => {
 	];
 	if (!isCust && (portalCapabilities.value?.manageable_project_names || []).length) {
 		filesItems.push({ name: "Shares", path: "/manage-shares", icon: "shield" });
+		// Routing rules only needs manage-rights on at least one project (same
+		// gate as Shares, and the same gate the /folder-rules route guard and
+		// its save/delete APIs actually enforce) — it was previously bundled
+		// with File tools' Auditor-only check, which hid it from every
+		// Projects Manager who wasn't also made an Auditor, even though they
+		// already had full permission to use it.
+		filesItems.push({ name: "Routing rules", path: "/folder-rules", icon: "git-merge" });
 	}
 	if (!isCust && portalCapabilities.value?.can_edit_portal_folder_template) {
-		filesItems.push({ name: "File tools",    path: "/file-tools",   icon: "sliders"   });
-		filesItems.push({ name: "Routing rules", path: "/folder-rules", icon: "git-merge" });
+		filesItems.push({ name: "File tools", path: "/file-tools", icon: "sliders" });
 	}
 	const files = { title: "Files", items: filesItems };
 

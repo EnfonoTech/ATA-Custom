@@ -245,16 +245,18 @@ def project_dashboard(name):
 	if p.get("customer"):
 		cust_display = frappe.db.get_value("Customer", p.customer, "customer_name") or p.customer
 
-	# as_dict() would ship the whole Project row, including the monetary fields that
-	# list_projects/portfolio_dashboard deliberately strip. Apply the same rule here so
-	# a Portal Customer cannot read a project's value just by opening its detail page.
+	# as_dict() ships the whole Project row — unlike list_projects/kanban_board, which
+	# only ever SELECT an explicit safe allow-list of fields (_project_fields()), this
+	# loads every field including all of ERPNext's built-in costing/billing amounts.
+	# Strip every Currency field on the doctype rather than naming them one by one —
+	# a hardcoded list silently misses new fields (this one previously missed
+	# total_purchase_cost, total_sales_amount and total_consumed_material_cost).
 	project_data = p.as_dict()
 	if not helper.can_view_project_value(name):
-		project_data.pop("estimated_costing", None)
-		project_data.pop("total_costing_amount", None)
-		project_data.pop("total_billable_amount", None)
-		project_data.pop("total_billed_amount", None)
-		project_data.pop("gross_margin", None)
+		for df in frappe.get_meta("Project").fields:
+			if df.fieldtype == "Currency":
+				project_data.pop(df.fieldname, None)
+		# Not a Currency field, but a derived percentage of cost — still reveals margin.
 		project_data.pop("per_gross_margin", None)
 	if not helper.has_portal_staff_project_access():
 		project_data.pop("portal_project_manager", None)
@@ -343,10 +345,6 @@ def update_project(project, **kwargs):
 		if v is not None:
 			doc.set(k, v if v != "" else None)
 
-	if kwargs.get("estimated_costing") is not None and helper.can_view_project_value(project):
-		v = kwargs.get("estimated_costing")
-		doc.set("estimated_costing", v if v != "" else None)
-
 	meta = frappe.get_meta("Project")
 	for k in (
 		"portal_project_manager",
@@ -363,6 +361,24 @@ def update_project(project, **kwargs):
 			v = kwargs.get(k)
 			if v is not None:
 				doc.set(k, v if v != "" else None)
+
+	# Apply the manager field (loop above) before this check, and pass its
+	# resulting in-memory value through — so claiming an unassigned project and
+	# pricing it in the same save is judged against who the user is about to
+	# become, not the stale pre-save manager read from the database.
+	if kwargs.get("estimated_costing") is not None and helper.can_view_project_value(
+		project, effective_portal_project_manager=doc.portal_project_manager
+	):
+		v = kwargs.get("estimated_costing")
+		doc.set("estimated_costing", v if v != "" else None)
+
+	# The Gantt milestone modal already blocks this client-side, but that's
+	# bypassable via a direct API call — enforce it here too, so a milestone
+	# label can never be saved without the date it's meant to sit on.
+	if meta.has_field("portal_upcoming_milestone") and doc.get("portal_upcoming_milestone") and not doc.get(
+		"portal_milestone_date"
+	):
+		frappe.throw(_("Pick the date this milestone falls on."))
 
 	requested_status = kwargs.get("status")
 	doc.save(ignore_permissions=True)
@@ -400,16 +416,35 @@ def get_portal_users():
 
 @frappe.whitelist()
 def get_portal_folder_template():
-	"""Read Portal Project Settings.folder_template (ordered subfolder names for new projects)."""
+	"""Read Portal Project Settings.folder_template (ordered subfolder names for new projects).
+
+	Returns the EFFECTIVE template — falling back to site_config, then the
+	built-in default list — not just the raw (possibly empty) DB rows. An
+	empty Portal Project Settings table doesn't mean "no template"; it means
+	"use the built-in default", and every new project silently gets that
+	full default tree regardless. Returning an empty list here made the
+	editor show nothing while a complete standard was actually in effect,
+	so an admin who saw "empty" and added one row would, on save, replace
+	that entire real default with just their one new row for every future
+	project — a serious, easy-to-trigger trap. `is_default` tells the
+	frontend whether what's shown is this fallback rather than a real
+	saved customization, so it can say so instead of implying it's empty.
+	"""
+	from portal_app.api.files import _folder_template
+
 	helper.assert_can_edit_portal_folder_template()
-	if not frappe.db.exists("DocType", "Portal Project Settings"):
-		return {"rows": []}
-	doc = frappe.get_single("Portal Project Settings")
-	rows = doc.get("folder_template") or []
-	out = []
-	for row in sorted(rows, key=lambda r: int(getattr(r, "idx", 0) or 0)):
-		out.append({"folder_name": cstr(getattr(row, "folder_name", None) or "").strip()})
-	return {"rows": [r for r in out if r["folder_name"]]}
+	stored_rows: list[str] = []
+	if frappe.db.exists("DocType", "Portal Project Settings"):
+		doc = frappe.get_single("Portal Project Settings")
+		for row in sorted(doc.get("folder_template") or [], key=lambda r: int(getattr(r, "idx", 0) or 0)):
+			v = cstr(getattr(row, "folder_name", None) or "").strip()
+			if v:
+				stored_rows.append(v)
+
+	if stored_rows:
+		return {"rows": [{"folder_name": v} for v in stored_rows], "is_default": False}
+
+	return {"rows": [{"folder_name": v} for v in _folder_template()], "is_default": True}
 
 
 @frappe.whitelist()
@@ -461,14 +496,39 @@ def save_portal_folder_template(rows=None):
 	return {"ok": True, "rows": [{"folder_name": n} for n in uniq]}
 
 
-def _collect_template_paths_from_zip_content(content: bytes) -> list[str]:
-	"""Extract folder tree from a ZIP. Returns only leaf paths in a stable hierarchical order.
+def _finalize_template_paths(paths: set) -> list[str]:
+	"""Shared tail end of both the ZIP and folder-picker template imports.
 
-	If every entry shares the same first segment (a single root folder wrapping the tree),
-	that wrapper is stripped so the template starts from the contained folders.
-	Intermediate folders are dropped because the backend auto-creates ancestors when ensuring
-	a leaf path; storing only leaves keeps the template list lean and easy to read.
+	If every path shares the same first segment (a single root folder wrapping
+	the tree), that wrapper is stripped so the template starts from the
+	contained folders. Non-leaf paths are dropped because the backend
+	auto-creates ancestors when ensuring a leaf path; storing only leaves
+	keeps the template list lean and easy to read.
 	"""
+	if paths:
+		roots = {p.split("/", 1)[0] for p in paths}
+		if len(roots) == 1:
+			only_root = next(iter(roots))
+			stripped = {p[len(only_root) + 1 :] for p in paths if "/" in p}
+			if stripped:
+				paths = {s for s in stripped if s}
+
+	leaves = []
+	all_paths = sorted(paths)
+	for p in all_paths:
+		prefix = p + "/"
+		if any(other.startswith(prefix) for other in all_paths):
+			continue
+		leaves.append(p)
+
+	def sort_key(path: str):
+		return [seg.lower() for seg in path.split("/")]
+
+	return sorted(leaves, key=sort_key)
+
+
+def _collect_template_paths_from_zip_content(content: bytes) -> list[str]:
+	"""Extract folder tree from a ZIP. Returns only leaf paths in a stable hierarchical order."""
 	try:
 		zf = zipfile.ZipFile(io.BytesIO(content))
 	except Exception:
@@ -490,26 +550,56 @@ def _collect_template_paths_from_zip_content(content: bytes) -> list[str]:
 		if norm:
 			paths.add(norm)
 
-	if paths:
-		roots = {p.split("/", 1)[0] for p in paths}
-		if len(roots) == 1:
-			only_root = next(iter(roots))
-			stripped = {p[len(only_root) + 1 :] for p in paths if "/" in p}
-			if stripped:
-				paths = {s for s in stripped if s}
+	return _finalize_template_paths(paths)
 
-	leaves = []
-	all_paths = sorted(paths)
-	for p in all_paths:
-		prefix = p + "/"
-		if any(other.startswith(prefix) for other in all_paths):
+
+@frappe.whitelist()
+def import_portal_folder_template_from_paths(paths_json, project=None):
+	"""Replace folder template from a flat list of relative file paths — the shape
+	produced by a browser's <input webkitdirectory> folder picker (e.g.
+	"MyTemplate/AA-FIRST/notes.txt"). Optionally apply now to one project,
+	mirroring import_portal_folder_template_zip's own behaviour.
+
+	The Admin page's "pick a folder from my computer" button called this exact
+	method name for a real feature, but it was never implemented — every click
+	failed with a raw "no attribute" server error instead of importing anything.
+	"""
+	helper.assert_can_edit_portal_folder_template()
+	if isinstance(paths_json, str):
+		try:
+			raw_paths = json.loads(paths_json or "[]")
+		except Exception:
+			frappe.throw(_("Invalid paths"))
+	else:
+		raw_paths = paths_json or []
+	if not isinstance(raw_paths, list):
+		frappe.throw(_("paths_json must be a list"))
+
+	paths = set()
+	for raw in raw_paths:
+		name = cstr(raw or "").strip().replace("\\", "/")
+		if not name or name.startswith("/") or ":" in name:
 			continue
-		leaves.append(p)
+		parts = [p for p in name.split("/") if p not in ("", ".", "..")]
+		if len(parts) < 2:
+			# A bare filename with no directory segment carries no folder info.
+			continue
+		norm = _normalize_folder_template_path("/".join(parts[:-1]))
+		if norm:
+			paths.add(norm)
 
-	def sort_key(path: str):
-		return [seg.lower() for seg in path.split("/")]
+	if not paths:
+		frappe.throw(_("No folders found in the selected directory."))
 
-	return sorted(leaves, key=sort_key)
+	rows = _finalize_template_paths(paths)
+	save_portal_folder_template(rows=rows)
+	applied_project = cstr(project or "").strip()
+	if applied_project:
+		helper.assert_manage_project(applied_project)
+		from portal_app.api.files import ensure_project_folders
+
+		ensure_project_folders(applied_project)
+	return {"ok": True, "rows": [{"folder_name": p} for p in rows], "count": len(rows)}
 
 
 @frappe.whitelist()
@@ -711,6 +801,7 @@ def _sync_project_assignment(project, users):
 	"""Mirror Project team membership into Frappe's standard Assign To (ToDo) so the
 	portal's Team list and ERP's native "Assigned To" sidebar show the same people.
 	Does not touch the Project Users table or any portal access-control logic."""
+	import frappe.share as _share
 	from frappe.desk.form.assign_to import add as assign_add
 	from frappe.desk.form.assign_to import remove as assign_remove
 
@@ -728,10 +819,35 @@ def _sync_project_assignment(project, users):
 	target = set(users)
 
 	to_add = list(target - current)
+	to_remove = current - target
+	if not to_add and not to_remove:
+		return
+
+	# assign_add() only auto-shares a doc with the assignee when they don't
+	# already have read access to it — and that auto-share step checks the
+	# CALLING user's own DocPerm "share" permission on Project, which
+	# ignore_permissions=True does not bypass (it's a separate, lower-level
+	# RBAC check). ERPNext's stock role permissions grant "share" on Project
+	# to Projects Manager but not to System Manager, so a pure System Manager
+	# caller would hit "No permission to share Project ...".
+	#
+	# sync_project_team() has already independently verified via
+	# assert_manage_project() that this user may manage this specific
+	# project, so pre-share it here using frappe.share's own
+	# ignore_share_permission flag (the officially supported bypass) instead
+	# of swapping frappe.session.user — an earlier version of this fix used
+	# frappe.set_user()/restore, which corrupted the CALLING user's own live
+	# session because Frappe persists frappe.session.user back to the
+	# Session record at the end of the request; that approach is not safe
+	# to use mid-request and must not be reintroduced here.
+	for u in to_add:
+		_share.add_docshare(
+			"Project", project, user=u, read=1, flags={"ignore_share_permission": True}
+		)
+
 	if to_add:
 		assign_add({"doctype": "Project", "name": project, "assign_to": to_add}, ignore_permissions=True)
-
-	for u in current - target:
+	for u in to_remove:
 		assign_remove("Project", project, u, ignore_permissions=True)
 
 
