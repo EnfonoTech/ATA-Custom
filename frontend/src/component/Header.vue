@@ -540,10 +540,16 @@ const openLogoutModal = () => {
 const handleLogout = async () => {
 	loggingOut.value = true;
 	try {
-		// Must go through call(): Frappe does not set a `csrf_token` cookie, so reading
-		// document.cookie always yielded "" and the POST was rejected as a CSRF failure.
-		// The error was swallowed, so the server session stayed alive after "logging out".
-		await call({ method: "logout", type: "POST" });
+		// GET, not POST: Frappe only enforces CSRF on POST/PUT/DELETE/PATCH, and the
+		// cached client-side CSRF token can go stale relative to the session's actual
+		// token (frappe.sessions.get_csrf_token, which call()'s stale-token retry path
+		// calls, isn't even a whitelisted endpoint — that retry always 403s). A CSRF
+		// failure here threw before frappe.local.login_manager.logout() ever ran, so
+		// the error was caught and swallowed below, but the server session was never
+		// actually terminated even though the browser moved on to the login page.
+		// logout's whitelist has no explicit `methods=`, so GET is allowed, and GET
+		// skips CSRF entirely — sidestepping the broken refresh path altogether.
+		await call({ method: "logout", type: "GET" });
 	} catch (err) {
 		console.error("Logout failed:", err);
 	} finally {
