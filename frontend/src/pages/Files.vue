@@ -1616,8 +1616,8 @@ async function deleteProjectFile(f) {
 						Project files
 					</h1>
 					<p class="mt-1 max-w-2xl text-sm text-[color:var(--portal-muted)]">
-						Files attached to ERPNext Project records. Frappe Drive / Google Drive / BIM 360 flags live in
-						<strong class="text-[color:var(--portal-text)]">Portal Project Settings</strong> (desk).
+						All the drawings and documents for one project, in the standard folder structure.
+						Pick a project below, open a folder, then drag your files in.
 					</p>
 				</div>
 			</div>
@@ -1646,7 +1646,7 @@ async function deleteProjectFile(f) {
 								Manage the company-wide folder template
 							</span>
 							<span class="block text-xs text-[color:var(--portal-muted)]">
-								Edit subfolder paths or import a ZIP structure on the dedicated File tools page (Auditor only).
+								Change the standard folders that every new project is given. Affects future projects.
 							</span>
 						</span>
 					</span>
@@ -1703,30 +1703,34 @@ async function deleteProjectFile(f) {
 				id="portal-scroll-file-help"
 				class="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 text-sm text-emerald-950 shadow-sm"
 			>
-				<p class="font-semibold text-emerald-900">What you can do on this page</p>
+				<p class="font-semibold text-emerald-900">A few things worth knowing</p>
 				<ul class="mt-2 list-inside list-disc space-y-1.5 text-xs leading-relaxed text-emerald-900/90">
 					<li>
-						<strong>Delete</strong> is the last column in the file table below. Project managers (including
-						<strong>Projects Manager</strong> and users set as <strong>Portal Project Manager</strong> on the project) can remove any
-						file; other team members only see <strong>Delete</strong> on rows where <strong>Owner</strong> is them.
+						You can delete any file <strong>you</strong> uploaded — look for Delete at the end of its row.
+						A project manager can delete anything on the project.
+					</li>
+					<li>
+						New files are <strong>private</strong> by default, which means only people on this project can
+						open them. Leave it that way unless you have a reason not to.
 					</li>
 					<li v-if="canShareFolder">
-						For this project you can use <strong>Share link</strong> and <strong>Rename</strong> on each subfolder card.
+						To send a folder to a client, use <strong>Share link</strong> on that folder. Give it the shortest
+						sensible expiry — you can revoke it at any time.
 					</li>
 					<li v-else-if="manageableCount > 0">
-						Share/rename subfolders is limited to projects you manage in the portal; pick a managed project to see those
-						actions.
+						Sharing and renaming folders is only available on projects you manage. Choose one of those to see
+						those buttons.
 					</li>
 					<li v-if="canEditFolderTemplate">
-						Edit the <strong>default subfolder template</strong> on the dedicated
+						You can change the standard folder list that every new project gets, on the
 						<router-link to="/file-tools" class="font-medium underline">File tools</router-link>
-						page (Auditor only).
+						page.
 					</li>
 				</ul>
 				<p class="mt-2 text-[11px] text-emerald-800/80">
-					Tip: open
-					<router-link to="/profile" class="font-medium underline">Profile</router-link>
-					to confirm roles; if you were recently given <strong>Projects Manager</strong>, refresh this page so permissions update.
+					Missing a button you expected? Your access may have changed since you opened this page —
+					reload it. You can check what you currently have on your
+					<router-link to="/profile" class="font-medium underline">Profile</router-link>.
 				</p>
 			</div>
 
@@ -1819,7 +1823,7 @@ async function deleteProjectFile(f) {
 								type="button"
 								class="rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50"
 								style="color:var(--portal-muted)"
-								title="Change this subfolder’s name in ERPNext File (first level only)"
+								title="Rename this folder (top-level folders only)"
 								:disabled="shareBusy || renameBusy"
 								@click.stop="openRenameSubfolder(f.name)"
 							>
@@ -2138,9 +2142,9 @@ async function deleteProjectFile(f) {
 					<div>
 						<label class="portal-section-title mb-1 block">Store in</label>
 						<select v-model="destination" class="portal-input">
-							<option value="erpnext">ERPNext File only</option>
+							<option value="erpnext">Store in the portal only</option>
 							<option value="external">External platform only</option>
-							<option value="both">Both ERPNext + External</option>
+							<option value="both">Store in the portal and send to the external drive</option>
 						</select>
 					</div>
 					<div v-if="destination !== 'erpnext'">
@@ -2343,7 +2347,7 @@ async function deleteProjectFile(f) {
 				</table>
 				<p v-if="!visibleFiles.length && project" class="p-4 text-center text-[color:var(--portal-muted)]">
 					<span v-if="isCustomerPortalUser">No files attached to this project yet.</span>
-					<span v-else>No files yet — upload above or attach from the Project form in ERPNext.</span>
+					<span v-else>No files here yet. Drag files into the box above to add the first one.</span>
 				</p>
 			</div>
 		</div>
@@ -2495,8 +2499,7 @@ async function deleteProjectFile(f) {
 							class="rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-xs text-[color:var(--portal-muted)]"
 						>
 							<FeatherIcon name="info" class="mr-1 inline h-3 w-3" />
-							Using ERPNext native sharing. Per-share expiry and public link sharing become available after the Portal app migration runs (creates the share-tracking doctype). Adding/revoking users still works.
-						</div>
+							Sharing is running in basic mode. Expiry dates and public share links will be available once your administrator completes the portal setup.</div>
 
 						<!-- Add people -->
 						<section>
@@ -2597,7 +2600,7 @@ async function deleteProjectFile(f) {
 										<p class="truncate text-xs text-[color:var(--portal-muted)]">
 											{{ s.user_email || s.user }}
 											<span v-if="s.expires_at"> · expires {{ fmtShareExpiry(s) }}</span>
-											<span v-else-if="s.native"> · ERPNext share</span>
+											<span v-else-if="s.native"> · shared directly</span>
 										</p>
 									</div>
 									<button
