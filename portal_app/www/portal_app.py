@@ -37,6 +37,18 @@ def _build_version() -> str:
 
 
 def get_context(context):
+	# context.no_cache governs FRAPPE's server-side website cache (the X-From-Cache
+	# header). It says nothing to the browser — verified: this page came back with no
+	# Cache-Control header at all, so browsers applied heuristic caching to the HTML,
+	# kept requesting the OLD ?v=, and the asset cache-busting below never got a
+	# chance. A deploy then looked like it had not happened.
 	context.no_cache = 1
+	try:
+		frappe.local.response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+		frappe.local.response.headers["Pragma"] = "no-cache"
+	except Exception:
+		# Header plumbing differs across Frappe versions; the <meta> tags in
+		# portal_app.html are the fallback, so never break the page over this.
+		pass
 	context.build_version = _build_version()
 	return context

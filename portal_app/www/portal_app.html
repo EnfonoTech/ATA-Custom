@@ -6,6 +6,13 @@
     <title>Portal App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
+    <!-- This document must never be cached. It carries the ?v= build stamp that
+         busts the JS/CSS below; if the HTML itself is cached the browser keeps
+         asking for an old build and deploys appear not to land. -->
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+
     <link rel="stylesheet" href="/assets/portal_app/frontend/assets/index.css?v={{ build_version }}">
 </head>
 
