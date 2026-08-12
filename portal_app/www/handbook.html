@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ATA Project Portal — Handbook</title>
+<link rel="icon" type="image/png" href="/assets/portal_app/images/portal-favicon.png" />
+<meta name="robots" content="noindex, nofollow" />
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:15.5px;
+line-height:1.7;color:#241c10;background:#faf7f2;display:flex;min-height:100vh}
+.sidebar{width:262px;min-height:100vh;background:#241c10;color:#d8cdb8;position:fixed;top:0;left:0;
+overflow-y:auto;display:flex;flex-direction:column;z-index:100}
+.brand{padding:22px 20px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
+.brand h1{font-size:14.5px;font-weight:700;color:#fff;letter-spacing:.2px}
+.brand p{font-size:11px;color:#9c8c6e;margin-top:3px}
+.whoami{margin:12px 20px;padding:10px 12px;background:rgba(197,160,89,.13);border:1px solid rgba(197,160,89,.3);
+border-radius:8px;font-size:11.5px;color:#e8dcc4}
+.whoami b{display:block;color:#fff;font-size:12.5px}
+nav{padding:6px 0 16px;flex:1}
+.navlbl{font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#7a6b4f;padding:14px 20px 5px}
+nav a{display:block;padding:6px 20px;color:#d8cdb8;text-decoration:none;font-size:13.5px;border-left:3px solid transparent}
+nav a:hover{background:rgba(255,255,255,.05);color:#fff}
+nav a.active{background:rgba(197,160,89,.18);border-left-color:#c5a059;color:#fff;font-weight:600}
+main{margin-left:262px;flex:1;min-width:0}
+.hero{background:linear-gradient(135deg,#241c10 0%,#4a3a1e 55%,#7a5f2c 100%);color:#fff;padding:46px 48px 40px}
+.hero h1{font-size:31px;font-weight:700;letter-spacing:-.6px;margin-bottom:9px}
+.hero p{font-size:15.5px;opacity:.92;max-width:730px}
+.chips{margin-top:18px;display:flex;gap:9px;flex-wrap:wrap}
+.chips span{background:rgba(255,255,255,.15);padding:5px 13px;border-radius:20px;font-size:12px;font-weight:600}
+.content{padding:34px 48px 90px;max-width:1000px}
+section{margin-bottom:48px;scroll-margin-top:16px}
+section>h2{font-size:22px;font-weight:700;color:#7a5f2c;margin-bottom:7px;padding-bottom:9px;border-bottom:2px solid #ece4d6}
+.lede{color:#6b5f4d;margin-bottom:18px;font-size:15px}
+h3{font-size:16.5px;font-weight:700;margin:26px 0 9px}
+p{margin-bottom:13px}
+ul,ol{margin:0 0 15px 22px}li{margin-bottom:7px}
+code{background:#f0eade;padding:2px 7px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#7a5f2c}
+figure{margin:18px 0 22px;border:1px solid #e2d9c8;border-radius:12px;overflow:hidden;background:#fff}
+figure img{display:block;width:100%;height:auto}
+figure figcaption{padding:10px 15px;font-size:13px;color:#6b5f4d;background:#f7f2e8;border-top:1px solid #e9e0cf}
+figure figcaption b{color:#241c10}
+.shot-missing{padding:34px 20px;text-align:center;color:#9c8c6e;font-size:13.5px;background:
+repeating-linear-gradient(45deg,#faf7f2,#faf7f2 10px,#f4eee2 10px,#f4eee2 20px)}
+.note,.warn,.tip{border-radius:9px;padding:14px 17px;margin:16px 0;font-size:14.5px;border-left:4px solid}
+.note{background:#eef4fb;border-color:#2f6fb5}
+.warn{background:#fdf1f1;border-color:#c0392b}
+.tip{background:#eef8f1;border-color:#2e8b57}
+.note strong,.warn strong,.tip strong{display:block;margin-bottom:4px}
+.table-wrap{overflow-x:auto;margin:16px 0 20px}
+table{width:100%;border-collapse:collapse;background:#fff;font-size:14.5px;border:1px solid #e2d9c8;border-radius:9px;overflow:hidden}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid #ede5d7;vertical-align:top}
+th{background:#f4eee2;font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;color:#6b5f4d}
+tbody tr:last-child td{border-bottom:none}
+.badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:700;white-space:nowrap}
+.b-yes{background:#d6f0e0;color:#1d6b41}.b-no{background:#fadcd9;color:#96271c}
+.b-part{background:#fbeecd;color:#8a6212}.b-role{background:#e6ddf5;color:#4a2f80}
+.steps{counter-reset:s;list-style:none;margin-left:0}
+.steps>li{counter-increment:s;position:relative;padding-left:44px;margin-bottom:17px}
+.steps>li::before{content:counter(s);position:absolute;left:0;top:0;width:29px;height:29px;border-radius:50%;
+background:linear-gradient(135deg,#7a5f2c,#c5a059);color:#fff;font-size:13px;font-weight:700;
+display:flex;align-items:center;justify-content:center}
+.steps>li strong{display:block;margin-bottom:2px}
+.tree{background:#241c10;color:#d8cdb8;border-radius:10px;padding:18px 22px;font-family:ui-monospace,Menlo,monospace;
+font-size:13px;line-height:1.9;overflow-x:auto;margin:16px 0 20px}
+.tree .l1{color:#e6c47a;font-weight:700}.tree .l2{color:#c3b28f}.tree .l3{color:#8d8069}
+details{background:#fff;border:1px solid #e2d9c8;border-radius:9px;padding:13px 17px;margin-bottom:11px}
+details summary{font-weight:600;cursor:pointer;color:#7a5f2c}
+details p{margin:11px 0 0}
+@media(max-width:900px){.sidebar{display:none}main{margin-left:0}.hero{padding:30px 20px 26px}.content{padding:24px 20px 60px}}
+@media print{.sidebar{display:none}main{margin-left:0}body{background:#fff;font-size:11pt}
+.hero{background:#241c10!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+section,figure,table{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="brand">
+    <h1>ATA Project Portal</h1>
+    <p>Handbook</p>
+  </div>
+  <div class="whoami">
+    <b>{{ user_full_name }}</b>
+    Signed in as {{ role_label }} · {{ my_project_count }} project{{ "" if my_project_count == 1 else "s" }} visible to you
+  </div>
+  <nav>
+    <div class="navlbl">Start here</div>
+    <a href="#what">What the portal is</a>
+    <a href="#roles">Who sees what</a>
+    <a href="#login">Signing in</a>
+    <div class="navlbl">Daily work</div>
+    <a href="#dashboard">Dashboard</a>
+    <a href="#projects">Projects</a>
+    <a href="#folders">The folder system</a>
+    <a href="#upload">Adding files</a>
+    <a href="#browser">Finding a file</a>
+    <div class="navlbl">Working with others</div>
+    <a href="#share">Sharing</a>
+    <a href="#clients">Client access</a>
+    <a href="#teams">Teams</a>
+    <div class="navlbl">Planning</div>
+    <a href="#tasks">Tasks &amp; views</a>
+    <div class="navlbl">Reference</div>
+    <a href="#register">Your 2026 register</a>
+    <a href="#rules">House rules</a>
+    <a href="#faq">Questions</a>
+    <a href="#help">Getting help</a>
+  </nav>
+</aside>
+
+<main>
+  <header class="hero">
+    <h1>ATA Project Portal — Handbook</h1>
+    <p>Your projects, your drawings and your client documents in one place, with the folder
+       structure built for you every time. This is the short guide to using it well.</p>
+    <div class="chips">
+      <span>{{ project_count }} projects live</span>
+      <span>{{ team_count }} teams</span>
+      <span>Read time ~12 min</span>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <section id="what">
+      <h2>What the portal is</h2>
+      <p class="lede">A simpler front door to the ERP, built around how ATA actually works.</p>
+      <p>Everything already lives in the ERP system. The portal gives you a faster screen for the
+         things you do every day — opening a project, finding a drawing, sending a folder to a
+         client — without having to learn the full ERP.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>It does this for you</th><th>So that</th></tr></thead>
+          <tbody>
+            <tr><td><b>Builds the folder tree automatically</b></td><td>Every project has the same structure. Nobody has to remember it, and nobody invents their own.</td></tr>
+            <tr><td><b>Keeps documents private by default</b></td><td>A title deed or an ID is only readable by people with access to that project.</td></tr>
+            <tr><td><b>Gives each client their own door</b></td><td>A client logs in and sees only their own projects. Never another client's.</td></tr>
+            <tr><td><b>Records who did what</b></td><td>Every upload, share and deletion is attributed to a named person.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="roles">
+      <h2>Who sees what</h2>
+      <p class="lede">The portal looks different depending on your role. This is the table to read first — most "it's broken" reports turn out to be this working correctly.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Role</th><th>Projects they see</th><th>Can edit</th><th>Can upload</th><th>Sees project value</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge b-role">System Manager</span></td><td>All</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">All</span></td></tr>
+            <tr><td><span class="badge b-role">Projects Manager</span></td><td>All</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Only their own</span></td></tr>
+            <tr><td><span class="badge b-role">Projects User</span></td><td>Only those they are added to</td><td><span class="badge b-no">No</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
+            <tr><td><span class="badge b-role">Client contact</span></td><td>Only their own company's</td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <strong>Two things people read wrongly</strong>
+        <ul style="margin-bottom:0">
+          <li>A <b>Projects Manager sees every project</b>, not only their own. What is restricted for
+              them is the <em>money</em> — they see the value only of projects where they are named as
+              Portal Project Manager.</li>
+          <li>A <b>Projects User cannot edit</b>, even on a project they lead. They can read everything
+              on their projects and upload files, but not change project details or delete. That is
+              deliberate.</li>
+        </ul>
+      </div>
+      <div class="warn">
+        <strong>Everyone at ATA currently starts as a Projects User</strong>
+        All 66 staff were loaded with the most restricted role on purpose. Nobody is a Projects
+        Manager until you decide who should be — because that role reveals the whole portfolio.
+        Ask your administrator to raise individuals from the Admin screen.
+      </div>
+    </section>
+
+    <section id="login">
+      <h2>Signing in</h2>
+      <ol class="steps">
+        <li><strong>Go to the portal</strong>Open <code>/portal-app</code> on the company address and bookmark it.</li>
+        <li><strong>Use your work email</strong>Your account is already created. If you have never set a password, use <em>Forgot Password?</em> and one will be emailed to you.</li>
+        <li><strong>You land on your home screen</strong>Managers see the Dashboard. Everyone else goes straight to Projects.</li>
+      </ol>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/01-login.png" alt="The portal sign-in screen"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the sign-in screen&lt;/div&gt;'">
+        <figcaption><b>Signing in.</b> Your work email and your own password. Never share a login — every
+          action in the portal is recorded against the account that did it.</figcaption>
+      </figure>
+      <div class="note">
+        <strong>Signing out properly</strong>
+        Click your name, top right, then <em>Logout</em>. That ends the session on the server, not just
+        on your screen. Always do this on a shared or client machine.
+      </div>
+    </section>
+
+    <section id="dashboard">
+      <h2>Dashboard</h2>
+      <p class="lede">The manager home screen: how many projects and tasks are open, budget health, and recent activity.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/02-dashboard.png" alt="Dashboard"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Dashboard&lt;/div&gt;'">
+        <figcaption><b>Dashboard.</b> Counts, budget health and trends. Money figures follow the roles
+          table above, so two managers can legitimately see different totals here.</figcaption>
+      </figure>
+    </section>
+
+    <section id="projects">
+      <h2>Projects</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/03-projects.png" alt="Projects list"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Projects list&lt;/div&gt;'">
+        <figcaption><b>The project list.</b> Search by name or project number, filter by status or
+          customer, and sort. Your 2026 register is already loaded here.</figcaption>
+      </figure>
+      <h3>Creating a project</h3>
+      <ol class="steps">
+        <li><strong>Projects → New Project</strong></li>
+        <li><strong>Fill in the details</strong>Name and customer are the important ones. The project number goes in <em>Project code</em>.</li>
+        <li><strong>Save</strong>The full folder tree is built at this moment — you never create folders by hand.</li>
+      </ol>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/04-new-project.png" alt="New project form"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the New Project form&lt;/div&gt;'">
+        <figcaption><b>New project.</b> <b>Portal Project Manager</b> is not just a label — that person,
+          and System Managers, are the only ones who can see this project's value.</figcaption>
+      </figure>
+      <div class="warn">
+        <strong>Only a System Manager can change the Portal Project Manager</strong>
+        Because that field controls who can see the money, a Projects Manager cannot move it to
+        themselves. Ask a System Manager if it needs changing.
+      </div>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/05-project-detail.png" alt="Project detail"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: a project detail page&lt;/div&gt;'">
+        <figcaption><b>Inside a project.</b> Details, team, tasks and files in one place. Adding someone
+          to the team here is what gives them access — without it they see nothing.</figcaption>
+      </figure>
+    </section>
+
+    <section id="folders">
+      <h2>The folder system</h2>
+      <p class="lede">Every project gets the same 67-folder tree, built automatically the moment it is created.</p>
+      <p>This is the heart of the portal. You never build it by hand, and you should not change the
+         standard folders — consistency is the whole point. Anyone can open any project and know
+         exactly where a title deed or a permit lives.</p>
+      <div class="tree">
+<span class="l1">01-DOCUMENTS</span>
+  <span class="l2">01-CLIENT DATA</span>
+    <span class="l3">01-BUSINESS CARD · 02-TITLE DEED · 03-ID</span>
+    <span class="l3">04-MASTER PLAN · 05-AUTHORIZATION LTR · 06-OTHERS</span>
+  <span class="l2">02-LOCATION · 03-BUILDING SYSTEM · 04-DRAWINGS</span>
+  <span class="l2">05-CONSTRUCTION PERMIT · 06-SITE PICTURE</span>
+
+<span class="l1">02-CONCEPT</span>
+  <span class="l2">01-CONCEPT STUDIES</span>
+    <span class="l3">01-ARCHITECTURE · 02-INTERIORS · 03-LANDSCAPE · 04-TECHNICAL</span>
+    <span class="l3">05-OPERATIONS · 06-LIGHTNING · 07-TRAFFIC · 08-FIRE FIGHTING</span>
+    <span class="l3">09-PROJECT RENDERS</span>
+  <span class="l2">02-SKETCH UP · 03-PERSPECTIVES · 04-FEASIBILITY STUDY</span>
+  <span class="l2">05-PRESENTATION · 06-REFERENCES · 07-SCHEDULES &amp; GUIDELINES</span>
+
+<span class="l1">03-BALADIYA</span>
+  <span class="l2">01-DOCUMENTS · 02-BALADIYA PLANS · 03-AREA STATEMENT</span>
+
+<span class="l1">04-WORKGDRAWINGS</span>   <span class="l1">05-SUPERVISION</span>   <span class="l1">06-CLIENT SUBMITTAL</span>
+      </div>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/06-files-tree.png" alt="Folder tree"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the folder tree on the Files page&lt;/div&gt;'">
+        <figcaption><b>Files.</b> Pick a project at the top, then click down through the tree. Whatever
+          folder you are standing in is where your upload will land.</figcaption>
+      </figure>
+      <div class="tip">
+        <strong>Adding a folder of your own</strong>
+        You can add extra sub-folders inside the standard ones for a particular project. Start the
+        name with a number — <code>07-SITE SURVEY</code> — so it sorts properly. Folder names cannot
+        contain a slash.
+      </div>
+    </section>
+
+    <section id="upload">
+      <h2>Adding files</h2>
+      <ol class="steps">
+        <li><strong>Open Files and pick your project</strong></li>
+        <li><strong>Click all the way into the right folder</strong>This matters — the file lands where you are standing, not at the top.</li>
+        <li><strong>Drag your files in, or click to browse</strong>Several at once is fine, and a whole ZIP will be unpacked with its folders intact.</li>
+        <li><strong>Check the confirmation box and confirm</strong>The portal guesses the file type from the extension; correct it if it guessed wrong.</li>
+      </ol>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/07-upload.png" alt="Upload dialog"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the upload dialog, with Private upload ticked&lt;/div&gt;'">
+        <figcaption><b>Uploading.</b> Note <b>Private upload</b> is ticked by default. Leave it ticked.</figcaption>
+      </figure>
+      <div class="warn">
+        <strong>Private vs public — the one setting to understand</strong>
+        <b>Private</b> means only people with access to the project can open the file. <b>Public</b>
+        means <em>anyone at all</em> with the web address can download it, with no login and no record
+        of who took it. Leave it private. Share links work perfectly well with private files, so
+        there is almost never a reason to untick it.
+      </div>
+      <div class="note">
+        <strong>Some file types are refused</strong>
+        Web and program files — <code>.html</code>, <code>.svg</code>, <code>.js</code>,
+        <code>.exe</code> — cannot be uploaded, because they can run code in someone's browser. Put
+        one inside a <code>.zip</code> if you genuinely need to store it.
+      </div>
+    </section>
+
+    <section id="browser">
+      <h2>Finding a file</h2>
+      <p class="lede">File Browser searches across every project you can see, rather than one at a time.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/08-file-browser.png" alt="File Browser"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the File Browser&lt;/div&gt;'">
+        <figcaption><b>File Browser.</b> Filter by project, category, document type or folder, or just
+          type part of the filename.</figcaption>
+      </figure>
+    </section>
+
+    <section id="share">
+      <h2>Sharing</h2>
+      <h3>With a colleague</h3>
+      <p>Open the folder, choose <em>Share</em>, pick the person and set how many days. They will find
+         it under <em>Shared</em> in their own menu.</p>
+      <h3>With someone who has no login</h3>
+      <p>Create a <em>share link</em>. Anyone holding the link can view and download that folder — no
+         login needed.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/09-share.png" alt="Share dialog"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the share dialog&lt;/div&gt;'">
+        <figcaption><b>Sharing.</b> Set the shortest expiry that does the job.</figcaption>
+      </figure>
+      <div class="warn">
+        <strong>Treat a share link like a key</strong>
+        Anyone it is forwarded to can open it, and you cannot tell who. Use a short expiry, and revoke
+        it under <em>Files → Shares</em> once the client has what they need. Revoking takes effect
+        immediately.
+      </div>
+    </section>
+
+    <section id="clients">
+      <h2>Client access</h2>
+      <ol class="steps">
+        <li><strong>Open one of that client's projects</strong>It must already have the Customer field filled in.</li>
+        <li><strong>Add the client contact</strong>Their email and full name.</li>
+        <li><strong>They receive a welcome email</strong>They choose their own password from the link. You never set a password for them.</li>
+      </ol>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>A client contact can</th><th>A client contact cannot</th></tr></thead>
+          <tbody><tr>
+            <td><ul style="margin:0 0 0 18px"><li>See their own company's projects</li><li>Browse the folders</li><li>Open and download documents</li><li>See tasks and progress</li></ul></td>
+            <td><ul style="margin:0 0 0 18px"><li>See any other client's projects</li><li>See any project value</li><li>Upload or delete anything</li><li>See staff lists or the org chart</li></ul></td>
+          </tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="teams">
+      <h2>Teams</h2>
+      <p class="lede">Your {{ team_count }} groups are already loaded, with their offices and members.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/13-teams.png" alt="Teams"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Teams page&lt;/div&gt;'">
+        <figcaption><b>Teams.</b> Each team, its office and its members.</figcaption>
+      </figure>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/14-org-chart.png" alt="Org chart"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Org Chart&lt;/div&gt;'">
+        <figcaption><b>Org Chart.</b> The same information drawn as a structure.</figcaption>
+      </figure>
+      <div class="note">
+        <strong>Teams and project access are separate</strong>
+        Being in a team does not by itself give access to a project. Someone must be added to that
+        project's team on the project page. This is the main thing to set up next.
+      </div>
+    </section>
+
+    <section id="tasks">
+      <h2>Tasks &amp; views</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/10-tasks.png" alt="Tasks"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Tasks page&lt;/div&gt;'">
+        <figcaption><b>Tasks.</b> Create, assign, set a due date and discuss in comments.</figcaption>
+      </figure>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>View</th><th>Best for</th></tr></thead>
+          <tbody>
+            <tr><td><b>Kanban</b></td><td>Where every project stands. Drag a card to change its stage.</td></tr>
+            <tr><td><b>Gantt</b></td><td>Timelines and overlaps across projects.</td></tr>
+            <tr><td><b>Calendar</b></td><td>What is due this month.</td></tr>
+            <tr><td><b>Daily Task</b></td><td>Your own private reminders. Nobody else sees these — not even your manager.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/11-kanban.png" alt="Kanban"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Kanban board&lt;/div&gt;'">
+        <figcaption><b>Kanban.</b> Drag between Planning, Active, On Hold, Review and Done.</figcaption>
+      </figure>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/12-gantt.png" alt="Gantt"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Gantt chart&lt;/div&gt;'">
+        <figcaption><b>Gantt.</b> Projects drawn from expected start to expected end.</figcaption>
+      </figure>
+    </section>
+
+    <section id="register">
+      <h2>Your 2026 register</h2>
+      <p class="lede">Loaded from the register you supplied — {{ project_count }} projects.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Group</th><th>How it is stored</th><th>Code in the portal</th></tr></thead>
+          <tbody>
+            <tr><td><b>11 registered projects</b></td><td>Their own numbered folder</td><td><code>2601</code> … <code>2611</code></td></tr>
+            <tr><td><b>22 concept design briefs</b></td><td>Inside <code>00001 CONCEPT DESIGN BRIEF</code></td><td><code>CB-01</code> … <code>CB-22</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        <strong>Two projects need a decision from you</strong>
+        <b>ABDULAZIZ ALTHEYAB</b> and <b>JAREED HOTEL – JEDDAH</b> each appear twice — once as a
+        registered project and once as a concept brief. They are almost certainly the same job before
+        and after it received a number. The concept versions are marked
+        <em>(Concept Brief)</em> so both were kept rather than one being silently dropped. Decide
+        whether to merge them, then delete the one you do not want.
+      </div>
+      <div class="warn">
+        <strong>Nobody is assigned to any project yet</strong>
+        The register you sent lists projects and staff, but not which people work on which project.
+        Until someone is added to a project's team, a Projects User will open the portal and see
+        nothing. Send that mapping to Enfono and it can be loaded in one go, or add people
+        project-by-project on each project page.
+      </div>
+    </section>
+
+    <section id="rules">
+      <h2>House rules</h2>
+      <ol class="steps">
+        <li><strong>One login per person, never shared</strong>Every upload, share and deletion is recorded against the account that did it. A shared login destroys that trail.</li>
+        <li><strong>Leave uploads private</strong>Public means anyone on the internet with the address. Use a share link instead.</li>
+        <li><strong>Navigate into the right folder before uploading</strong>The file lands where you are standing.</li>
+        <li><strong>Short expiries on share links, and revoke when done</strong>Under Files → Shares.</li>
+        <li><strong>Do not change the standard folders</strong>Their sameness across every project is what makes them useful.</li>
+      </ol>
+    </section>
+
+    <section id="faq">
+      <h2>Questions</h2>
+      <details><summary>I cannot see a project I know exists.</summary>
+        <p>If you are a Projects User you only see projects you have been added to. Ask the project
+           manager to add you. A client contact only ever sees their own company's projects.</p></details>
+      <details><summary>Why can I see the project but not its value?</summary>
+        <p>Project value is restricted. System Managers see all values; a Projects Manager sees only
+           projects where they are the named Portal Project Manager; everyone else sees none.</p></details>
+      <details><summary>My upload was refused.</summary>
+        <p>Most likely the file type — web and program files are blocked. Client contacts cannot
+           upload at all.</p></details>
+      <details><summary>The file went into the wrong folder.</summary>
+        <p>Files land in the folder you are viewing. Navigate all the way in before uploading. A
+           routing rule may also place a copy elsewhere by design.</p></details>
+      <details><summary>A client says a share link stopped working.</summary>
+        <p>It expired or was revoked. Check Files → Shares — you can extend a share you created, or
+           issue a new link.</p></details>
+    </section>
+
+    <section id="help">
+      <h2>Getting help</h2>
+      <ol class="steps">
+        <li><strong>Refresh the page</strong>Clears most one-off glitches.</li>
+        <li><strong>Sign out and back in</strong>Fixes anything caused by a permission change made while you were logged in.</li>
+        <li><strong>Report it with detail</strong>Your administrator needs four things: what you were doing, which project or file, the exact message, and roughly what time. The time matters most.</li>
+      </ol>
+      <p>There is also a general <a href="/user-guide">user guide</a> covering every screen in more depth.</p>
+    </section>
+
+  </div>
+</main>
+
+<script>
+(function () {
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav a'));
+  var byId = {}; links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+  var secs = Array.prototype.slice.call(document.querySelectorAll('section[id]'));
+  if (!('IntersectionObserver' in window) || !secs.length) return;
+  var vis = new Set();
+  var ob = new IntersectionObserver(function (es) {
+    es.forEach(function (x) { x.isIntersecting ? vis.add(x.target.id) : vis.delete(x.target.id); });
+    for (var i = 0; i < secs.length; i++) {
+      if (vis.has(secs[i].id)) {
+        links.forEach(function (a) { a.classList.remove('active'); });
+        if (byId[secs[i].id]) byId[secs[i].id].classList.add('active');
+        break;
+      }
+    }
+  }, { rootMargin: '-10% 0px -70% 0px' });
+  secs.forEach(function (s) { ob.observe(s); });
+})();
+</script>
+</body>
+</html>
