@@ -386,26 +386,40 @@ def run(commit=False):
 			dept_names[dn] = f"{dn} - {company_abbr}"
 
 	# ── 2. Users ────────────────────────────────────────────────────────────
-	for u in USERS:
-		if frappe.db.exists("User", u["email"]):
-			stats["user_exists"] += 1
-			continue
-		first, last = _split_name(u["full_name"])
-		log.append(f"user  CREATE  {u['email']:<34} {u['full_name']}  [{', '.join(u['client_roles'])}]")
-		stats["user_created"] += 1
-		if commit:
-			doc = frappe.get_doc({
-				"doctype": "User",
-				"email": u["email"],
-				"first_name": first,
-				"last_name": last,
-				"enabled": 1,
-				# Deliberate: importing must not email 66 real staff.
-				"send_welcome_email": 0,
-				"user_type": "System User",
-			})
-			doc.append("roles", {"role": ROLE})
-			doc.insert(ignore_permissions=True)
+	# frappe.core.doctype.user.user.throttle_user_creation() refuses more than
+	# `throttle_user_limit` (default 60) User inserts per minute and raises
+	# ValidationError("Throttled") — which is precisely what 66 staff in one run hits.
+	# frappe.flags.in_import is its documented escape hatch:
+	#     def throttle_user_creation():
+	#         if frappe.flags.in_import: return
+	# Scope it to this loop only and restore it afterwards: in_import also relaxes
+	# link/mandatory validation elsewhere, and we want the project inserts below to be
+	# validated normally.
+	prev_in_import = frappe.flags.in_import
+	frappe.flags.in_import = True
+	try:
+		for u in USERS:
+			if frappe.db.exists("User", u["email"]):
+				stats["user_exists"] += 1
+				continue
+			first, last = _split_name(u["full_name"])
+			log.append(f"user  CREATE  {u['email']:<34} {u['full_name']}  [{', '.join(u['client_roles'])}]")
+			stats["user_created"] += 1
+			if commit:
+				doc = frappe.get_doc({
+					"doctype": "User",
+					"email": u["email"],
+					"first_name": first,
+					"last_name": last,
+					"enabled": 1,
+					# Deliberate: importing must not email 66 real staff.
+					"send_welcome_email": 0,
+					"user_type": "System User",
+				})
+				doc.append("roles", {"role": ROLE})
+				doc.insert(ignore_permissions=True)
+	finally:
+		frappe.flags.in_import = prev_in_import
 
 	# ── 3. Team membership = Frappe "Assign To" (ToDo) on the Department ────
 	# This is what teams.py reads; Employee.department is NOT used by the portal.
