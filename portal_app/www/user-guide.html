@@ -1,0 +1,10 @@
+{#
+  Deliberately near-empty. The content moved to /handbook; user_guide.py redirects
+  there before this ever renders. The file still has to EXIST, though — Frappe's
+  website router resolves a www route by finding the .html/.md template first and
+  only then imports the sibling controller, so a .py on its own 404s and the
+  redirect never runs. Verified: deleting this file turned /user-guide into a 404.
+#}
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=/handbook"></head>
+<body><p>This guide has moved to <a href="/handbook">the handbook</a>.</p></body></html>
