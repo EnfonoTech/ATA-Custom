@@ -16,9 +16,6 @@ overflow-y:auto;display:flex;flex-direction:column;z-index:100}
 .brand{padding:22px 20px 16px;border-bottom:1px solid rgba(255,255,255,.08)}
 .brand h1{font-size:14.5px;font-weight:700;color:#fff;letter-spacing:.2px}
 .brand p{font-size:11px;color:#9c8c6e;margin-top:3px}
-.whoami{margin:12px 20px;padding:10px 12px;background:rgba(197,160,89,.13);border:1px solid rgba(197,160,89,.3);
-border-radius:8px;font-size:11.5px;color:#e8dcc4}
-.whoami b{display:block;color:#fff;font-size:12.5px}
 nav{padding:6px 0 16px;flex:1}
 .navlbl{font-size:10px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:#7a6b4f;padding:14px 20px 5px}
 nav a{display:block;padding:6px 20px;color:#d8cdb8;text-decoration:none;font-size:13.5px;border-left:3px solid transparent}
@@ -81,10 +78,6 @@ section,figure,table{page-break-inside:avoid}}
   <div class="brand">
     <h1>ATA Project Portal</h1>
     <p>Handbook</p>
-  </div>
-  <div class="whoami">
-    <b>{{ user_full_name }}</b>
-    Signed in as {{ role_label }} · {{ my_project_count }} project{{ "" if my_project_count == 1 else "s" }} visible to you
   </div>
   <nav>
     <div class="navlbl">Start here</div>
@@ -154,7 +147,7 @@ section,figure,table{page-break-inside:avoid}}
           <tbody>
             <tr><td><span class="badge b-role">System Manager</span></td><td>All</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">All</span></td></tr>
             <tr><td><span class="badge b-role">Projects Manager</span></td><td>All</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Only their own</span></td></tr>
-            <tr><td><span class="badge b-role">Projects User</span></td><td>Only those they are added to</td><td><span class="badge b-no">No</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
+            <tr><td><span class="badge b-role">Projects User</span></td><td><span class="badge b-yes">All</span></td><td><span class="badge b-part">Only their own</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td><span class="badge b-role">Client contact</span></td><td>Only their own company's</td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
           </tbody>
         </table>
@@ -165,16 +158,15 @@ section,figure,table{page-break-inside:avoid}}
           <li>A <b>Projects Manager sees every project</b>, not only their own. What is restricted for
               them is the <em>money</em> — they see the value only of projects where they are named as
               Portal Project Manager.</li>
-          <li>A <b>Projects User cannot edit</b>, even on a project they lead. They can read everything
-              on their projects and upload files, but not change project details or delete. That is
-              deliberate.</li>
+          <li>A <b>Projects User can see every project</b> in the practice, but can only
+              <em>change</em> the ones they are on the team of. Read wide, write narrow.</li>
         </ul>
       </div>
-      <div class="warn">
-        <strong>Everyone at ATA currently starts as a Projects User</strong>
-        All 66 staff were loaded with the most restricted role on purpose. Nobody is a Projects
-        Manager until you decide who should be — because that role reveals the whole portfolio.
-        Ask your administrator to raise individuals from the Admin screen.
+      <div class="note">
+        <strong>How ATA is set up today</strong>
+        Everyone is a <b>Projects User</b>: they can open any project in the practice and upload to
+        it, but can only edit the projects they are a team member of. One <b>Projects Manager</b>
+        can edit anything and see project values. Client contacts see only their own company.
       </div>
     </section>
 

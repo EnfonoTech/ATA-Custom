@@ -93,11 +93,12 @@ def get_allowed_project_names(user=None) -> list[str]:
 			return []
 		return frappe.get_all("Project", filters={"customer": cust}, pluck="name")
 
-	rows = frappe.db.sql(
-		"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
-		user,
-	)
-	return [r[0] for r in rows]
+	# Internal staff (Projects User) READ the whole portfolio. ATA is one practice and
+	# people need to find each other's drawings; the restriction that matters is WRITE,
+	# handled by can_manage_project() below, and MONEY, handled by
+	# can_view_project_value(). Portal Customers are scoped to their own customer above
+	# and are unaffected by this.
+	return frappe.get_all("Project", pluck="name")
 
 
 def assert_portal_user(user=None) -> None:
@@ -161,21 +162,44 @@ def get_value_visible_project_names(user=None) -> list[str]:
 	return []
 
 
+def project_member_names(user=None) -> list[str]:
+	"""Projects this user is actually on the team of (Project User child rows).
+
+	Distinct from get_allowed_project_names(), which is now the whole portfolio for
+	internal staff. This is the narrower set that grants WRITE.
+	"""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return []
+	rows = frappe.db.sql(
+		"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
+		user,
+	)
+	return [r[0] for r in rows]
+
+
 def can_manage_project(project_name: str) -> bool:
 	"""Management-level action (edit, delete, team sync, sharing, folder rules, etc.).
 
-	Restricted to System Manager / Projects Manager. Regular "Projects User" team
-	members — even a project's Lead Architect or the document owner — get read-only
-	access to projects; they cannot edit or delete them."""
-	if not has_portal_staff_project_access():
+	Two ways in:
+	  * System Manager / Projects Manager — anywhere in the portfolio.
+	  * A Projects User who is ON that project's team — that project only.
+
+	Read access is deliberately wider than this: every internal user can now SEE the
+	whole portfolio (get_allowed_project_names), but can only change the projects they
+	belong to. Customer portal users can never manage anything.
+	"""
+	if user_is_customer_portal_user():
 		return False
-	return project_name in get_allowed_project_names()
+	if has_portal_staff_project_access():
+		return project_name in get_allowed_project_names()
+	return project_name in project_member_names()
 
 
 def assert_manage_project(project_name: str) -> None:
 	if not can_manage_project(project_name):
 		frappe.throw(
-			_("Only the portal project manager or a Projects Manager can change this."),
+			_("You can only change projects you are on the team of."),
 			frappe.PermissionError,
 		)
 

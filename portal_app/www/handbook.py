@@ -1,62 +1,35 @@
-"""Controller for the client handover handbook at /handbook.
+"""Controller for the public handbook at /handbook.
 
-Unlike /user-guide, this page is NOT public. It is illustrated with screenshots of
-the live site, which show ATA's real project names and real staff names — that is
-client-confidential, so a login is required.
+PUBLIC on purpose. It is the guide ATA hands to its own staff, and requiring a
+login to read the instructions for logging in is a circle. It replaced the old
+/user-guide, which said much the same thing.
 
-Any portal user may read it: it is the handover guide their own staff are meant to
-use. It is not restricted to managers, because the people who most need it are the
-ones with the least access.
+Because it is public it must contain NO credentials and NO client data. The
+figures are drawn illustrations with generic example names, not screenshots of
+the live register, precisely so this page can stay open. If real screenshots are
+ever added, this page has to go back behind a login.
 
-NAMING — the controller for `handbook.html` must be `handbook.py`. Frappe finds it
-via `template_basepath.replace("-", "_") + ".py"`, so a hyphenated page name needs an
-underscored module (see www/test_guide.py, where getting that wrong meant the
-permission check silently never ran while the page still served HTTP 200).
-
-`no_cache` is module-level because that is where the website router reads it. It
-matters here: the page greets the reader by name and adapts to their role, so a copy
-rendered for one user must never be served to another from cache.
+Counts come from the database rather than being written into the page, so the
+guide cannot drift out of date — but they are deliberately coarse (how many
+projects exist, how many teams), never names.
 """
 
 import frappe
 from frappe import _
 
-from portal_app.api import helper
-
 no_cache = 1
 
 
 def get_context(context):
-	if frappe.session.user == "Guest":
-		# Send them to log in and come back, rather than a bare 403.
-		frappe.local.flags.redirect_location = "/login?redirect-to=/handbook"
-		raise frappe.Redirect
-
 	context.no_cache = 1
 	context.title = _("ATA Project Portal — Handbook")
 
-	roles = set(frappe.get_roles())
-	context.user_full_name = frappe.db.get_value("User", frappe.session.user, "full_name") or frappe.session.user
-	context.is_staff = helper.has_portal_staff_project_access()
-	context.is_customer = helper.user_is_customer_portal_user()
-	context.role_label = (
-		_("System Manager") if "System Manager" in roles
-		else _("Projects Manager") if "Projects Manager" in roles
-		else _("Client contact") if context.is_customer
-		else _("Projects User")
-	)
-
-	# Real figures, so the handbook never contradicts what the reader sees on screen.
-	# Two different numbers, and conflating them is a bug the restore exposed: the
-	# portfolio now holds the 2022-2025 history as well as the 2026 register, so the
-	# section about the 2026 register must not quote the total.
+	# Coarse, non-identifying figures only — this page is world-readable.
 	context.project_count = frappe.db.count("Project")
 	context.register_2026 = (
 		frappe.db.count("Project", {"portal_project_code": ["like", "26%"]})
 		+ frappe.db.count("Project", {"portal_project_code": ["like", "CB-%"]})
 	)
 	context.historical_count = frappe.db.count("Project", {"portal_project_code": ["like", "ATA-%"]})
-	context.my_project_count = len(helper.get_allowed_project_names())
 	context.team_count = frappe.db.count("Department", {"portal_office": ["!=", ""]})
-
 	return context

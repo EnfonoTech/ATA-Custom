@@ -75,9 +75,18 @@ def _assert_may_set_project_manager(project: str, payload: dict) -> None:
 
 
 def _manageable_project_names(allowed_names: list) -> list:
-	"""Equivalent to [n for n in allowed_names if can_manage_project(n)], without the
-	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call."""
-	return list(allowed_names) if helper.has_portal_staff_project_access() else []
+	"""Which of `allowed_names` this caller may CHANGE, in O(1) queries.
+
+	Mirrors helper.can_manage_project without calling it per project (it re-reads the
+	Project table each time). Staff manage the whole portfolio; a Projects User manages
+	only the projects they are on the team of; customer users manage nothing.
+	"""
+	if helper.user_is_customer_portal_user():
+		return []
+	if helper.has_portal_staff_project_access():
+		return list(allowed_names)
+	member_of = set(helper.project_member_names())
+	return [n for n in allowed_names if n in member_of]
 
 
 def _safe_order_by(sort_by: str, sort_order: str) -> str:

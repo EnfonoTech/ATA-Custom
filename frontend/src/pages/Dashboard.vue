@@ -25,6 +25,7 @@ onMounted(async () => {
 });
 
 // ── Team Structure Overview — real teams, largest first ────────────────────
+// Cycled across every team now that all of them render as equal cards.
 const TEAM_COLORS = ["blue", "green", "purple"];
 const topTeams = computed(() =>
   [...teams.value]
@@ -689,24 +690,29 @@ onUnmounted(()=>document.removeEventListener("click",closeAll));
             </div>
 
             <p v-if="!topTeams.length" class="text-xs text-center py-4" style="color:var(--portal-muted);">No teams found</p>
-            <template v-else>
-              <!-- Top 3 teams (by member count) -->
-              <div class="flex justify-around gap-2 mb-3">
-                <div v-for="t in topTeams.slice(0, 3)" :key="t.name" class="rounded-xl px-3 py-2.5 text-center flex-1"
-                     :style="`background:var(--portal-team-${t.color}-bg);border:1px solid var(--portal-team-${t.color}-border);`">
-                  <p class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ t.department_name }}</p>
-                  <p class="text-xs mt-0.5" style="color:var(--portal-muted);">👥 {{ t.member_count }}</p>
-                </div>
+            <!--
+              One uniform grid for every team, not "top 3 big + the rest small".
+              The old split put 3 flex-1 cards in a column that is one quarter of the
+              row, so long names like "ATA RIYADH SUPERVISION TEAM" overflowed, and a
+              second 3-col grid left a lone orphan card whenever the team count was
+              not a multiple of 3 (7 teams => 3 + 3 + 1). An odd last card now spans
+              the full width instead, so the block stays square at any team count.
+            -->
+            <div v-else class="grid grid-cols-2 gap-2">
+              <div v-for="(t, i) in topTeams" :key="t.name"
+                   class="flex items-center justify-between gap-2 rounded-lg px-2.5 py-2 min-w-0"
+                   :class="{ 'col-span-2': i === topTeams.length - 1 && topTeams.length % 2 === 1 }"
+                   :style="`background:var(--portal-team-${t.color}-bg);border:1px solid var(--portal-team-${t.color}-border);`"
+                   :title="`${t.department_name} — ${t.member_count} members`">
+                <p class="text-[11px] font-semibold leading-tight truncate min-w-0" style="color:var(--portal-text);">
+                  {{ t.department_name }}
+                </p>
+                <span class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold"
+                      style="background:var(--portal-surface);color:var(--portal-text);">
+                  {{ t.member_count }}
+                </span>
               </div>
-
-              <!-- Remaining teams -->
-              <div v-if="topTeams.length > 3" class="grid grid-cols-3 gap-1.5">
-                <div v-for="t in topTeams.slice(3, 9)" :key="t.name" class="rounded-lg px-2 py-1.5 text-center" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border-strong);">
-                  <p class="text-[10px] font-medium truncate" style="color:var(--portal-muted);">{{ t.department_name }}</p>
-                  <p class="text-[10px] font-bold" style="color:var(--portal-text);">👥 {{ t.member_count }}</p>
-                </div>
-              </div>
-            </template>
+            </div>
 
             <div class="mt-4 pt-3 flex items-center justify-between" style="border-top:1px solid var(--portal-border);">
               <span class="text-xs" style="color:var(--portal-muted);">Total Members</span>

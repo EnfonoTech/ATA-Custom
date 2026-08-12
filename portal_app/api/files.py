@@ -1860,11 +1860,15 @@ def list_managed_shares():
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return {"projects": []}
-	# can_manage_project() re-reads the entire Project table on every call, so calling
-	# it once per project was a full table scan x N (119 scans for 118 projects here).
-	# It reduces exactly to "is this caller portal staff, and is the project in their
-	# allowed set" — and every p is already from `allowed`.
-	manageable = set(allowed) if helper.has_portal_staff_project_access() else set()
+	# Mirrors helper.can_manage_project without calling it per project (it re-reads the
+	# Project table each time — that was a full scan x N here). Staff manage everything
+	# they can see; a Projects User manages only projects they are on the team of.
+	if helper.user_is_customer_portal_user():
+		manageable = set()
+	elif helper.has_portal_staff_project_access():
+		manageable = set(allowed)
+	else:
+		manageable = set(allowed) & set(helper.project_member_names())
 	if not manageable:
 		# Not a manager on any project — surface an empty payload with a hint flag so
 		# the UI can show a "you are not a project admin" lock screen.
