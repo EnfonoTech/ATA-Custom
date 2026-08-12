@@ -126,6 +126,14 @@
     .tree .lvl2 { color: #c4b5fd; }
     .tree .lvl3 { color: #9ca3c4; }
 
+    /* ── Screenshots ─────────────────────────────────────────── */
+    figure { margin: 18px 0 22px; border: 1px solid #e3e7f5; border-radius: 10px; overflow: hidden; background: #fff; }
+    figure img { display: block; width: 100%; height: auto; }
+    figure figcaption { padding: 10px 15px; font-size: 13px; color: #5a6280; background: #f7f9fd; border-top: 1px solid #e8ebf5; }
+    figure figcaption b { color: #1a1a2e; }
+    .shot-missing { padding: 34px 20px; text-align: center; color: #8891ad; font-size: 13.5px;
+      background: repeating-linear-gradient(45deg,#f5f6fa,#f5f6fa 10px,#eceff7 10px,#eceff7 20px); }
+
     /* ── FAQ ─────────────────────────────────────────────────── */
     details {
       background: #fff; border: 1px solid #e3e7f5; border-radius: 8px;
@@ -231,7 +239,7 @@
     <section id="intro">
       <h2>What this portal is</h2>
       <p class="lede">A single place for every project, every document, and every person working on it.</p>
-      <p>The portal sits on top of your ERP system. It gives you a simpler, faster screen for the things you do every day — opening a project, finding a drawing, sending a folder to a client — without needing to learn the full ERP.</p>
+      <p>Everything already lives in your main ERP system. The portal is just a simpler, faster screen for the things you do every day — opening a project, finding a drawing, sending a folder to a client — without needing to learn the full ERP.</p>
       <div class="card">
         <strong>Three things it does that matter most:</strong>
         <ul>
@@ -248,13 +256,18 @@
       <ol class="steps">
         <li><strong>Open the portal</strong>Go to <code>/portal-app</code> on your company address. Bookmark it.</li>
         <li><strong>Enter your email and password</strong>Use the work email your administrator registered. If you have never set a password, use the link in your welcome email.</li>
-        <li><strong>You land on your home screen</strong>Managers land on the Dashboard. Everyone else lands on Projects.</li>
+        <li><strong>You land on your home screen</strong>Managers see the Dashboard first. Everyone else goes straight to Projects.</li>
       </ol>
       <div class="note">
         <strong>Signing out properly</strong>
-        Click your name in the top-right corner and choose <em>Logout</em>. This ends your session on the server, not just in this browser. Always do this on a shared or client machine.
+        Click your name in the top-right corner and choose <em>Logout</em>. This properly ends your session — not just on your screen. Closing the tab is not the same thing. Always do this on a shared or client machine.
       </div>
 
+            <figure>
+        <img src="/assets/portal_app/images/handbook/01-login.png" alt="the sign-in screen"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the sign-in screen&lt;/div&gt;'">
+        <figcaption><b>Signing in.</b> Your work email and your own password.</figcaption>
+      </figure>
       <h3>Where your login comes from</h3>
       <p>Accounts are created for you — you cannot sign yourself up. How you get yours depends on who you are:</p>
       <div class="table-wrap">
@@ -349,6 +362,12 @@
     <section id="layout">
       <h2>Finding your way around</h2>
       <p>The menu runs down the left. It is grouped, and you only see the groups your role allows.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/02-dashboard.png" alt="the Dashboard and the left-hand menu"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Dashboard and the left-hand menu&lt;/div&gt;'">
+        <figcaption><b>The main screen.</b> The menu runs down the left. You only see the entries your role allows, so your menu may be shorter than a colleague's.</figcaption>
+      </figure>
+
       <div class="table-wrap">
         <table>
           <thead><tr><th>Group</th><th>What is in it</th><th>Who sees it</th></tr></thead>
@@ -367,10 +386,16 @@
     <section id="customers">
       <h2>Adding a customer</h2>
       <p class="lede">Every project belongs to a customer. Add the customer first, or create it while creating the project.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/03-projects.png" alt="the Projects list"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Projects list&lt;/div&gt;'">
+        <figcaption><b>Projects.</b> Switch between Year, Cards and Table. The chips filter to <em>All accessible</em>, <em>I am a team member</em>, or <em>I manage</em>.</figcaption>
+      </figure>
+
       <ol class="steps">
         <li><strong>Go to Projects</strong>Click <em>Projects</em> in the left menu, then <em>New Project</em>.</li>
-        <li><strong>Start typing in the Customer box</strong>It searches as you type.</li>
-        <li><strong>If they do not exist, create them</strong>Choose the create option and type the full company name. Use the name exactly as it should appear on documents — it is what your client will see.</li>
+        <li><strong>Start typing in the Customer box</strong>Start typing and it looks for matches.</li>
+        <li><strong>If they do not exist, create them</strong>Choose the create option and type the full company name. Type the name exactly as it should appear on paperwork, because this is what the client sees.</li>
       </ol>
       <div class="warn"><strong>Get the name right the first time</strong>The customer name links the client's own login to their projects. Renaming later is possible but means checking that client logins still point at the right company.</div>
     </section>
@@ -381,8 +406,14 @@
       <ol class="steps">
         <li><strong>Projects → New Project</strong></li>
         <li><strong>Fill in the details</strong>See the table below for what each field does.</li>
-        <li><strong>Save</strong>The folder tree is built automatically at this moment. You do not create folders by hand.</li>
+        <li><strong>Save</strong>Saving builds the whole folder tree for you. You never make folders by hand.</li>
       </ol>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/04-new-project.png" alt="the New Project form"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the New Project form&lt;/div&gt;'">
+        <figcaption><b>New project.</b> Fill this in and save — the folder tree is built for you at that moment.</figcaption>
+      </figure>
+
       <div class="table-wrap">
         <table>
           <thead><tr><th>Field</th><th>Required</th><th>What it does</th></tr></thead>
@@ -406,11 +437,11 @@
     <!-- ══════════════ TEAM ══════════════ -->
     <section id="project-team">
       <h2>Adding your team to a project</h2>
-      <p class="lede">This is what gives an internal staff member access. Without it, they see nothing.</p>
+      <p class="lede">This is the step that lets a colleague see the project at all. Miss it and the project simply will not appear for them.</p>
       <ol class="steps">
         <li><strong>Open the project</strong>Projects → click the project name.</li>
         <li><strong>Find the team section</strong>Add people one at a time, or add a whole User Group at once.</li>
-        <li><strong>Save</strong>They can now see the project immediately — no need for them to log out and back in.</li>
+        <li><strong>Save</strong>They can see it straight away. They do not need to log out and back in.</li>
       </ol>
       <div class="note"><strong>Removing someone</strong>Take them off the team and their access disappears straight away, including to the files.</div>
     </section>
@@ -437,6 +468,12 @@
     <section id="folders">
       <h2>The folder structure</h2>
       <p class="lede">Every project gets the same 67-folder tree, built automatically the moment the project is created.</p>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/06-files-tree.png" alt="the folder tree on the Files page"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the folder tree on the Files page&lt;/div&gt;'">
+        <figcaption><b>Files.</b> Pick a project at the top, then click down into the tree. Your upload lands in whichever folder you are standing in.</figcaption>
+      </figure>
+
       <p>You never have to create this by hand, and you should not change the standard folders. Consistency is the point — anyone can open any project and know exactly where a title deed or a permit lives.</p>
       <div class="tree">
 <span class="lvl1">01-DOCUMENTS</span>
@@ -484,6 +521,12 @@
     <!-- ══════════════ PRIVACY ══════════════ -->
     <section id="privacy">
       <h2>Private vs public files</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/07-upload.png" alt="the upload box with Private upload ticked"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the upload box with Private upload ticked&lt;/div&gt;'">
+        <figcaption><b>Uploading.</b> <em>Private upload</em> is ticked for you. Leave it ticked.</figcaption>
+      </figure>
+
       <p class="lede">Understand this one setting and you will not accidentally publish a client's documents.</p>
       <div class="table-wrap">
         <table>
@@ -546,6 +589,12 @@
     <!-- ══════════════ SHARE USER ══════════════ -->
     <section id="share-user">
       <h2>Sharing a folder with a colleague</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/09-share.png" alt="the share dialog"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the share dialog&lt;/div&gt;'">
+        <figcaption><b>Sharing.</b> Pick the person and how many days the access lasts.</figcaption>
+      </figure>
+
       <ol class="steps">
         <li><strong>Open Files and navigate to the folder</strong></li>
         <li><strong>Choose Share</strong>Pick the person and set how many days the access should last.</li>
@@ -632,6 +681,12 @@
     <!-- ══════════════ TASKS ══════════════ -->
     <section id="tasks">
       <h2>Tasks</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/10-tasks.png" alt="the Tasks page"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Tasks page&lt;/div&gt;'">
+        <figcaption><b>Tasks.</b> Filter by project, status or priority, and assign to a team member.</figcaption>
+      </figure>
+
       <ol class="steps">
         <li><strong>Left menu → Tasks</strong>Filter by project, status, priority, or search.</li>
         <li><strong>Create a task</strong>Give it a subject, pick the project, set priority and a due date.</li>
@@ -671,6 +726,12 @@
     <!-- ══════════════ TEAMS ══════════════ -->
     <section id="teams">
       <h2>Teams &amp; Org Chart</h2>
+      <figure>
+        <img src="/assets/portal_app/images/handbook/13-teams.png" alt="the Teams page"
+             onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Screenshot: the Teams page&lt;/div&gt;'">
+        <figcaption><b>Teams.</b> Each team, its office and its members.</figcaption>
+      </figure>
+
       <p>Teams are departments. Each has an office (Riyadh, Manila, Lisbon and so on) and a list of members.</p>
       <ul>
         <li><strong>Teams</strong> — see each team, its office, its members and how many projects it is carrying.</li>
