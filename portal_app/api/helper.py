@@ -43,6 +43,20 @@ def user_is_customer_portal_user(user=None) -> bool:
 	return PORTAL_CUSTOMER_ROLE in frappe.get_roles(user)
 
 
+def is_customer_only(user=None) -> bool:
+	"""True only for a genuine client contact — never for staff.
+
+	`user_is_customer_portal_user()` alone is NOT a safe test. Administrator holds
+	EVERY role in Frappe, including Portal Customer, so it reports True for the
+	superuser; the same happens to any staff member who is also given the role.
+	get_allowed_project_names() avoids the trap by checking staff access first, and
+	anything gating customer-only behaviour must do the same.
+	"""
+	if has_portal_staff_project_access(user):
+		return False
+	return user_is_customer_portal_user(user)
+
+
 def has_portal_staff_project_access(user=None) -> bool:
 	"""System / Projects Manager: full project portfolio in ERPNext; overrides customer-only portal scoping."""
 	user = user or frappe.session.user
@@ -189,10 +203,13 @@ def can_manage_project(project_name: str) -> bool:
 	whole portfolio (get_allowed_project_names), but can only change the projects they
 	belong to. Customer portal users can never manage anything.
 	"""
-	if user_is_customer_portal_user():
-		return False
+	# Staff FIRST. Administrator holds every role in Frappe, Portal Customer
+	# included, so testing "is customer" before "is staff" locks the superuser out
+	# of managing anything.
 	if has_portal_staff_project_access():
 		return project_name in get_allowed_project_names()
+	if user_is_customer_portal_user():
+		return False
 	return project_name in project_member_names()
 
 

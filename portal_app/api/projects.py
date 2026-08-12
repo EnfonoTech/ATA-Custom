@@ -81,10 +81,11 @@ def _manageable_project_names(allowed_names: list) -> list:
 	Project table each time). Staff manage the whole portfolio; a Projects User manages
 	only the projects they are on the team of; customer users manage nothing.
 	"""
-	if helper.user_is_customer_portal_user():
-		return []
+	# Staff first — Administrator carries the Portal Customer role too.
 	if helper.has_portal_staff_project_access():
 		return list(allowed_names)
+	if helper.user_is_customer_portal_user():
+		return []
 	member_of = set(helper.project_member_names())
 	return [n for n in allowed_names if n in member_of]
 

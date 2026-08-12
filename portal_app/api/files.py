@@ -527,7 +527,7 @@ def _restrict_files_for_customer(project: str, filters: list) -> list:
 	Enforced HERE, in the query, rather than by hiding things in the UI — a customer
 	who calls the endpoint directly must get the same answer as one who clicks.
 	"""
-	if not helper.user_is_customer_portal_user():
+	if not helper.is_customer_only():
 		return filters
 	roots = _customer_folder_roots(project)
 	# get_all cannot express OR across LIKEs in a filter list, and there is only ever
@@ -542,7 +542,7 @@ def _restrict_files_for_customer(project: str, filters: list) -> list:
 def list_project_files(project):
 	helper.assert_project_access(project)
 	folders = get_project_folders(project)
-	is_customer = helper.user_is_customer_portal_user()
+	is_customer = helper.is_customer_only()
 
 	file_filters = {
 		"attached_to_doctype": "Project",
@@ -1915,10 +1915,11 @@ def list_managed_shares():
 	# Mirrors helper.can_manage_project without calling it per project (it re-reads the
 	# Project table each time — that was a full scan x N here). Staff manage everything
 	# they can see; a Projects User manages only projects they are on the team of.
-	if helper.user_is_customer_portal_user():
-		manageable = set()
-	elif helper.has_portal_staff_project_access():
+	# Staff first — Administrator carries the Portal Customer role too.
+	if helper.has_portal_staff_project_access():
 		manageable = set(allowed)
+	elif helper.user_is_customer_portal_user():
+		manageable = set()
 	else:
 		manageable = set(allowed) & set(helper.project_member_names())
 	if not manageable:
@@ -2879,7 +2880,7 @@ def list_all_files(
 		["attached_to_name", "in", allowed],
 		["is_folder", "=", 0],
 	]
-	if helper.user_is_customer_portal_user():
+	if helper.is_customer_only():
 		# Client contacts browse only the submittal folder of their own projects.
 		# The folder path embeds the project, so one LIKE on the folder suffix is
 		# enough across every project they can see, and it is applied in the QUERY
