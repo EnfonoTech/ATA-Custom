@@ -15,7 +15,6 @@ const portalAdmin        = inject("portalAdmin", ref({ can_create_users: false, 
 const portalCapabilities = inject("portalCapabilities", ref({}));
 const portalSettings     = inject("portalSettings", ref({ company_logo: "", company_name: "", company_tagline: "", logo_width: 0, logo_height: 0 }));
 
-const CS = (m) => `/coming-soon?m=${m}`;
 
 // ── Team Structure — fetched from backend ─────────────────────────────────
 const ataExpanded   = ref(true);
@@ -58,21 +57,32 @@ const groups = computed(() => {
 	];
 	// Management-level views — only System Manager / Projects Manager.
 	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
+	// Hidden from client contacts: Kanban exists to drag a project between stages,
+	// which needs manage rights they will never have, so for them it is a board that
+	// looks interactive and refuses every interaction.
+	const staffOnlyPaths = new Set(["/kanban"]);
 	const workspace = {
 		title: "Project Management",
-		items: isManager.value ? workspaceItems : workspaceItems.filter((i) => !managerOnlyPaths.has(i.path)),
+		items: workspaceItems.filter(
+			(i) =>
+				(isManager.value || !managerOnlyPaths.has(i.path)) &&
+				(!isCust || !staffOnlyPaths.has(i.path))
+		),
 	};
 
-	const modules = {
-		title: "Modules",
-		items: [
-			{ name: "HR",       path: CS("HR"),       icon: "user",       comingSoon: true },
-			{ name: "Accounts", path: CS("Accounts"), icon: "book-open",  comingSoon: true },
-			{ name: "Stock",    path: CS("Stock"),    icon: "package",    comingSoon: true },
-			{ name: "Assets",   path: CS("Assets"),   icon: "server",     comingSoon: true },
-			{ name: "Helpdesk", path: CS("Helpdesk"), icon: "headphones", comingSoon: true },
-		],
-	};
+	// MODULES (HR / Accounts / Stock / Assets / Helpdesk) and ANALYTICS (Reports /
+	// Resources / Risks & Issues) are gone from the menu. Every one of them was a
+	// `comingSoon` link to /coming-soon — eight dead entries out of roughly twenty,
+	// so a third of the menu did nothing. A menu that mostly does not work teaches
+	// people not to trust the menu.
+	//
+	// To bring one back when it is actually built, add it to a group below with a
+	// real `path` and no `comingSoon` flag. The filter at the end of this computed
+	// drops any `comingSoon` item, so re-adding one as a placeholder will not show
+	// it — that is deliberate.
+	//
+	// Analytics' only working entry was "Settings", which pointed at /profile and so
+	// duplicated Account > Profile. Nothing was lost by removing the group.
 
 	const filesItems = [
 		{ name: "Files",        path: "/files",           icon: "paperclip" },
@@ -105,17 +115,11 @@ const groups = computed(() => {
 		items: [{ name: "ATA AI CHAT", path: "/ai-chat", icon: "zap", ai: true }],
 	};
 
-	const analytics = {
-		title: "Analytics",
-		items: [
-			{ name: "Reports",        path: CS("Reports"),    icon: "bar-chart-2",    comingSoon: true },
-			{ name: "Resources",      path: CS("Resources"),  icon: "package",        comingSoon: true },
-			{ name: "Risks & Issues", path: CS("Risks"),      icon: "alert-triangle", comingSoon: true },
-			{ name: "Settings",       path: "/profile",       icon: "settings"        },
-		],
-	};
-
-	return [workspace, ai, modules, files, analytics, account];
+	// Defence in depth: drop any item still flagged comingSoon, then drop any group
+	// left with nothing in it, so an empty heading never renders.
+	return [workspace, ai, files, account]
+		.map((g) => ({ ...g, items: (g.items || []).filter((i) => !i.comingSoon) }))
+		.filter((g) => g.items.length);
 });
 
 function isActive(item) {
