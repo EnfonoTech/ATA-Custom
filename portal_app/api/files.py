@@ -159,6 +159,53 @@ def get_project_folders(project: str) -> dict:
 	return {"project_root": project_root, "subfolders": subfolders}
 
 
+def get_project_folders_bulk(projects: list) -> dict:
+	"""get_project_folders() for many projects in ONE query instead of two per project.
+
+	list_managed_shares walks every project the caller manages. Calling the single
+	version in that loop cost 2 queries per project — on a site with 118 projects that
+	was ~240 queries just to read a folder tree that lives in one table. This fetches
+	every folder row under the attachments root once and buckets them in Python.
+
+	Returns {project: {"project_root": str, "subfolders": [{"name","label"}]}} with an
+	entry for every requested project, empty subfolders included, so callers can index
+	it exactly like the single-project version.
+	"""
+	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+	out = {p: {"project_root": attachments_root + "/" + p, "subfolders": []} for p in projects}
+	if not projects:
+		return out
+
+	# One scan of the folder rows, filtered to the attachments subtree. Bucketing by
+	# project in Python is cheaper than N LIKE queries even at a few thousand folders.
+	rows = frappe.get_all(
+		"File",
+		filters={"is_folder": 1, "name": ["like", attachments_root + "/%"]},
+		fields=["name"],
+		limit_page_length=0,
+		ignore_permissions=True,
+	)
+	# A folder row is always "<attachments_root>/<project>/<rest>", so split the project
+	# out of the path directly. Testing each row against every requested project instead
+	# would be rows x projects string compares (~236k here) for no benefit.
+	wanted = set(projects)
+	base = attachments_root + "/"
+	for r in rows:
+		nm = r["name"]
+		if not nm.startswith(base):
+			continue
+		rest = nm[len(base) :]
+		project, sep, label = rest.partition("/")
+		if not sep or project not in wanted:
+			# No separator means this IS a project root, not a subfolder — the caller
+			# already has project_root, so there is nothing to add.
+			continue
+		out[project]["subfolders"].append({"name": nm, "label": label})
+	for p in out:
+		out[p]["subfolders"].sort(key=lambda d: d["label"])
+	return out
+
+
 def _folder_template_uncached() -> list[str]:
 	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists(
 		"DocType", "Portal Project Settings"
@@ -352,6 +399,11 @@ _BLOCKED_UPLOAD_EXTENSIONS = frozenset(
 # request, so without these one upload can exhaust a worker.
 _ZIP_MAX_ENTRIES = 2000
 _ZIP_MAX_TOTAL_BYTES = 500 * 1024 * 1024
+# Ceiling for the Shares page, which loads every file of every managed project
+# in one request to build its tree. 50k covers any realistic ATA site; beyond
+# that the page logs that it truncated rather than silently showing less.
+_MANAGED_SHARES_MAX_FILES = 50000
+
 _ZIP_DOWNLOAD_MAX_FILES = 500
 _ZIP_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
 
@@ -1974,11 +2026,59 @@ def list_managed_shares():
 	# the admin sees the full structure with shares overlaid (rather than only the
 	# rows that already happen to have a share). File-level shares are nested
 	# under the file row.
-	for pj in manageable:
+	# Two bulk reads up front instead of two queries per project inside the loop below.
+	# With 118 manageable projects that is the difference between ~590 queries and ~6.
+	try:
+		folders_by_project = get_project_folders_bulk(list(manageable))
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Portal: bulk folder read")
+		folders_by_project = {}
+
+	files_by_project: dict[str, list] = {}
+	if manageable:
 		try:
-			folder_ctx = get_project_folders(pj)
+			for fr in frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": "Project",
+					"attached_to_name": ["in", list(manageable)],
+					"is_folder": 0,
+				},
+				fields=[
+					"name",
+					"file_name",
+					"file_url",
+					"folder",
+					"file_size",
+					"is_private",
+					"creation",
+					"owner",
+					"attached_to_name",
+				],
+				order_by="creation desc",
+				# The per-project version capped at 2000. This reads every managed
+				# project at once, so it needs its own ceiling or a large site could
+				# pull hundreds of thousands of rows into memory in one request.
+				limit_page_length=_MANAGED_SHARES_MAX_FILES,
+				ignore_permissions=True,
+			):
+				files_by_project.setdefault(fr["attached_to_name"], []).append(fr)
+			fetched = sum(len(v) for v in files_by_project.values())
+			if fetched >= _MANAGED_SHARES_MAX_FILES:
+				# Never truncate silently — a short list here looks like missing files.
+				frappe.log_error(
+					f"Hit the {_MANAGED_SHARES_MAX_FILES} file ceiling across "
+					f"{len(manageable)} projects; the Shares page is showing a partial list.",
+					"Portal: managed shares truncated",
+				)
 		except Exception:
-			folder_ctx = {"project_root": f"Home/Attachments/{pj}", "subfolders": []}
+			frappe.log_error(frappe.get_traceback(), "Portal: bulk project file read")
+
+	for pj in manageable:
+		folder_ctx = folders_by_project.get(pj) or {
+			"project_root": f"Home/Attachments/{pj}",
+			"subfolders": [],
+		}
 		project_root = folder_ctx.get("project_root") or f"Home/Attachments/{pj}"
 		# Project root + each subfolder become folder entries (no shares = empty arrays).
 		all_folder_paths = [(project_root, _("Project folder (all files)"))]
@@ -1997,31 +2097,8 @@ def list_managed_shares():
 					"link_shares": [],
 				},
 			)
-		# Pull every File for the project once, then bucket by parent folder.
-		try:
-			file_rows = frappe.get_all(
-				"File",
-				filters={
-					"attached_to_doctype": "Project",
-					"attached_to_name": pj,
-					"is_folder": 0,
-				},
-				fields=[
-					"name",
-					"file_name",
-					"file_url",
-					"folder",
-					"file_size",
-					"is_private",
-					"creation",
-					"owner",
-				],
-				order_by="creation desc",
-				limit_page_length=2000,
-				ignore_permissions=True,
-			)
-		except Exception:
-			file_rows = []
+		# Already fetched in the bulk read above.
+		file_rows = files_by_project.get(pj, [])
 		# Index file-level Portal Folder Share rows so we can attach them per file.
 		shares_by_file: dict[str, list] = {}
 		for fkey, folder in by_project[pj]["folders"].items():
@@ -2054,10 +2131,19 @@ def list_managed_shares():
 
 	# Hydrate each project with metadata + flatten folder dict to list.
 	projects_out = []
+	# One fetch for every project in the payload rather than a get_value per iteration.
+	project_meta = {
+		m["name"]: m
+		for m in frappe.get_all(
+			"Project",
+			filters={"name": ["in", list(by_project.keys())]},
+			fields=["name", "project_name", "status", "customer"],
+			limit_page_length=0,
+			ignore_permissions=True,
+		)
+	} if by_project else {}
 	for pj, payload in by_project.items():
-		meta = frappe.db.get_value(
-			"Project", pj, ["name", "project_name", "status", "customer"], as_dict=True
-		) or {"name": pj, "project_name": pj}
+		meta = project_meta.get(pj) or {"name": pj, "project_name": pj}
 		folders_list = list(payload["folders"].values())
 		# Drop the synthetic file-share rows — those are inlined as `shares` on the
 		# corresponding file row inside the parent folder.
