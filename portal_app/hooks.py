@@ -215,7 +215,11 @@ scheduler_events = {
 # Request Events
 # ----------------
 # before_request = ["portal_app.utils.before_request"]
-# after_request = ["portal_app.utils.after_request"]
+
+# Stops browsers caching the SPA's HTML. context.no_cache only controls Frappe's
+# own server-side page cache and emits no browser directive, so /portal-app was
+# being cached with a stale ?v= build stamp and deploys appeared not to land.
+after_request = ["portal_app.utils.set_spa_no_cache"]
 
 # Job Events
 # ----------

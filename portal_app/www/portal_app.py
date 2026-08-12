@@ -42,13 +42,11 @@ def get_context(context):
 	# Cache-Control header at all, so browsers applied heuristic caching to the HTML,
 	# kept requesting the OLD ?v=, and the asset cache-busting below never got a
 	# chance. A deploy then looked like it had not happened.
+	# Browser cache headers are NOT set here. frappe.local.response is the API
+	# response dict and writing headers onto it from a website page silently does
+	# nothing — verified: the response still came back with no Cache-Control. The
+	# real hook is after_request (see portal_app.utils.set_spa_no_cache), which is
+	# handed the actual response object by frappe/app.py.
 	context.no_cache = 1
-	try:
-		frappe.local.response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-		frappe.local.response.headers["Pragma"] = "no-cache"
-	except Exception:
-		# Header plumbing differs across Frappe versions; the <meta> tags in
-		# portal_app.html are the fallback, so never break the page over this.
-		pass
 	context.build_version = _build_version()
 	return context
