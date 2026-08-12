@@ -47,7 +47,15 @@ def get_context(context):
 	)
 
 	# Real figures, so the handbook never contradicts what the reader sees on screen.
+	# Two different numbers, and conflating them is a bug the restore exposed: the
+	# portfolio now holds the 2022-2025 history as well as the 2026 register, so the
+	# section about the 2026 register must not quote the total.
 	context.project_count = frappe.db.count("Project")
+	context.register_2026 = (
+		frappe.db.count("Project", {"portal_project_code": ["like", "26%"]})
+		+ frappe.db.count("Project", {"portal_project_code": ["like", "CB-%"]})
+	)
+	context.historical_count = frappe.db.count("Project", {"portal_project_code": ["like", "ATA-%"]})
 	context.my_project_count = len(helper.get_allowed_project_names())
 	context.team_count = frappe.db.count("Department", {"portal_office": ["!=", ""]})
 
