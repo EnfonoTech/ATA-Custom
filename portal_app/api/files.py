@@ -1860,7 +1860,11 @@ def list_managed_shares():
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return {"projects": []}
-	manageable = {p for p in allowed if helper.can_manage_project(p)}
+	# can_manage_project() re-reads the entire Project table on every call, so calling
+	# it once per project was a full table scan x N (119 scans for 118 projects here).
+	# It reduces exactly to "is this caller portal staff, and is the project in their
+	# allowed set" — and every p is already from `allowed`.
+	manageable = set(allowed) if helper.has_portal_staff_project_access() else set()
 	if not manageable:
 		# Not a manager on any project — surface an empty payload with a hint flag so
 		# the UI can show a "you are not a project admin" lock screen.
@@ -2062,7 +2066,10 @@ def list_managed_shares():
 				limit_page_length=_MANAGED_SHARES_MAX_FILES,
 				ignore_permissions=True,
 			):
-				files_by_project.setdefault(fr["attached_to_name"], []).append(fr)
+				# pop, don't just read: these rows are spread wholesale into the response
+				# with {**fr}, so leaving the bucketing key on them would add a field the
+				# per-project version never returned.
+				files_by_project.setdefault(fr.pop("attached_to_name"), []).append(fr)
 			fetched = sum(len(v) for v in files_by_project.values())
 			if fetched >= _MANAGED_SHARES_MAX_FILES:
 				# Never truncate silently — a short list here looks like missing files.
