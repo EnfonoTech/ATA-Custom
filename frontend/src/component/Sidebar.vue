@@ -57,10 +57,19 @@ const groups = computed(() => {
 	];
 	// Management-level views — only System Manager / Projects Manager.
 	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
-	// Hidden from client contacts: Kanban exists to drag a project between stages,
-	// which needs manage rights they will never have, so for them it is a board that
-	// looks interactive and refuses every interaction.
-	const staffOnlyPaths = new Set(["/kanban"]);
+	// Hidden from client contacts. These are internal working tools, not things a
+	// client is here to do:
+	//   Kanban     — exists to drag a project between stages, which needs manage
+	//                rights they will never have; for them it only refuses clicks.
+	//   Tasks      — ATA's internal work breakdown.
+	//   Daily Task — a personal reminder board for staff.
+	//   Gantt      — internal scheduling.
+	//   Calendar   — internal deadlines.
+	//   AI Chat    — answers about the portfolio; a client wants their own project.
+	// A client contact is left with Projects, Files, Shared and Profile.
+	const staffOnlyPaths = new Set([
+		"/kanban", "/tasks", "/daily-task", "/gantt", "/calendar", "/ai-chat",
+	]);
 	const workspace = {
 		title: "Project Management",
 		items: workspaceItems.filter(
@@ -112,7 +121,7 @@ const groups = computed(() => {
 
 	const ai = {
 		title: "AI",
-		items: [{ name: "ATA AI CHAT", path: "/ai-chat", icon: "zap", ai: true }],
+		items: isCust ? [] : [{ name: "ATA AI CHAT", path: "/ai-chat", icon: "zap", ai: true }],
 	};
 
 	// Defence in depth: drop any item still flagged comingSoon, then drop any group

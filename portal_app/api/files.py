@@ -501,17 +501,69 @@ def _verify_share_token(token: str) -> dict:
 	return payload
 
 
+
+# Folders a client contact may see inside a project. Everything else — concept
+# studies, Baladiya submissions, working drawings, supervision — is internal.
+# "06-CLIENT SUBMITTAL" is what ATA formally submits TO the client, so it is the
+# one folder that is theirs to read.
+#
+# Deliberately NOT including "01-DOCUMENTS/01-CLIENT DATA": that holds title
+# deeds and ID scans. The client supplied them, but exposing an ID scan through a
+# portal login is a bigger promise than this feature needs to make. Add it here if
+# ATA decides otherwise.
+_CUSTOMER_VISIBLE_FOLDERS = ("06-CLIENT SUBMITTAL",)
+
+
+def _customer_folder_roots(project: str) -> list:
+	"""Full File-folder paths a customer contact may read in this project."""
+	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+	base = attachments_root + "/" + project
+	return [base + "/" + f for f in _CUSTOMER_VISIBLE_FOLDERS]
+
+
+def _restrict_files_for_customer(project: str, filters: list) -> list:
+	"""Append a folder restriction to a File query when the caller is a customer.
+
+	Enforced HERE, in the query, rather than by hiding things in the UI — a customer
+	who calls the endpoint directly must get the same answer as one who clicks.
+	"""
+	if not helper.user_is_customer_portal_user():
+		return filters
+	roots = _customer_folder_roots(project)
+	# get_all cannot express OR across LIKEs in a filter list, and there is only ever
+	# a handful of roots, so match the prefix in one LIKE per root via or_filters at
+	# the call site. Callers that pass a plain filter list use the single-root form.
+	filters = list(filters)
+	filters.append(["folder", "like", roots[0] + "%"])
+	return filters
+
+
 @frappe.whitelist()
 def list_project_files(project):
 	helper.assert_project_access(project)
 	folders = get_project_folders(project)
+	is_customer = helper.user_is_customer_portal_user()
+
+	file_filters = {
+		"attached_to_doctype": "Project",
+		"attached_to_name": project,
+		"folder": ["not like", "Home/Contracts/%"],
+	}
+	if is_customer:
+		# A client contact sees only the submittal folder, never the internal tree.
+		roots = _customer_folder_roots(project)
+		file_filters["folder"] = ["like", roots[0] + "%"]
+		folders = {
+			"project_root": folders.get("project_root"),
+			"subfolders": [
+				f for f in (folders.get("subfolders") or [])
+				if any(str(f.get("name", "")).startswith(r) for r in roots)
+			],
+		}
+
 	files = frappe.get_all(
 		"File",
-		filters={
-			"attached_to_doctype": "Project",
-			"attached_to_name": project,
-			"folder": ["not like", "Home/Contracts/%"],
-		},
+		filters=file_filters,
 		fields=[
 			"name",
 			"file_name",
@@ -2827,6 +2879,12 @@ def list_all_files(
 		["attached_to_name", "in", allowed],
 		["is_folder", "=", 0],
 	]
+	if helper.user_is_customer_portal_user():
+		# Client contacts browse only the submittal folder of their own projects.
+		# The folder path embeds the project, so one LIKE on the folder suffix is
+		# enough across every project they can see, and it is applied in the QUERY
+		# so a direct API call gets the same answer as the UI.
+		file_filters.append(["folder", "like", "%/" + _CUSTOMER_VISIBLE_FOLDERS[0] + "%"])
 	if search:
 		file_filters.append(["file_name", "like", f"%{search}%"])
 	if folder_search:
