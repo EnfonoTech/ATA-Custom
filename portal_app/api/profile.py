@@ -151,9 +151,18 @@ def change_my_password(current_password=None, new_password=None, logout_other_se
 		u = frappe.get_cached_doc("User", user)
 		user_data = (u.first_name, u.middle_name, u.last_name, u.email, u.birth_date)
 		result = test_password_strength(new_password, user_inputs=user_data) or {}
-		feedback = result.get("feedback") or {}
-		if not feedback.get("password_policy_validation_passed", False):
-			handle_password_test_fail(feedback)
+
+		# Compare the score here rather than reading a
+		# feedback["password_policy_validation_passed"] flag: the util in
+		# frappe.utils.password_strength only ever fills feedback with
+		# {warning, suggestions}. That flag is added by the *wrapper* in
+		# frappe.core.doctype.user.user.test_password_strength, so reading it off
+		# the util's result always came back None and rejected every password.
+		# This is the same comparison that wrapper makes.
+		score = cint(result.get("score"))
+		minimum = cint(frappe.get_system_settings("minimum_password_score")) or 0
+		if not (score and score >= minimum):
+			handle_password_test_fail(result.get("feedback") or {})
 
 	update_password(user, new_password, logout_all_sessions=cint(logout_other_sessions))
 	frappe.db.commit()
