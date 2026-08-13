@@ -52,6 +52,15 @@ const customerDisplayName = ref("");
 const customerSearchQ = ref("");
 const customerHits = ref([]);
 let customerSearchTimer;
+
+// ── Portal Team (Department) — groups this project under a team on the Gantt
+// Chart. Distinct from the "Team" section below, which manages individual
+// project MEMBERS, not the department/office grouping. ─────────────────────
+const deptOptions = ref([]);
+const deptSearchQ = ref("");
+const deptBusy = ref(false);
+const deptMsg = ref("");
+const deptErr = ref("");
 const manualCustomerId = ref("");
 const customerBusy = ref(false);
 const customerMsg = ref("");
@@ -59,6 +68,11 @@ const customerErr = ref("");
 const showNewCustomer = ref(false);
 const newCustomerName = ref("");
 const newCustomerBusy = ref(false);
+
+const showNewTeam = ref(false);
+const newTeamName = ref("");
+const newTeamOffice = ref("");
+const newTeamBusy = ref(false);
 const teamSaving = ref(false);
 const teamMessage = ref("");
 const teamError = ref("");
@@ -519,6 +533,70 @@ async function clearCustomer() {
 	}
 }
 
+async function loadDeptOptions() {
+	if (deptOptions.value.length) return;
+	try {
+		deptOptions.value = await call({ method: "portal_app.api.teams.get_teams" });
+	} catch (e) {
+		console.error(e);
+		deptOptions.value = [];
+	}
+}
+const deptHits = computed(() => {
+	const q = deptSearchQ.value.trim().toLowerCase();
+	const list = q
+		? deptOptions.value.filter((d) => d.department_name.toLowerCase().includes(q))
+		: deptOptions.value;
+	return list.slice(0, 25);
+});
+
+async function setProjectTeam(deptName) {
+	deptBusy.value = true;
+	deptMsg.value = "";
+	deptErr.value = "";
+	try {
+		await call({
+			method: "portal_app.api.projects.update_project",
+			type: "POST",
+			args: { project: props.name, portal_team: deptName },
+		});
+		deptSearchQ.value = "";
+		deptMsg.value = deptName ? "Team set." : "Team cleared.";
+		await loadDashboard();
+		window.setTimeout(() => (deptMsg.value = ""), 2500);
+	} catch (e) {
+		deptErr.value = apiErr(e);
+	} finally {
+		deptBusy.value = false;
+	}
+}
+
+async function submitNewTeam() {
+	const n = newTeamName.value.trim();
+	if (n.length < 2) {
+		deptErr.value = "Enter a team name.";
+		return;
+	}
+	newTeamBusy.value = true;
+	deptErr.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.teams.create_or_get_team",
+			type: "POST",
+			args: { department_name: n, office: newTeamOffice.value.trim() },
+		});
+		showNewTeam.value = false;
+		newTeamName.value = "";
+		newTeamOffice.value = "";
+		deptOptions.value = []; // force a fresh fetch so the new team shows up in the picker
+		await setProjectTeam(res.name);
+	} catch (e) {
+		deptErr.value = apiErr(e);
+	} finally {
+		newTeamBusy.value = false;
+	}
+}
+
 async function applyManualCustomer() {
 	const id = manualCustomerId.value.trim();
 	if (!id) return;
@@ -776,6 +854,68 @@ async function submitNewCustomer() {
 						<p v-if="customerErr" class="text-sm text-red-600">{{ customerErr }}</p>
 					</div>
 					<p v-else class="text-sm text-gray-500">You can view the customer link; only project managers can change it.</p>
+				</div>
+
+				<div class="portal-card-strong p-5">
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
+							<FeatherIcon name="grid" class="h-4 w-4 text-[color:var(--portal-accent)]" />
+							Portal Team (Gantt grouping)
+						</h2>
+					</div>
+					<p class="mb-3 text-sm text-gray-600">
+						Groups this project under a department on the Gantt Chart page. A Projects Manager can only set this on projects where they are the Portal Project Manager; System Manager can set it on any project.
+					</p>
+					<div v-if="canManage" class="space-y-3">
+						<p class="text-sm" style="color:var(--portal-text);">
+							Current: <strong>{{ project.portal_team || "None" }}</strong>
+						</p>
+						<label class="text-xs font-medium text-gray-600">Search teams</label>
+						<div class="space-y-2" @focusin="loadDeptOptions">
+							<TextInput
+								v-model="deptSearchQ"
+								class="w-full rounded-xl"
+								placeholder="Click to see teams, or type to filter…"
+							/>
+							<div
+								v-if="deptHits.length"
+								class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
+							>
+								<button
+									v-for="d in deptHits"
+									:key="d.name"
+									type="button"
+									class="flex w-full flex-col gap-0.5 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white"
+									:disabled="deptBusy"
+									@click="setProjectTeam(d.name)"
+								>
+									<span class="font-medium text-gray-900">{{ d.department_name }}</span>
+									<span class="text-xs text-gray-500">{{ d.office }}</span>
+								</button>
+							</div>
+						</div>
+						<div class="flex flex-wrap gap-2">
+							<button
+								type="button"
+								class="rounded-xl border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50"
+								@click="showNewTeam = true"
+							>
+								Create team (no duplicate name)
+							</button>
+							<button
+								v-if="project.portal_team"
+								type="button"
+								class="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+								:disabled="deptBusy"
+								@click="setProjectTeam('')"
+							>
+								Clear team
+							</button>
+						</div>
+						<p v-if="deptMsg" class="text-sm text-green-700">{{ deptMsg }}</p>
+						<p v-if="deptErr" class="text-sm text-red-600">{{ deptErr }}</p>
+					</div>
+					<p v-else class="text-sm text-gray-500">You can view the team; only project managers can change it.</p>
 				</div>
 
 				<div class="portal-card-strong p-5">
@@ -1069,6 +1209,35 @@ async function submitNewCustomer() {
 						</button>
 						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="newCustomerBusy" @click="submitNewCustomer">
 							Create or link
+						</Button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<Teleport to="body">
+			<div
+				v-if="showNewTeam"
+				class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showNewTeam = false"></div>
+				<div class="relative z-10 w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
+					<h3 class="text-lg font-semibold text-gray-900">New team</h3>
+					<p class="mt-1 text-sm text-gray-600">
+						If the name already exists (same spelling), the existing team is used — nothing is duplicated.
+					</p>
+					<label class="mt-4 block text-xs font-medium text-gray-600">Team name</label>
+					<TextInput v-model="newTeamName" class="mt-1 w-full rounded-xl" placeholder="e.g. CD Team 07" />
+					<label class="mt-3 block text-xs font-medium text-gray-600">Office (optional)</label>
+					<TextInput v-model="newTeamOffice" class="mt-1 w-full rounded-xl" placeholder="e.g. RIYADH" />
+					<div class="mt-4 flex justify-end gap-2">
+						<button type="button" class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" @click="showNewTeam = false">
+							Cancel
+						</button>
+						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="newTeamBusy" @click="submitNewTeam">
+							Create and assign
 						</Button>
 					</div>
 				</div>

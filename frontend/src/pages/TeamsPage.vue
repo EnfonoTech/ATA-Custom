@@ -100,6 +100,44 @@ const totalMembers  = computed(() => teams.value.reduce((s, t) => s + t.memberCo
 function openTeam(team)  { selectedTeam.value = team; }
 function closeTeam()     { selectedTeam.value = null; }
 
+// ── Create Team ───────────────────────────────────────────────────────────
+const showNewTeam   = ref(false);
+const newTeamName   = ref("");
+const newTeamOffice = ref("");
+const newTeamBusy   = ref(false);
+const newTeamError  = ref("");
+
+function openNewTeam() {
+  newTeamName.value = "";
+  newTeamOffice.value = "";
+  newTeamError.value = "";
+  showNewTeam.value = true;
+}
+function closeNewTeam() { showNewTeam.value = false; }
+
+async function submitNewTeam() {
+  const n = newTeamName.value.trim();
+  if (n.length < 2) {
+    newTeamError.value = "Enter a team name.";
+    return;
+  }
+  newTeamBusy.value = true;
+  newTeamError.value = "";
+  try {
+    await call({
+      method: "portal_app.api.teams.create_or_get_team",
+      type: "POST",
+      args: { department_name: n, office: newTeamOffice.value.trim() },
+    });
+    showNewTeam.value = false;
+    await loadTeams();
+  } catch (e) {
+    newTeamError.value = apiErr(e);
+  } finally {
+    newTeamBusy.value = false;
+  }
+}
+
 // ── Edit Team ─────────────────────────────────────────────────────────────
 const showEditTeam  = ref(false);
 const savingTeam    = ref(false);
@@ -268,17 +306,29 @@ async function removeMember(m) {
             </p>
           </div>
 
-          <!-- Office filter -->
-          <div class="inline-flex rounded-xl border border-[color:var(--portal-border)] p-0.5 shadow-sm" style="background:var(--portal-surface)">
+          <div class="flex items-center gap-3">
+            <!-- Office filter -->
+            <div class="inline-flex rounded-xl border border-[color:var(--portal-border)] p-0.5 shadow-sm" style="background:var(--portal-surface)">
+              <button
+                v-for="o in officeList" :key="o"
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-xs font-semibold transition"
+                :style="officeFilter === o
+                  ? 'background:' + (o === 'ALL' ? 'var(--portal-accent)' : avatarBg(o)) + ';color:#fff;'
+                  : 'color:var(--portal-muted);'"
+                @click="officeFilter = o"
+              >{{ o }}</button>
+            </div>
+
             <button
-              v-for="o in officeList" :key="o"
+              v-if="canManageTeams"
               type="button"
-              class="rounded-lg px-3 py-1.5 text-xs font-semibold transition"
-              :style="officeFilter === o
-                ? 'background:' + (o === 'ALL' ? 'var(--portal-accent)' : avatarBg(o)) + ';color:#fff;'
-                : 'color:var(--portal-muted);'"
-              @click="officeFilter = o"
-            >{{ o }}</button>
+              class="portal-btn portal-btn-primary flex items-center gap-1.5 whitespace-nowrap"
+              @click="openNewTeam"
+            >
+              <FeatherIcon name="plus" class="h-3.5 w-3.5" />
+              Create team
+            </button>
           </div>
         </div>
       </div>
@@ -477,6 +527,47 @@ async function removeMember(m) {
             :disabled="savingTeam"
             @click="submitEditTeam"
           >{{ savingTeam ? "Saving…" : "Save Changes" }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- New Team Modal -->
+  <Teleport to="body">
+    <div
+      v-if="showNewTeam"
+      class="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style="background:rgba(0,0,0,0.55);"
+      @click.self="closeNewTeam"
+    >
+      <div class="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden" style="background:var(--portal-surface);">
+        <div class="flex items-center justify-between px-6 py-5 border-b border-[color:var(--portal-border)]">
+          <h2 class="text-lg font-bold" style="color:var(--portal-text);">Create Team</h2>
+          <button class="h-8 w-8 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeNewTeam">
+            <FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
+          </button>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+          <p class="text-xs" style="color:var(--portal-muted);">
+            If the name already exists (same spelling), the existing team is used — nothing is duplicated.
+          </p>
+          <div>
+            <label class="text-xs font-semibold mb-1.5 block" style="color:var(--portal-muted);">Team Name</label>
+            <input v-model="newTeamName" type="text" class="portal-input w-full" placeholder="e.g. CD Team 07" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold mb-1.5 block" style="color:var(--portal-muted);">Office (optional)</label>
+            <input v-model="newTeamOffice" type="text" class="portal-input w-full" placeholder="e.g. RIYADH" />
+          </div>
+          <p v-if="newTeamError" class="text-xs text-red-600">{{ newTeamError }}</p>
+        </div>
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[color:var(--portal-border)]">
+          <button class="portal-btn portal-btn-ghost" @click="closeNewTeam">Cancel</button>
+          <button
+            class="portal-btn portal-btn-primary"
+            :disabled="newTeamBusy"
+            @click="submitNewTeam"
+          >{{ newTeamBusy ? "Creating…" : "Create team" }}</button>
         </div>
       </div>
     </div>

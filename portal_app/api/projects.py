@@ -74,6 +74,24 @@ def _assert_may_set_project_manager(project: str, payload: dict) -> None:
 		)
 
 
+def _assert_may_set_team(project: str, payload: dict) -> None:
+	"""A Projects Manager may only put their OWN projects (the ones where they are
+	named as portal_project_manager) under a team — not any project in the
+	portfolio, even though assert_manage_project already lets them edit any
+	project's other fields. System Manager is unrestricted, same as everywhere
+	else this two-tier rule shows up (see _assert_may_set_project_manager)."""
+	if payload.get("portal_team") is None:
+		return
+	if "System Manager" in frappe.get_roles():
+		return
+	manager = frappe.db.get_value("Project", project, "portal_project_manager")
+	if manager != frappe.session.user:
+		frappe.throw(
+			_("Only a System Manager, or the project's own Portal Project Manager, can set its team."),
+			frappe.PermissionError,
+		)
+
+
 def _manageable_project_names(allowed_names: list) -> list:
 	"""Equivalent to [n for n in allowed_names if can_manage_project(n)], without the
 	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call."""
@@ -329,6 +347,7 @@ def update_project(project, **kwargs):
 	"""Update editable project fields from the portal edit modal."""
 	helper.assert_manage_project(project)
 	_assert_may_set_project_manager(project, kwargs)
+	_assert_may_set_team(project, kwargs)
 	doc = frappe.get_doc("Project", project)
 
 	for k in (
@@ -350,6 +369,7 @@ def update_project(project, **kwargs):
 	meta = frappe.get_meta("Project")
 	for k in (
 		"portal_project_manager",
+		"portal_team",
 		"portal_kanban_stage",
 		"portal_office",
 		"portal_phase",
@@ -376,6 +396,69 @@ def update_project(project, **kwargs):
 		doc.status = requested_status
 
 	return {"name": doc.name, "project_name": doc.project_name}
+
+
+def _resync_upcoming_milestone_summary(doc) -> None:
+	"""Keep the legacy single-value portal_upcoming_milestone/portal_milestone_date
+	fields (still read by the Projects table's "Upcoming Milestone" column) pointing
+	at the soonest not-yet-passed entry in the new portal_milestones list — falling
+	back to the most recent past one if every entry is already behind us, so the
+	column still shows *something* rather than going blank the day a milestone
+	passes. The child table is the source of truth now; these two fields are just a
+	denormalized summary other screens read without needing the list themselves."""
+	from frappe.utils import getdate, nowdate
+
+	meta = frappe.get_meta("Project")
+	if not (meta.has_field("portal_upcoming_milestone") and meta.has_field("portal_milestone_date")):
+		return
+
+	rows = sorted(doc.get("portal_milestones") or [], key=lambda m: getdate(m.milestone_date))
+	today = getdate(nowdate())
+	upcoming = [m for m in rows if getdate(m.milestone_date) >= today]
+	chosen = upcoming[0] if upcoming else (rows[-1] if rows else None)
+
+	doc.portal_upcoming_milestone = chosen.title if chosen else ""
+	doc.portal_milestone_date = chosen.milestone_date if chosen else None
+	frappe.db.set_value(
+		"Project",
+		doc.name,
+		{
+			"portal_upcoming_milestone": doc.portal_upcoming_milestone,
+			"portal_milestone_date": doc.portal_milestone_date,
+		},
+		update_modified=False,
+	)
+
+
+@frappe.whitelist()
+def add_project_milestone(project, title, milestone_date):
+	helper.assert_manage_project(project)
+	title = cstr(title).strip()
+	if not title:
+		frappe.throw(_("Milestone title is required."))
+	if not cstr(milestone_date).strip():
+		frappe.throw(_("Pick the date this milestone falls on."))
+
+	doc = frappe.get_doc("Project", project)
+	doc.append("portal_milestones", {"title": title, "milestone_date": milestone_date})
+	doc.save(ignore_permissions=True)
+	_resync_upcoming_milestone_summary(doc)
+	frappe.db.commit()
+	return {"ok": True, "milestones": [m.as_dict() for m in doc.portal_milestones]}
+
+
+@frappe.whitelist()
+def delete_project_milestone(project, row_name):
+	helper.assert_manage_project(project)
+	doc = frappe.get_doc("Project", project)
+	before = len(doc.portal_milestones or [])
+	doc.portal_milestones = [m for m in (doc.portal_milestones or []) if m.name != row_name]
+	if len(doc.portal_milestones) == before:
+		frappe.throw(_("Milestone not found."))
+	doc.save(ignore_permissions=True)
+	_resync_upcoming_milestone_summary(doc)
+	frappe.db.commit()
+	return {"ok": True, "milestones": [m.as_dict() for m in doc.portal_milestones]}
 
 
 @frappe.whitelist()

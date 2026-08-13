@@ -144,6 +144,43 @@ def update_team(team, department_name=None, office=None):
 
 
 @frappe.whitelist()
+def create_or_get_team(department_name, office=None):
+	"""Create a new team (Department), or return the existing one if the exact
+	name is already taken — same "no duplicate name" behaviour as
+	projects.create_or_get_customer, for the analogous "Create team" button on
+	the Project detail page's team picker."""
+	from erpnext import get_default_company
+
+	helper.assert_manage_teams()
+
+	name = (department_name or "").strip()
+	if len(name) < 2:
+		frappe.throw(_("Team name is too short"))
+
+	existing = frappe.db.get_value("Department", {"department_name": name}, "name")
+	if existing:
+		return {"name": existing, "department_name": name, "created": False}
+
+	company = get_default_company()
+	if not company:
+		frappe.throw(_("Set a default Company first."))
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Department",
+			"department_name": name,
+			"company": company,
+			"parent_department": "All Departments",
+			"is_group": 0,
+			"portal_office": (office or "").strip(),
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	frappe.db.commit()
+	return {"name": doc.name, "department_name": doc.department_name, "created": True}
+
+
+@frappe.whitelist()
 def get_assignable_users(team=None):
 	"""Enabled portal users not already assigned to `team`, plus available User Groups,
 	for the Add Member picker — mirrors Frappe's "Assign To" / "Assign To User Group" pair."""
