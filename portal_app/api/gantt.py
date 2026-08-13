@@ -44,6 +44,23 @@ def get_gantt_data(office=None, team=None):
 
 	projects = frappe.get_all("Project", filters=filters, fields=fields)
 
+	# frappe.get_all() on the parent doctype never includes child-table rows —
+	# fetch every project's milestones in one batch query instead of N+1-ing per row.
+	milestones_by_project: dict[str, list] = {}
+	if projects and frappe.db.exists("DocType", "Portal Project Milestone"):
+		names = [p["name"] for p in projects]
+		for m in frappe.get_all(
+			"Portal Project Milestone",
+			filters={"parent": ["in", names], "parenttype": "Project"},
+			fields=["name", "parent", "title", "milestone_date"],
+			order_by="milestone_date asc",
+		):
+			milestones_by_project.setdefault(m.parent, []).append(
+				{"name": m.name, "title": m.title, "milestone_date": m.milestone_date}
+			)
+	for p in projects:
+		p["milestones"] = milestones_by_project.get(p["name"], [])
+
 	departments = frappe.get_all(
 		"Department",
 		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},

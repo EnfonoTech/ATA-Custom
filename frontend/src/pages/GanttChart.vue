@@ -53,8 +53,8 @@ watch([officeFilter, teamFilter], load);
 
 const totalProjects = computed(() => teams.value.reduce((s, t) => s + t.projects.length, 0) + unassigned.value.length);
 const totalMilestones = computed(() =>
-	teams.value.reduce((s, t) => s + t.projects.filter((p) => p.portal_upcoming_milestone).length, 0) +
-	unassigned.value.filter((p) => p.portal_upcoming_milestone).length,
+	teams.value.reduce((s, t) => s + t.projects.reduce((s2, p) => s2 + (p.milestones?.length || 0), 0), 0) +
+	unassigned.value.reduce((s, p) => s + (p.milestones?.length || 0), 0),
 );
 
 // ── Timeline window (Full Year / Quarterly / Monthly) ──────────────────────
@@ -141,10 +141,10 @@ function printGantt() {
 	window.print();
 }
 
-// ── Add / Edit Milestone — a text label (portal_upcoming_milestone) plus the
-// actual date it falls on (portal_milestone_date), both saved on the Project.
-// The date is what positions the flag on the timeline below — without it the
-// flag has nowhere real to sit, so it's required. ──────────────────────────
+// ── Milestones — a project can now carry any number of them (portal_milestones,
+// a child table), each its own text label + date. The date is what positions
+// that milestone's flag on the timeline below — without it the flag has
+// nowhere real to sit, so the backend requires it. ──────────────────────────
 const milestoneProject = ref(null);
 const milestoneText    = ref("");
 const milestoneDate    = ref("");
@@ -153,33 +153,33 @@ const milestoneError   = ref("");
 
 function openMilestone(p) {
 	milestoneProject.value = p;
-	milestoneText.value = p.portal_upcoming_milestone || "";
-	milestoneDate.value = p.portal_milestone_date || "";
+	milestoneText.value = "";
+	milestoneDate.value = "";
 	milestoneError.value = "";
 }
 function closeMilestone() { milestoneProject.value = null; }
 
-async function saveMilestone() {
+async function addMilestone() {
 	if (!milestoneProject.value) return;
-	if (milestoneText.value.trim() && !milestoneDate.value) {
-		milestoneError.value = "Pick the date this milestone falls on.";
+	if (!milestoneText.value.trim() || !milestoneDate.value) {
+		milestoneError.value = "Both a title and a date are required.";
 		return;
 	}
 	milestoneSaving.value = true;
 	milestoneError.value = "";
 	try {
-		await call({
-			method: "portal_app.api.projects.update_project",
+		const res = await call({
+			method: "portal_app.api.projects.add_project_milestone",
 			type: "POST",
 			args: {
 				project: milestoneProject.value.name,
-				portal_upcoming_milestone: milestoneText.value.trim(),
-				portal_milestone_date: milestoneText.value.trim() ? milestoneDate.value : "",
+				title: milestoneText.value.trim(),
+				milestone_date: milestoneDate.value,
 			},
 		});
-		milestoneProject.value.portal_upcoming_milestone = milestoneText.value.trim();
-		milestoneProject.value.portal_milestone_date = milestoneText.value.trim() ? milestoneDate.value : "";
-		closeMilestone();
+		milestoneProject.value.milestones = res.milestones;
+		milestoneText.value = "";
+		milestoneDate.value = "";
 	} catch (e) {
 		const body = e?.responseBody;
 		milestoneError.value = body?.message || body?.exc || "Could not save milestone.";
@@ -188,18 +188,32 @@ async function saveMilestone() {
 	}
 }
 
-// Real position on the timeline for a project's milestone flag — falls back to
-// the bar's end (old behaviour) only for rows saved before a date existed.
-function milestoneFlagStyle(p) {
-	const d = parseDate(p.portal_milestone_date);
-	if (d) {
-		const p_ = pct(d);
-		if (p_ < 0 || p_ > 100) return null;
-		return { left: `calc(${p_}% - 6px)` };
+async function removeMilestone(row) {
+	if (!milestoneProject.value) return;
+	milestoneSaving.value = true;
+	milestoneError.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.projects.delete_project_milestone",
+			type: "POST",
+			args: { project: milestoneProject.value.name, row_name: row.name },
+		});
+		milestoneProject.value.milestones = res.milestones;
+	} catch (e) {
+		const body = e?.responseBody;
+		milestoneError.value = body?.message || body?.exc || "Could not remove milestone.";
+	} finally {
+		milestoneSaving.value = false;
 	}
-	const bar = barStyle(p);
-	if (!bar) return null;
-	return { left: `calc(${bar.left} + ${bar.width} - 6px)` };
+}
+
+// Real position on the timeline for one milestone's flag.
+function milestoneFlagStyle(m) {
+	const d = parseDate(m.milestone_date);
+	if (!d) return null;
+	const p_ = pct(d);
+	if (p_ < 0 || p_ > 100) return null;
+	return { left: `calc(${p_}% - 6px)` };
 }
 
 // All projects across every team + unassigned, for the header "+ Milestone" project picker.
@@ -318,10 +332,10 @@ function pickProjectForMilestone(p) {
 								<button
 									type="button"
 									class="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-black/5"
-									:title="p.portal_upcoming_milestone ? 'Edit milestone' : 'Add milestone'"
+									title="Add / manage milestones"
 									@click="openMilestone(p)"
 								>
-									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.milestones?.length ? '#ef4444' : 'var(--portal-subtle)' }" />
 								</button>
 							</div>
 							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/visibleMonths.length}% 100%` }">
@@ -339,13 +353,15 @@ function pickProjectForMilestone(p) {
 										{{ Math.round(p.percent_complete || 0) }}%
 									</span>
 								</div>
-								<FeatherIcon
-									v-if="p.portal_upcoming_milestone && milestoneFlagStyle(p)"
-									name="flag"
-									class="absolute top-1 h-3.5 w-3.5 text-red-500"
-									:style="milestoneFlagStyle(p)"
-									:title="'Milestone: ' + p.portal_upcoming_milestone + (p.portal_milestone_date ? ' — ' + fmtMilestoneDate(p.portal_milestone_date) : '')"
-								/>
+								<template v-for="m in p.milestones" :key="m.name">
+									<FeatherIcon
+										v-if="milestoneFlagStyle(m)"
+										name="flag"
+										class="absolute top-1 h-3.5 w-3.5 text-red-500"
+										:style="milestoneFlagStyle(m)"
+										:title="`Milestone: ${m.title} - ${fmtMilestoneDate(m.milestone_date)}`"
+									/>
+								</template>
 								<span v-if="!barStyle(p)" class="absolute inset-0 flex items-center px-2 text-[10px]" style="color:var(--portal-subtle);">No dates set</span>
 							</div>
 						</div>
@@ -358,6 +374,17 @@ function pickProjectForMilestone(p) {
 						<span class="font-semibold text-sm" style="color:var(--portal-text);">Unassigned to a team</span>
 						<span class="portal-pill portal-pill-muted ml-2">{{ unassigned.length }} projects</span>
 					</div>
+
+					<!-- Month grid header -->
+					<div class="grid text-[10px] font-semibold uppercase tracking-wider border-b border-[color:var(--portal-border)]" style="grid-template-columns: 220px 1fr;">
+						<div></div>
+						<div class="relative grid" :style="{ gridTemplateColumns: `repeat(${visibleMonths.length}, 1fr)` }">
+							<div v-for="m in visibleMonths" :key="m.year + '-' + m.month" class="px-2 py-2 text-center border-l border-[color:var(--portal-border)]" style="color:var(--portal-muted);">
+								{{ MONTH_NAMES[m.month] }} {{ m.year }}
+							</div>
+						</div>
+					</div>
+
 					<div class="divide-y divide-[color:var(--portal-border)]">
 						<div v-for="p in unassigned" :key="p.name" class="grid items-center" style="grid-template-columns: 220px 1fr;">
 							<div class="px-3 py-2.5 min-w-0 flex items-center gap-2">
@@ -369,21 +396,35 @@ function pickProjectForMilestone(p) {
 								<button
 									type="button"
 									class="h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-black/5"
-									:title="p.portal_upcoming_milestone ? 'Edit milestone' : 'Add milestone'"
+									title="Add / manage milestones"
 									@click="openMilestone(p)"
 								>
-									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.milestones?.length ? '#ef4444' : 'var(--portal-subtle)' }" />
 								</button>
 							</div>
-							<div class="relative h-9 border-l border-[color:var(--portal-border)]">
+							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/visibleMonths.length}% 100%` }">
 								<div v-if="todayPct !== null" class="absolute top-0 bottom-0 w-px bg-red-500 z-10" :style="{ left: todayPct + '%' }"></div>
 								<div
 									v-if="barStyle(p)"
 									class="absolute top-1.5 h-6 rounded-md overflow-hidden"
 									:style="{ ...barStyle(p), background: 'rgba(128,128,128,0.18)' }"
+									:title="`${p.project_name} - ${Math.round(p.percent_complete || 0)}%`"
 								>
 									<div class="h-full rounded-md" :style="{ width: (p.percent_complete || 0) + '%', background: progressColor(p.percent_complete) }"></div>
+									<span class="absolute inset-0 flex items-center px-2 text-[10px] font-semibold text-white truncate" style="mix-blend-mode: difference;">
+										{{ Math.round(p.percent_complete || 0) }}%
+									</span>
 								</div>
+								<template v-for="m in p.milestones" :key="m.name">
+									<FeatherIcon
+										v-if="milestoneFlagStyle(m)"
+										name="flag"
+										class="absolute top-1 h-3.5 w-3.5 text-red-500"
+										:style="milestoneFlagStyle(m)"
+										:title="`Milestone: ${m.title} - ${fmtMilestoneDate(m.milestone_date)}`"
+									/>
+								</template>
+								<span v-if="!barStyle(p)" class="absolute inset-0 flex items-center px-2 text-[10px]" style="color:var(--portal-subtle);">No dates set</span>
 							</div>
 						</div>
 					</div>
@@ -422,14 +463,14 @@ function pickProjectForMilestone(p) {
 						@click="pickProjectForMilestone(p)"
 					>
 						<span class="truncate">{{ p.project_name }}</span>
-						<FeatherIcon name="flag" class="h-3.5 w-3.5 shrink-0" :style="{ color: p.portal_upcoming_milestone ? '#ef4444' : 'var(--portal-subtle)' }" />
+						<FeatherIcon name="flag" class="h-3.5 w-3.5 shrink-0" :style="{ color: p.milestones?.length ? '#ef4444' : 'var(--portal-subtle)' }" />
 					</button>
 				</div>
 			</div>
 		</div>
 	</Teleport>
 
-	<!-- Add / Edit Milestone Modal -->
+	<!-- Milestones Modal — a project can carry any number of these now -->
 	<Teleport to="body">
 		<div
 			v-if="milestoneProject"
@@ -441,7 +482,7 @@ function pickProjectForMilestone(p) {
 			<div class="relative z-10 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden portal-anim-in" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
 				<div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--portal-border);">
 					<div class="min-w-0">
-						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">Milestone</h2>
+						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">Milestones</h2>
 						<p class="text-xs mt-0.5 truncate" style="color:var(--portal-muted);">{{ milestoneProject.project_name }}</p>
 					</div>
 					<button class="h-7 w-7 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeMilestone">
@@ -450,26 +491,50 @@ function pickProjectForMilestone(p) {
 				</div>
 
 				<div class="px-5 py-4 space-y-3">
-					<input
-						v-model="milestoneText"
-						type="text"
-						placeholder="e.g. Client presentation"
-						class="portal-input w-full"
-						maxlength="140"
-						@keyup.enter="saveMilestone"
-					/>
-					<div>
-						<label class="block text-xs font-medium mb-1" style="color:var(--portal-muted);">Milestone date</label>
-						<input v-model="milestoneDate" type="date" class="portal-input w-full" @keyup.enter="saveMilestone"/>
-						<p class="text-[11px] mt-1" style="color:var(--portal-subtle);">This is where the flag lands on the Gantt timeline.</p>
+					<div v-if="milestoneProject.milestones?.length" class="space-y-1.5 max-h-40 overflow-auto">
+						<div
+							v-for="m in milestoneProject.milestones"
+							:key="m.name"
+							class="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs"
+							style="background:var(--portal-surface-alt);"
+						>
+							<div class="min-w-0">
+								<div class="font-medium truncate" style="color:var(--portal-text);">{{ m.title }}</div>
+								<div style="color:var(--portal-muted);">{{ fmtMilestoneDate(m.milestone_date) }}</div>
+							</div>
+							<button
+								type="button"
+								class="h-6 w-6 shrink-0 rounded-full flex items-center justify-center transition hover:bg-red-50"
+								title="Remove milestone"
+								:disabled="milestoneSaving"
+								@click="removeMilestone(m)"
+							>
+								<FeatherIcon name="trash-2" class="h-3.5 w-3.5 text-red-600" />
+							</button>
+						</div>
 					</div>
-					<p v-if="milestoneError" class="text-xs text-red-600">{{ milestoneError }}</p>
+					<p v-else class="text-xs" style="color:var(--portal-muted);">No milestones yet.</p>
+
+					<div class="border-t pt-3 space-y-2" style="border-color:var(--portal-border);">
+						<label class="block text-xs font-medium" style="color:var(--portal-muted);">Add a milestone</label>
+						<input
+							v-model="milestoneText"
+							type="text"
+							placeholder="e.g. Client presentation"
+							class="portal-input w-full"
+							maxlength="140"
+							@keyup.enter="addMilestone"
+						/>
+						<input v-model="milestoneDate" type="date" class="portal-input w-full" @keyup.enter="addMilestone"/>
+						<p class="text-[11px]" style="color:var(--portal-subtle);">This is where the flag lands on the Gantt timeline.</p>
+						<p v-if="milestoneError" class="text-xs text-red-600">{{ milestoneError }}</p>
+						<button class="portal-btn portal-btn-primary w-full" :disabled="milestoneSaving" @click="addMilestone">
+							{{ milestoneSaving ? "Saving…" : "Add milestone" }}
+						</button>
+					</div>
 				</div>
-				<div class="flex items-center justify-end gap-3 px-5 py-4 border-t" style="border-color:var(--portal-border);">
-					<button class="portal-btn portal-btn-ghost" @click="closeMilestone">Cancel</button>
-					<button class="portal-btn portal-btn-primary" :disabled="milestoneSaving" @click="saveMilestone">
-						{{ milestoneSaving ? "Saving…" : "Save" }}
-					</button>
+				<div class="flex items-center justify-end px-5 py-4 border-t" style="border-color:var(--portal-border);">
+					<button class="portal-btn portal-btn-ghost" @click="closeMilestone">Close</button>
 				</div>
 			</div>
 		</div>
