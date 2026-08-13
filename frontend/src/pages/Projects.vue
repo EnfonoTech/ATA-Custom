@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch, inject, computed } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch, inject, computed } from "vue";
 import { call } from "@/api";
 import { useRouter, useRoute } from "vue-router";
 import { Button, TextInput, FeatherIcon } from "frappe-ui";
@@ -43,6 +43,43 @@ const newForm = ref({
 	expected_end_date: "",
 	customer: "",
 });
+
+// ── Customer picker for "New project" (search-as-you-type, or full list on focus) ──
+const newCustomerSearchQ = ref("");
+const newCustomerHits = ref([]);
+const newCustomerPickerRef = ref(null);
+let newCustomerSearchTimer = null;
+
+async function runNewCustomerSearch(q) {
+	try {
+		newCustomerHits.value = await call({
+			method: "portal_app.api.projects.search_customers",
+			args: { txt: (q || "").trim() },
+		});
+	} catch (e) {
+		console.error(e);
+		newCustomerHits.value = [];
+	}
+}
+watch(newCustomerSearchQ, (q) => {
+	clearTimeout(newCustomerSearchTimer);
+	newCustomerSearchTimer = setTimeout(() => runNewCustomerSearch(q), 200);
+});
+function onNewCustomerFocus() {
+	if (!newCustomerHits.value.length) runNewCustomerSearch(newCustomerSearchQ.value);
+}
+function linkNewCustomer(name) {
+	newForm.value.customer = name;
+	newCustomerSearchQ.value = "";
+	newCustomerHits.value = [];
+}
+function onDocClickCloseNewCustomerPicker(e) {
+	if (newCustomerPickerRef.value && !newCustomerPickerRef.value.contains(e.target)) {
+		newCustomerHits.value = [];
+	}
+}
+onMounted(() => document.addEventListener("click", onDocClickCloseNewCustomerPicker));
+onBeforeUnmount(() => document.removeEventListener("click", onDocClickCloseNewCustomerPicker));
 
 // ── Edit Project ─────────────────────────────────────────────────────────────
 const showEdit   = ref(false);
@@ -227,6 +264,8 @@ async function openNew() {
 		portal_phase: "",
 		portal_project_manager: "",
 	};
+	newCustomerSearchQ.value = "";
+	newCustomerHits.value = [];
 	if (!portalUsers.value.length) {
 		try {
 			portalUsers.value = await call({ method: "portal_app.api.projects.get_portal_users" });
@@ -831,12 +870,33 @@ function printProjects() {
 							</div>
 						</div>
 						<div>
-							<label class="portal-section-title mb-1 block">Customer (link name)</label>
-							<TextInput
-								v-model="newForm.customer"
-								class="w-full rounded-xl"
-								placeholder="ERPNext Customer name if applicable"
-							/>
+							<label class="portal-section-title mb-1 block">Customer</label>
+							<div ref="newCustomerPickerRef" class="space-y-2">
+								<TextInput
+									v-model="newCustomerSearchQ"
+									class="w-full rounded-xl"
+									placeholder="Click to see existing customers, or type to filter…"
+									@focus="onNewCustomerFocus"
+								/>
+								<div
+									v-if="newCustomerHits.length"
+									class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
+								>
+									<button
+										v-for="c in newCustomerHits"
+										:key="c.name"
+										type="button"
+										class="flex w-full flex-col gap-0.5 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white"
+										@click="linkNewCustomer(c.name)"
+									>
+										<span class="font-medium text-gray-900">{{ c.customer_name || c.name }}</span>
+										<span class="text-xs text-gray-500">{{ c.name }}</span>
+									</button>
+								</div>
+								<p v-if="newForm.customer" class="text-xs text-[color:var(--portal-muted)]">
+									Selected: <strong class="text-[color:var(--portal-text)]">{{ newForm.customer }}</strong>
+								</p>
+							</div>
 						</div>
 						<p v-if="createError" class="text-sm text-red-600">{{ createError }}</p>
 						<div class="flex justify-end gap-2 pt-2">
