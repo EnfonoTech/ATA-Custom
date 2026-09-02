@@ -94,8 +94,16 @@ def _assert_may_set_team(project: str, payload: dict) -> None:
 
 def _manageable_project_names(allowed_names: list) -> list:
 	"""Equivalent to [n for n in allowed_names if can_manage_project(n)], without the
-	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call."""
-	return list(allowed_names) if helper.has_portal_staff_project_access() else []
+	O(N^2) blowup — can_manage_project() re-reads the whole Project table per call.
+
+	A non-staff user can still manage the one project (if any) they are the
+	portal_project_manager of — see helper.can_manage_project_team."""
+	if helper.has_portal_staff_project_access():
+		return list(allowed_names)
+	led = frappe.get_all(
+		"Project", filters={"portal_project_manager": frappe.session.user}, pluck="name"
+	)
+	return [n for n in led if n in allowed_names]
 
 
 def _safe_order_by(sort_by: str, sort_order: str) -> str:
@@ -757,7 +765,7 @@ def create_project(project_name, company=None, **kwargs):
 
 @frappe.whitelist()
 def sync_project_team(project, users):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_team(project)
 	if isinstance(users, str):
 		users = json.loads(users or "[]")
 	if not isinstance(users, list):

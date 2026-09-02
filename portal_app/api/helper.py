@@ -97,7 +97,11 @@ def get_allowed_project_names(user=None) -> list[str]:
 		"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
 		user,
 	)
-	return [r[0] for r in rows]
+	names = {r[0] for r in rows}
+	# A project's own lead can see it even before they've been added as a Project
+	# User row on it — see can_manage_project_team.
+	names.update(frappe.get_all("Project", filters={"portal_project_manager": user}, pluck="name"))
+	return list(names)
 
 
 def assert_portal_user(user=None) -> None:
@@ -177,6 +181,24 @@ def assert_manage_teams() -> None:
 	if not can_manage_teams():
 		frappe.throw(
 			_("Only a Projects Manager or System Manager can manage teams."),
+			frappe.PermissionError,
+		)
+
+
+def can_manage_project_team(project_name: str, user=None) -> bool:
+	"""Adding/removing a project's own members (Project User rows) is either a
+	staff-level action, or something the project's own portal_project_manager may
+	do for that one project — same two-tier shape as _assert_may_set_team."""
+	user = user or frappe.session.user
+	if has_portal_staff_project_access(user):
+		return True
+	return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
+
+
+def assert_manage_project_team(project_name: str) -> None:
+	if not can_manage_project_team(project_name):
+		frappe.throw(
+			_("Only a Projects Manager, System Manager, or this project's own lead can manage its team."),
 			frappe.PermissionError,
 		)
 
