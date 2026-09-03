@@ -48,11 +48,13 @@ def global_search(query):
 			limit_page_length=5,
 		)
 
-	teams = frappe.get_all(
-		"Department",
-		filters={"portal_office": ["!=", ""], "department_name": ["like", like]},
-		fields=["name", "department_name", "portal_office"],
-		limit_page_length=5,
-	)
+	teams = []
+	if not helper.user_is_customer_portal_user():
+		teams = frappe.get_all(
+			"Department",
+			filters={"portal_office": ["!=", ""], "department_name": ["like", like]},
+			fields=["name", "department_name", "portal_office"],
+			limit_page_length=5,
+		)
 
 	return {"projects": projects, "tasks": tasks, "teams": teams}

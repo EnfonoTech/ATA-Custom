@@ -31,6 +31,15 @@ no_cache = 1
 
 
 def get_context(context):
+	# Restricted again now that the site holds real client data. This page carries
+	# UAT logins and internal test procedure; it was deliberately left open only
+	# while ata was a throwaway test site. frappe.only_for raises PermissionError,
+	# which Frappe renders as its standard 403 "Not Permitted" page with a login
+	# link — verify with a logged-out request, never by reading this code, because
+	# a controller Frappe fails to import performs no check at all (see the module
+	# docstring on the hyphen/underscore trap that caused exactly that).
+	frappe.only_for("System Manager")
+
 	context.no_cache = 1
 	context.title = _("ATA Project Portal — Tester Guide")
 

@@ -93,10 +93,28 @@ def ensure_project_portal_custom_fields():
 					"description": "Date the milestone above falls on — positions the flag on the Gantt Chart timeline",
 				},
 				{
+					# The child table behind the multi-milestone list. projects.py
+					# appends to this in add_project_milestone(); without the field,
+					# Document.append() dies on `meta.get_field(...).options` with
+					# "AttributeError: 'NoneType' object has no attribute 'options'"
+					# and the Milestone dialog 500s on first use. The child DocType
+					# shipping in the app is not enough — Project belongs to ERPNext,
+					# so the table field has to be a Custom Field.
+					"fieldname": "portal_milestones",
+					"label": "Portal Milestones",
+					"fieldtype": "Table",
+					"options": "Portal Project Milestone",
+					"insert_after": "portal_milestone_date",
+					"description": "Every milestone for this project. portal_upcoming_milestone / portal_milestone_date above are a denormalized summary of this list.",
+				},
+				{
 					"fieldname": "portal_server_t",
 					"label": "T-Server (Google Drive)",
 					"fieldtype": "Data",
-					"insert_after": "portal_milestone_date",
+					# Chained after portal_milestones, not portal_milestone_date: two
+					# fields claiming the same insert_after makes the resulting field
+					# order non-deterministic (same reason noted on portal_team below).
+					"insert_after": "portal_milestones",
 					"description": "Link to this project's folder on Google Drive",
 				},
 				{

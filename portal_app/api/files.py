@@ -159,6 +159,53 @@ def get_project_folders(project: str) -> dict:
 	return {"project_root": project_root, "subfolders": subfolders}
 
 
+def get_project_folders_bulk(projects: list) -> dict:
+	"""get_project_folders() for many projects in ONE query instead of two per project.
+
+	list_managed_shares walks every project the caller manages. Calling the single
+	version in that loop cost 2 queries per project — on a site with 118 projects that
+	was ~240 queries just to read a folder tree that lives in one table. This fetches
+	every folder row under the attachments root once and buckets them in Python.
+
+	Returns {project: {"project_root": str, "subfolders": [{"name","label"}]}} with an
+	entry for every requested project, empty subfolders included, so callers can index
+	it exactly like the single-project version.
+	"""
+	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+	out = {p: {"project_root": attachments_root + "/" + p, "subfolders": []} for p in projects}
+	if not projects:
+		return out
+
+	# One scan of the folder rows, filtered to the attachments subtree. Bucketing by
+	# project in Python is cheaper than N LIKE queries even at a few thousand folders.
+	rows = frappe.get_all(
+		"File",
+		filters={"is_folder": 1, "name": ["like", attachments_root + "/%"]},
+		fields=["name"],
+		limit_page_length=0,
+		ignore_permissions=True,
+	)
+	# A folder row is always "<attachments_root>/<project>/<rest>", so split the project
+	# out of the path directly. Testing each row against every requested project instead
+	# would be rows x projects string compares (~236k here) for no benefit.
+	wanted = set(projects)
+	base = attachments_root + "/"
+	for r in rows:
+		nm = r["name"]
+		if not nm.startswith(base):
+			continue
+		rest = nm[len(base) :]
+		project, sep, label = rest.partition("/")
+		if not sep or project not in wanted:
+			# No separator means this IS a project root, not a subfolder — the caller
+			# already has project_root, so there is nothing to add.
+			continue
+		out[project]["subfolders"].append({"name": nm, "label": label})
+	for p in out:
+		out[p]["subfolders"].sort(key=lambda d: d["label"])
+	return out
+
+
 def _folder_template_uncached() -> list[str]:
 	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists(
 		"DocType", "Portal Project Settings"
@@ -275,7 +322,16 @@ def ensure_project_folders(project: str) -> dict:
 		return {"project_root": project_root, "subfolders": subfolders}
 
 	subfolders = []
-	seen = set()
+	# Maps a template-relative path already processed in this call to the REAL
+	# File name it resolved to, so a later template row sharing that prefix can
+	# resume from the actual folder. This used to be a set that reconstructed the
+	# parent path by string-concatenating the original template segment names —
+	# correct only as long as no ancestor folder had ever been renamed. Once one
+	# had, that reconstructed path pointed at a File name that no longer existed,
+	# and the next segment's insert failed with LinkValidationError, permanently
+	# breaking that project's folder listing (rename_project_subfolder calls this
+	# function too, so this used to fail on the very next rename in the project).
+	seen: dict[str, str] = {}
 	for rel in _folder_template():
 		cur_parent = project_root
 		current_parts = []
@@ -283,11 +339,11 @@ def ensure_project_folders(project: str) -> dict:
 			current_parts.append(seg)
 			cur_rel = "/".join(current_parts)
 			if cur_rel in seen:
-				cur_parent = f"{project_root}/{cur_rel}"
+				cur_parent = seen[cur_rel]
 				continue
 			fname = _ensure_folder(cur_parent, seg)
 			subfolders.append({"name": fname, "label": cur_rel})
-			seen.add(cur_rel)
+			seen[cur_rel] = fname
 			cur_parent = fname
 	return {"project_root": project_root, "subfolders": subfolders}
 
@@ -343,6 +399,11 @@ _BLOCKED_UPLOAD_EXTENSIONS = frozenset(
 # request, so without these one upload can exhaust a worker.
 _ZIP_MAX_ENTRIES = 2000
 _ZIP_MAX_TOTAL_BYTES = 500 * 1024 * 1024
+# Ceiling for the Shares page, which loads every file of every managed project
+# in one request to build its tree. 50k covers any realistic ATA site; beyond
+# that the page logs that it truncated rather than silently showing less.
+_MANAGED_SHARES_MAX_FILES = 50000
+
 _ZIP_DOWNLOAD_MAX_FILES = 500
 _ZIP_DOWNLOAD_MAX_BYTES = 500 * 1024 * 1024
 
@@ -440,13 +501,69 @@ def _verify_share_token(token: str) -> dict:
 	return payload
 
 
+
+# Folders a client contact may see inside a project. Everything else — concept
+# studies, Baladiya submissions, working drawings, supervision — is internal.
+# "06-CLIENT SUBMITTAL" is what ATA formally submits TO the client, so it is the
+# one folder that is theirs to read.
+#
+# Deliberately NOT including "01-DOCUMENTS/01-CLIENT DATA": that holds title
+# deeds and ID scans. The client supplied them, but exposing an ID scan through a
+# portal login is a bigger promise than this feature needs to make. Add it here if
+# ATA decides otherwise.
+_CUSTOMER_VISIBLE_FOLDERS = ("06-CLIENT SUBMITTAL",)
+
+
+def _customer_folder_roots(project: str) -> list:
+	"""Full File-folder paths a customer contact may read in this project."""
+	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+	base = attachments_root + "/" + project
+	return [base + "/" + f for f in _CUSTOMER_VISIBLE_FOLDERS]
+
+
+def _restrict_files_for_customer(project: str, filters: list) -> list:
+	"""Append a folder restriction to a File query when the caller is a customer.
+
+	Enforced HERE, in the query, rather than by hiding things in the UI — a customer
+	who calls the endpoint directly must get the same answer as one who clicks.
+	"""
+	if not helper.is_customer_only():
+		return filters
+	roots = _customer_folder_roots(project)
+	# get_all cannot express OR across LIKEs in a filter list, and there is only ever
+	# a handful of roots, so match the prefix in one LIKE per root via or_filters at
+	# the call site. Callers that pass a plain filter list use the single-root form.
+	filters = list(filters)
+	filters.append(["folder", "like", roots[0] + "%"])
+	return filters
+
+
 @frappe.whitelist()
 def list_project_files(project):
 	helper.assert_project_access(project)
 	folders = get_project_folders(project)
+	is_customer = helper.is_customer_only()
+
+	file_filters = {
+		"attached_to_doctype": "Project",
+		"attached_to_name": project,
+		"folder": ["not like", "Home/Contracts/%"],
+	}
+	if is_customer:
+		# A client contact sees only the submittal folder, never the internal tree.
+		roots = _customer_folder_roots(project)
+		file_filters["folder"] = ["like", roots[0] + "%"]
+		folders = {
+			"project_root": folders.get("project_root"),
+			"subfolders": [
+				f for f in (folders.get("subfolders") or [])
+				if any(str(f.get("name", "")).startswith(r) for r in roots)
+			],
+		}
+
 	files = frappe.get_all(
 		"File",
-		filters={"attached_to_doctype": "Project", "attached_to_name": project},
+		filters=file_filters,
 		fields=[
 			"name",
 			"file_name",
@@ -465,8 +582,15 @@ def list_project_files(project):
 
 @frappe.whitelist()
 def list_project_folders(project):
+	# get_project_folders(), not ensure_project_folders(): this is a read-only
+	# listing endpoint. Calling the writing version here meant every time
+	# anyone opened a project's Files page, it silently re-synced that
+	# project against the CURRENT company-wide template — so editing the
+	# shared template (e.g. adding a row) retroactively added the new
+	# folder to every existing project the next time someone merely looked
+	# at it, not just to new projects going forward.
 	helper.assert_project_access(project)
-	return ensure_project_folders(project)
+	return get_project_folders(project)
 
 
 @frappe.whitelist()
@@ -494,7 +618,7 @@ def rename_project_subfolder(project, folder_path, new_folder_name):
 	new_segment = cstr(new_folder_name or "").strip()
 	if not new_segment or "/" in new_segment or "\\" in new_segment or ".." in new_segment:
 		frappe.throw(_("Invalid folder name. Use a single name without slashes."))
-	folder_ctx = ensure_project_folders(project)
+	folder_ctx = get_project_folders(project)
 	root = folder_ctx["project_root"].replace("\\", "/")
 	fp = cstr(folder_path or "").replace("\\", "/").strip()
 	if not fp or fp == root:
@@ -513,12 +637,22 @@ def rename_project_subfolder(project, folder_path, new_folder_name):
 	if frappe.db.exists("File", new_path):
 		frappe.throw(_("A file or folder with that name already exists"))
 	frappe.rename_doc("File", fp, new_path, force=True, merge=False)
+	# rename_doc only changes the docname (the full path) — it has no idea this
+	# doctype also carries a separate file_name field that's supposed to mirror
+	# the folder's own (last path segment) name. Left stale, any later lookup
+	# by the OLD name (e.g. ensure_project_folders() matching a template
+	# segment against file_name) would silently treat this renamed folder as
+	# if it still had its original name.
+	frappe.db.set_value("File", new_path, "file_name", new_segment, update_modified=False)
 	return {"old": fp, "new": new_path}
 
 
 def _resolve_share_folder(project: str, folder_hint: str) -> tuple[str, str]:
 	"""Return (canonical File folder name, human label) for project root or a template subfolder."""
-	folder_ctx = ensure_project_folders(project)
+	# Read-only lookup — this is only resolving an EXISTING folder reference
+	# for a share link, not provisioning new ones, so it must not silently
+	# re-sync the project against the current template (see list_project_folders).
+	folder_ctx = get_project_folders(project)
 	root = folder_ctx["project_root"]
 	hint = cstr(folder_hint).strip()
 	if not hint:
@@ -968,6 +1102,9 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30, notif
 			doc.expires_at = _expiry_datetime(expires_days)
 			doc.user_email = user_row.get("email") or doc.user_email
 			doc.user_full_name = user_row.get("full_name") or doc.user_full_name
+			# Whoever (re-)grants the share becomes responsible for it — otherwise a
+			# teammate extending someone else's share could never revoke their own work.
+			doc.created_by_user = frappe.session.user
 			doc.save(ignore_permissions=True)
 		else:
 			doc = frappe.get_doc(
@@ -1115,6 +1252,7 @@ def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)
 		frappe.throw(_("User {0} not found.").format(uid))
 	if uid in {"Guest", "Administrator"}:
 		frappe.throw(_("Cannot share file with {0}.").format(uid))
+	_assert_valid_share_recipient(uid, project)
 
 	try:
 		expires_days = max(1, min(365, int(expires_days)))
@@ -1145,6 +1283,9 @@ def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)
 			doc.expires_at = _expiry_datetime(expires_days)
 			doc.user_email = user_row.get("email") or doc.user_email
 			doc.user_full_name = user_row.get("full_name") or doc.user_full_name
+			# Whoever (re-)grants the share becomes responsible for it — otherwise a
+			# teammate extending someone else's share could never revoke their own work.
+			doc.created_by_user = frappe.session.user
 			doc.save(ignore_permissions=True)
 		else:
 			doc = frappe.get_doc(
@@ -1409,11 +1550,23 @@ def _revoke_folder_docshares(project: str, folder: str, user: str) -> None:
 	  - The parent Project doc — but ONLY if the user has no other active Portal
 	    Folder Share for this project (otherwise other shares would break).
 	"""
-	import frappe.share as _share
-
 	def _safe_remove(doctype, name):
+		# frappe.share.remove() deletes the DocShare row without ignore_permissions, and
+		# DocShare.on_trash() *also* independently re-checks "Share" permission on the
+		# underlying doc unless doc.flags.ignore_share_permission is set — so it silently
+		# throws (and gets swallowed below) for any caller who isn't a System Manager,
+		# e.g. a Projects Manager revoking a share they granted. Bypass both checks.
 		try:
-			_share.remove(doctype, name, user)
+			share_name = frappe.db.get_value(
+				"DocShare", {"user": user, "share_name": name, "share_doctype": doctype}
+			)
+			if share_name:
+				frappe.delete_doc(
+					"DocShare",
+					share_name,
+					ignore_permissions=True,
+					flags={"ignore_share_permission": True},
+				)
 		except Exception:
 			frappe.log_error(frappe.get_traceback(), f"Portal: docshare remove {doctype}/{name}")
 
@@ -1537,8 +1690,20 @@ def list_shared_with_me():
 			project = file_row.get("attached_to_name")
 		if not project or not frappe.db.exists("Project", project):
 			continue
-		# Skip if a Portal Folder Share already covers this folder.
-		if any(f["folder_path"] == fname for f in folders_by_project.get(project, [])):
+		# Skip if a Portal Folder Share already covers this folder, or covers a parent
+		# folder that this file/folder is nested under (the per-file DocShare rows
+		# granted by share_folder_with_user would otherwise show up a second time,
+		# once per file, alongside the folder entry that already lists them). Folder
+		# docnames are their own path, but a FILE's docname is an opaque hash — its
+		# location is in its `folder` field, not in `fname` — so check both.
+		containing_path = fname if file_row.get("is_folder") else (file_row.get("folder") or "")
+		covered = folders_by_project.get(project, [])
+		if any(
+			f["folder_path"] == fname
+			or containing_path == f["folder_path"]
+			or containing_path.startswith(f["folder_path"] + "/")
+			for f in covered
+		):
 			continue
 		# Build a label relative to the project root. For direct-file shares (where the
 		# File doc name is a hash, not a path), fall back to the file's display name.
@@ -1747,7 +1912,16 @@ def list_managed_shares():
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return {"projects": []}
-	manageable = {p for p in allowed if helper.can_manage_project(p)}
+	# Mirrors helper.can_manage_project without calling it per project (it re-reads the
+	# Project table each time — that was a full scan x N here). Staff manage everything
+	# they can see; a Projects User manages only projects they are on the team of.
+	# Staff first — Administrator carries the Portal Customer role too.
+	if helper.has_portal_staff_project_access():
+		manageable = set(allowed)
+	elif helper.user_is_customer_portal_user():
+		manageable = set()
+	else:
+		manageable = set(allowed) & set(helper.project_member_names())
 	if not manageable:
 		# Not a manager on any project — surface an empty payload with a hint flag so
 		# the UI can show a "you are not a project admin" lock screen.
@@ -1913,11 +2087,62 @@ def list_managed_shares():
 	# the admin sees the full structure with shares overlaid (rather than only the
 	# rows that already happen to have a share). File-level shares are nested
 	# under the file row.
-	for pj in manageable:
+	# Two bulk reads up front instead of two queries per project inside the loop below.
+	# With 118 manageable projects that is the difference between ~590 queries and ~6.
+	try:
+		folders_by_project = get_project_folders_bulk(list(manageable))
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Portal: bulk folder read")
+		folders_by_project = {}
+
+	files_by_project: dict[str, list] = {}
+	if manageable:
 		try:
-			folder_ctx = get_project_folders(pj)
+			for fr in frappe.get_all(
+				"File",
+				filters={
+					"attached_to_doctype": "Project",
+					"attached_to_name": ["in", list(manageable)],
+					"is_folder": 0,
+				},
+				fields=[
+					"name",
+					"file_name",
+					"file_url",
+					"folder",
+					"file_size",
+					"is_private",
+					"creation",
+					"owner",
+					"attached_to_name",
+				],
+				order_by="creation desc",
+				# The per-project version capped at 2000. This reads every managed
+				# project at once, so it needs its own ceiling or a large site could
+				# pull hundreds of thousands of rows into memory in one request.
+				limit_page_length=_MANAGED_SHARES_MAX_FILES,
+				ignore_permissions=True,
+			):
+				# pop, don't just read: these rows are spread wholesale into the response
+				# with {**fr}, so leaving the bucketing key on them would add a field the
+				# per-project version never returned.
+				files_by_project.setdefault(fr.pop("attached_to_name"), []).append(fr)
+			fetched = sum(len(v) for v in files_by_project.values())
+			if fetched >= _MANAGED_SHARES_MAX_FILES:
+				# Never truncate silently — a short list here looks like missing files.
+				frappe.log_error(
+					f"Hit the {_MANAGED_SHARES_MAX_FILES} file ceiling across "
+					f"{len(manageable)} projects; the Shares page is showing a partial list.",
+					"Portal: managed shares truncated",
+				)
 		except Exception:
-			folder_ctx = {"project_root": f"Home/Attachments/{pj}", "subfolders": []}
+			frappe.log_error(frappe.get_traceback(), "Portal: bulk project file read")
+
+	for pj in manageable:
+		folder_ctx = folders_by_project.get(pj) or {
+			"project_root": f"Home/Attachments/{pj}",
+			"subfolders": [],
+		}
 		project_root = folder_ctx.get("project_root") or f"Home/Attachments/{pj}"
 		# Project root + each subfolder become folder entries (no shares = empty arrays).
 		all_folder_paths = [(project_root, _("Project folder (all files)"))]
@@ -1936,31 +2161,8 @@ def list_managed_shares():
 					"link_shares": [],
 				},
 			)
-		# Pull every File for the project once, then bucket by parent folder.
-		try:
-			file_rows = frappe.get_all(
-				"File",
-				filters={
-					"attached_to_doctype": "Project",
-					"attached_to_name": pj,
-					"is_folder": 0,
-				},
-				fields=[
-					"name",
-					"file_name",
-					"file_url",
-					"folder",
-					"file_size",
-					"is_private",
-					"creation",
-					"owner",
-				],
-				order_by="creation desc",
-				limit_page_length=2000,
-				ignore_permissions=True,
-			)
-		except Exception:
-			file_rows = []
+		# Already fetched in the bulk read above.
+		file_rows = files_by_project.get(pj, [])
 		# Index file-level Portal Folder Share rows so we can attach them per file.
 		shares_by_file: dict[str, list] = {}
 		for fkey, folder in by_project[pj]["folders"].items():
@@ -1993,10 +2195,19 @@ def list_managed_shares():
 
 	# Hydrate each project with metadata + flatten folder dict to list.
 	projects_out = []
+	# One fetch for every project in the payload rather than a get_value per iteration.
+	project_meta = {
+		m["name"]: m
+		for m in frappe.get_all(
+			"Project",
+			filters={"name": ["in", list(by_project.keys())]},
+			fields=["name", "project_name", "status", "customer"],
+			limit_page_length=0,
+			ignore_permissions=True,
+		)
+	} if by_project else {}
 	for pj, payload in by_project.items():
-		meta = frappe.db.get_value(
-			"Project", pj, ["name", "project_name", "status", "customer"], as_dict=True
-		) or {"name": pj, "project_name": pj}
+		meta = project_meta.get(pj) or {"name": pj, "project_name": pj}
 		folders_list = list(payload["folders"].values())
 		# Drop the synthetic file-share rows — those are inlined as `shares` on the
 		# corresponding file row inside the parent folder.
@@ -2516,17 +2727,89 @@ def list_portal_file_types():
 
 
 @frappe.whitelist()
-def get_file_download_url(file_name):
+def download_project_file(file_name):
+	"""Stream a single project file's bytes, gated by the portal's own
+	project-access rule instead of Frappe's core file-permission engine.
+
+	Frappe's native /private/files/... route independently runs
+	frappe.has_permission("Project", ..., doc=...) before serving a private
+	file, and the "Portal Customer" role has no DocPerm on Project at all —
+	so a customer could see a file via list_project_files (which is gated
+	only by our own assert_project_access) but then get a 403 clicking it,
+	because the raw file_url falls through to that separate, stricter core
+	check. Serving the bytes ourselves after assert_project_access means
+	"can this user see this project" is decided in exactly one place, the
+	same way download_files_zip already does for multi-file downloads.
+	"""
 	f = frappe.get_doc("File", file_name)
-	if f.attached_to_doctype != "Project":
+	if f.attached_to_doctype != "Project" or not f.attached_to_name:
 		frappe.throw(_("Invalid file"))
+	if cstr(f.folder or "").startswith("Home/Contracts/"):
+		# Contracts are stored as Project-attached Files too (for save_file's sake)
+		# but are manager-only — list_project_files already excludes them, and this
+		# endpoint must reject a direct call by docname the same way, or a team
+		# member who learns/guesses the docname could still pull the bytes here.
+		helper.assert_manage_project(f.attached_to_name)
+	else:
+		helper.assert_project_access(f.attached_to_name)
 
-	helper.assert_project_access(f.attached_to_name)
+	content = f.get_content()
+	frappe.local.response.filename = f.file_name
+	frappe.local.response.filecontent = content
+	frappe.local.response.type = "download"
+	frappe.local.response.display_content_as = "inline"
 
-	if frappe.session.user == "Guest":
-		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
-	return {"url": f.file_url, "file_name": f.file_name}
+@frappe.whitelist()
+def submit_to_client_submittal(file_name, project):
+	"""Copy a project file into 06-CLIENT SUBMITTAL, renamed with an auto serial
+	and today's date (NN_YYYY-MM-DD_originalname), for handing off to the client.
+
+	The File Browser's "Submit" button on every file row has always called this
+	exact method name, but it was never implemented — every click failed with a
+	raw "method not found" error instead of copying anything.
+	"""
+	project = cstr(project or "").strip()
+	if not project:
+		frappe.throw(_("project is required"))
+	helper.assert_project_access(project)
+	if not helper.has_portal_staff_project_access() and helper.user_is_customer_portal_user():
+		frappe.throw(_("Customer portal users cannot submit files to Client Submittal."), frappe.PermissionError)
+
+	src = frappe.get_doc("File", file_name)
+	if src.attached_to_doctype != "Project" or src.attached_to_name != project:
+		frappe.throw(_("Invalid file"))
+	if src.is_folder:
+		frappe.throw(_("Cannot submit a folder"))
+
+	folder_ctx = get_project_folders(project)
+	target_folder = None
+	for row in folder_ctx.get("subfolders", []):
+		if row.get("label") == "06-CLIENT SUBMITTAL":
+			target_folder = row["name"]
+			break
+	if not target_folder:
+		frappe.throw(_("This project has no 06-CLIENT SUBMITTAL folder."))
+
+	serial = frappe.db.count("File", {"folder": target_folder, "is_folder": 0}) + 1
+	new_filename = f"{serial:02d}_{frappe.utils.today()}_{src.file_name}"
+
+	content = src.get_content()
+	with _bypass_max_attachments():
+		doc = save_file(new_filename, content, "Project", project, folder=target_folder, is_private=1)
+	# Belt-and-braces: if some hook reset the folder, force it back (same pattern
+	# already used by upload_project_file for the same reason).
+	if doc and doc.folder != target_folder:
+		frappe.db.set_value("File", doc.name, "folder", target_folder, update_modified=False)
+	# save_file() reuses file_name/file_url from any existing File with the same
+	# content_hash (see get_file_data_from_hash) — since we're always copying content
+	# that already exists as the source file, this silently discards our serial-
+	# numbered name. Force the display name back to what we constructed.
+	if doc and doc.file_name != new_filename:
+		frappe.db.set_value("File", doc.name, "file_name", new_filename, update_modified=False)
+		doc.file_name = new_filename
+
+	return {"file_name": doc.file_name, "sl_no": serial}
 
 
 @frappe.whitelist()
@@ -2597,6 +2880,12 @@ def list_all_files(
 		["attached_to_name", "in", allowed],
 		["is_folder", "=", 0],
 	]
+	if helper.is_customer_only():
+		# Client contacts browse only the submittal folder of their own projects.
+		# The folder path embeds the project, so one LIKE on the folder suffix is
+		# enough across every project they can see, and it is applied in the QUERY
+		# so a direct API call gets the same answer as the UI.
+		file_filters.append(["folder", "like", "%/" + _CUSTOMER_VISIBLE_FOLDERS[0] + "%"])
 	if search:
 		file_filters.append(["file_name", "like", f"%{search}%"])
 	if folder_search:
@@ -2832,6 +3121,9 @@ def save_folder_route_rule(
 	rule_type = cstr(rule_type).strip() or "Cross-route"
 	if rule_type not in ("Cross-route", "Mirror"):
 		rule_type = "Cross-route"
+
+	if rule_type == "Cross-route" and not cstr(file_classification).strip():
+		frappe.throw(_("File classification is required for Cross-route rules."))
 
 	auto_name = f"{src} → {tgt}"
 	rname = cstr(rule_name).strip() or auto_name

@@ -11,6 +11,7 @@ const refreshPortalCapabilities = inject("refreshPortalCapabilities", () => Prom
 const canEditTemplate = computed(() => !!portalCapabilities.value?.can_edit_portal_folder_template);
 
 const templateRows = ref([]);
+const templateIsDefault = ref(false);
 const templateLoading = ref(false);
 const templateSaveBusy = ref(false);
 const templateSaveErr = ref("");
@@ -39,10 +40,12 @@ async function loadTemplate() {
 		const res = await call({ method: "portal_app.api.projects.get_portal_folder_template" });
 		const rows = (res.rows || []).map((r) => ({ folder_name: String(r.folder_name || "") }));
 		templateRows.value = rows.length ? rows : [{ folder_name: "" }];
+		templateIsDefault.value = !!res.is_default;
 	} catch (e) {
 		console.error(e);
 		templateSaveErr.value = apiErr(e);
 		templateRows.value = [{ folder_name: "" }];
+		templateIsDefault.value = false;
 	} finally {
 		templateLoading.value = false;
 	}
@@ -202,6 +205,12 @@ onMounted(async () => {
 						<span class="portal-pill portal-pill-muted">{{ templateRows.length }} rows</span>
 					</div>
 				</div>
+
+				<p v-if="templateIsDefault && !templateLoading" class="mb-2 text-xs text-[color:var(--portal-muted)]">
+					No custom template has been saved yet — the rows below are the built-in default that every
+					project is already using. Editing and saving will replace this default with exactly what
+					you see here.
+				</p>
 
 				<div v-if="templateLoading" class="text-sm text-[color:var(--portal-muted)]">Loading template…</div>
 				<div v-else class="space-y-2">

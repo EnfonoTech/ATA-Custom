@@ -777,7 +777,7 @@ async function submitNewCustomer() {
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="user" class="h-4 w-4 text-[color:var(--portal-accent)]" />
-							Customer (ERPNext)
+							Customer
 						</h2>
 					</div>
 					<p class="mb-3 text-sm text-gray-600">
@@ -1131,7 +1131,7 @@ async function submitNewCustomer() {
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
 								<a
 									v-if="f.file_url"
-									:href="f.file_url"
+									:href="`/api/method/portal_app.api.files.download_project_file?file_name=${encodeURIComponent(f.name)}`"
 									target="_blank"
 									rel="noopener"
 									class="text-[color:var(--portal-accent)] hover:underline"
