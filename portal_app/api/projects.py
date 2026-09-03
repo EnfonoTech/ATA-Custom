@@ -857,7 +857,7 @@ def create_project(project_name, company=None, **kwargs):
 
 @frappe.whitelist()
 def sync_project_team(project, users):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_team(project)
 	if isinstance(users, str):
 		users = json.loads(users or "[]")
 	if not isinstance(users, list):
