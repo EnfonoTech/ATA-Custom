@@ -1217,9 +1217,9 @@ defineExpose({ uploadCardRef, scrollIntoView: () => uploadCardRef.value?.scrollI
 			<div>
 				<label class="portal-section-title mb-1 block">Store in</label>
 				<select v-model="destination" class="portal-input">
-					<option value="erpnext">ERPNext File only</option>
+					<option value="erpnext">Store in the portal only</option>
 					<option value="external">External platform only</option>
-					<option value="both">Both ERPNext + External</option>
+					<option value="both">Store in the portal and send to the external drive</option>
 				</select>
 			</div>
 			<div v-if="destination !== 'erpnext'">

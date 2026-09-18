@@ -96,21 +96,29 @@ def create_portal_user(
 	if frappe.db.exists("User", email):
 		frappe.throw(_("User already exists"))
 
-	roles = ["Projects User"]
+	# roles_json omitted entirely (e.g. a direct API caller) defaults to Projects User;
+	# an explicitly-provided empty list (all checkboxes unticked in the form) must be
+	# rejected, not silently fall back to the same default — it used to be
+	# indistinguishable from "not provided" here, so unticking every role box was
+	# accepted instead of refused.
+	roles = None
 	if roles_json:
 		try:
 			parsed = json.loads(roles_json)
-			if isinstance(parsed, list) and parsed:
-				roles = [str(r).strip() for r in parsed if r]
 		except Exception:
 			frappe.throw(_("Invalid roles"))
+		if not isinstance(parsed, list):
+			frappe.throw(_("Invalid roles"))
+		roles = [str(r).strip() for r in parsed if r]
+	if roles is None:
+		roles = ["Projects User"]
+
+	if not roles:
+		frappe.throw(_("Select at least one role"))
 
 	for r in roles:
 		if r not in ALLOWED_PORTAL_USER_ROLES:
 			frappe.throw(_("Role {0} cannot be assigned from the portal").format(r))
-
-	if not roles:
-		frappe.throw(_("Select at least one role"))
 
 	if cint(is_super_admin):
 		# Granting full ERP admin access is a privilege only an existing Super

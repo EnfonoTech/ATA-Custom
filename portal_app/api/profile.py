@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import cstr
+from frappe.utils import cint, cstr
 
 from portal_app.api import helper
 
@@ -104,6 +104,69 @@ def mark_notifications_read(names=None):
 		frappe.log_error(frappe.get_traceback(), "Portal: mark notifications read")
 		frappe.throw(_("Could not mark notifications as read. Please try again."))
 	return {"ok": True}
+
+
+@frappe.whitelist()
+def change_my_password(current_password=None, new_password=None, logout_other_sessions=1):
+	"""Let a signed-in portal user change their OWN password.
+
+	Deliberately not reusing frappe.core.doctype.user.user.update_password: that
+	endpoint is allow_guest (it also serves the forgot-password key flow) and it
+	calls login_manager.login_as() plus writes frappe.local.response for a redirect,
+	which is wrong for an XHR from the SPA.
+
+	Only ever acts on frappe.session.user — there is no user argument to tamper
+	with, so this cannot be pointed at somebody else's account.
+	"""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	from frappe.utils.password import check_password, update_password
+
+	user = frappe.session.user
+	current_password = cstr(current_password)
+	new_password = cstr(new_password)
+
+	if not current_password or not new_password:
+		frappe.throw(_("Enter your current password and the new one."))
+
+	# check_password raises AuthenticationError on a mismatch. Catch and re-throw so
+	# the SPA gets a readable sentence instead of a bare framework error.
+	try:
+		check_password(user, current_password)
+	except frappe.AuthenticationError:
+		frappe.throw(_("Your current password is not correct."), frappe.AuthenticationError)
+
+	if new_password == current_password:
+		frappe.throw(_("Your new password must be different from your current one."))
+	if len(new_password) < 8:
+		frappe.throw(_("Your new password must be at least 8 characters long."))
+
+	# Honour the site's own policy rather than inventing a second, weaker one —
+	# same gate and same feedback handler core uses in User.validate().
+	if frappe.get_system_settings("enable_password_policy"):
+		from frappe.core.doctype.user.user import handle_password_test_fail
+		from frappe.utils.password_strength import test_password_strength
+
+		u = frappe.get_cached_doc("User", user)
+		user_data = (u.first_name, u.middle_name, u.last_name, u.email, u.birth_date)
+		result = test_password_strength(new_password, user_inputs=user_data) or {}
+
+		# Compare the score here rather than reading a
+		# feedback["password_policy_validation_passed"] flag: the util in
+		# frappe.utils.password_strength only ever fills feedback with
+		# {warning, suggestions}. That flag is added by the *wrapper* in
+		# frappe.core.doctype.user.user.test_password_strength, so reading it off
+		# the util's result always came back None and rejected every password.
+		# This is the same comparison that wrapper makes.
+		score = cint(result.get("score"))
+		minimum = cint(frappe.get_system_settings("minimum_password_score")) or 0
+		if not (score and score >= minimum):
+			handle_password_test_fail(result.get("feedback") or {})
+
+	update_password(user, new_password, logout_all_sessions=cint(logout_other_sessions))
+	frappe.db.commit()
+	return {"ok": True, "logged_out_other_sessions": bool(cint(logout_other_sessions))}
 
 
 @frappe.whitelist()

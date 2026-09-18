@@ -22,6 +22,65 @@ const form = ref({
 const message = ref("");
 const error = ref("");
 
+// ── Roles ────────────────────────────────────────────────────────────────────
+// frappe.get_roles() returns EVERY role the user holds — for Administrator that
+// is ~60, which rendered as a wall of identical grey pills and buried the ones
+// that actually mean something here. Portal roles first, the rest behind a
+// toggle.
+const PORTAL_ROLES = [
+	"System Manager",
+	"Projects Manager",
+	"Projects User",
+	"Portal Customer",
+	"Administrator",
+];
+const showAllRoles = ref(false);
+const keyRoles = computed(() => (profile.value?.roles || []).filter((r) => PORTAL_ROLES.includes(r)));
+const otherRoles = computed(() => (profile.value?.roles || []).filter((r) => !PORTAL_ROLES.includes(r)));
+
+// ── Password ─────────────────────────────────────────────────────────────────
+const pw = ref({ current_password: "", new_password: "", confirm: "" });
+const pwSaving = ref(false);
+const pwMessage = ref("");
+const pwError = ref("");
+const showPw = ref(false);
+
+async function changePassword() {
+	pwMessage.value = "";
+	pwError.value = "";
+	if (!pw.value.current_password || !pw.value.new_password) {
+		pwError.value = "Enter your current password and the new one.";
+		return;
+	}
+	if (pw.value.new_password !== pw.value.confirm) {
+		pwError.value = "The two new passwords do not match.";
+		return;
+	}
+	if (pw.value.new_password.length < 8) {
+		pwError.value = "Your new password must be at least 8 characters long.";
+		return;
+	}
+	pwSaving.value = true;
+	try {
+		await call({
+			method: "portal_app.api.profile.change_my_password",
+			type: "POST",
+			args: {
+				current_password: pw.value.current_password,
+				new_password: pw.value.new_password,
+				logout_other_sessions: 1,
+			},
+		});
+		pw.value = { current_password: "", new_password: "", confirm: "" };
+		pwMessage.value = "Password changed. Any other devices you were signed in on have been signed out.";
+	} catch (e) {
+		console.error(e);
+		pwError.value = extractErr(e) || "Could not change the password.";
+	} finally {
+		pwSaving.value = false;
+	}
+}
+
 onMounted(async () => {
 	try {
 		await refreshPortalCapabilities();
@@ -107,14 +166,49 @@ function extractErr(e) {
 			<template v-else>
 				<!-- Identity card -->
 				<div class="portal-card-strong overflow-hidden p-0">
+					<!-- Cover. Was a flat 96px block of accent gradient and nothing else.
+					     Now layered: a blueprint grid (this is an architecture practice),
+					     two soft light pools, and a fade into the card so the avatar has
+					     something to sit against instead of a hard colour band. -->
 					<div
-						class="relative h-24"
-						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+						class="relative h-32 overflow-hidden"
+						style="background: linear-gradient(135deg, var(--portal-accent-strong) 0%, var(--portal-accent) 55%, var(--portal-accent-strong) 100%);"
 					>
 						<div
 							aria-hidden="true"
-							class="pointer-events-none absolute inset-0 opacity-30"
-							style="background-image: radial-gradient(circle at 20% 50%, rgba(255,255,255,0.4), transparent 40%);"
+							class="pointer-events-none absolute inset-0 opacity-[0.18]"
+							style="
+								background-image:
+									linear-gradient(to right, rgba(255,255,255,0.9) 1px, transparent 1px),
+									linear-gradient(to bottom, rgba(255,255,255,0.9) 1px, transparent 1px);
+								background-size: 26px 26px;
+							"
+						></div>
+						<div
+							aria-hidden="true"
+							class="pointer-events-none absolute inset-0"
+							style="
+								background-image:
+									radial-gradient(circle at 12% 15%, rgba(255,255,255,0.55), transparent 45%),
+									radial-gradient(circle at 88% 90%, rgba(0,0,0,0.28), transparent 55%);
+							"
+						></div>
+						<!-- soft arc, echoes the drafting-compass mark in the logo -->
+						<svg
+							aria-hidden="true"
+							class="pointer-events-none absolute -right-6 -top-10 h-48 w-48 opacity-25"
+							viewBox="0 0 200 200"
+							fill="none"
+						>
+							<circle cx="100" cy="100" r="86" stroke="#fff" stroke-width="1.5" />
+							<circle cx="100" cy="100" r="60" stroke="#fff" stroke-width="1.5" />
+							<circle cx="100" cy="100" r="34" stroke="#fff" stroke-width="1.5" />
+							<path d="M100 0 L100 200 M0 100 L200 100" stroke="#fff" stroke-width="1" />
+						</svg>
+						<div
+							aria-hidden="true"
+							class="pointer-events-none absolute inset-x-0 bottom-0 h-12"
+							style="background: linear-gradient(to bottom, transparent, var(--portal-surface));"
 						></div>
 					</div>
 					<div class="-mt-10 flex items-end gap-4 px-5 pb-5">
@@ -138,8 +232,23 @@ function extractErr(e) {
 						</div>
 					</div>
 
-					<div v-if="profile?.roles?.length" class="flex flex-wrap gap-1.5 px-5 pb-5">
-						<span v-for="r in profile.roles" :key="r" class="portal-pill portal-pill-muted">{{ r }}</span>
+					<div v-if="profile?.roles?.length" class="px-5 pb-5">
+						<p class="portal-section-title mb-2">Roles</p>
+						<div class="flex flex-wrap items-center gap-1.5">
+							<span v-for="r in keyRoles" :key="r" class="portal-pill portal-pill-accent">{{ r }}</span>
+							<template v-if="showAllRoles">
+								<span v-for="r in otherRoles" :key="r" class="portal-pill portal-pill-muted">{{ r }}</span>
+							</template>
+							<button
+								v-if="otherRoles.length"
+								type="button"
+								class="portal-pill portal-pill-muted cursor-pointer"
+								style="border-style: dashed;"
+								@click="showAllRoles = !showAllRoles"
+							>
+								{{ showAllRoles ? "Show fewer" : `+${otherRoles.length} more` }}
+							</button>
+						</div>
 					</div>
 				</div>
 
@@ -240,6 +349,71 @@ function extractErr(e) {
 							@click="save"
 						>
 							Save changes
+						</Button>
+					</div>
+				</div>
+
+				<!-- Password -->
+				<div class="portal-card-strong p-5">
+					<h2 class="mb-1 flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
+						<FeatherIcon name="lock" class="h-4 w-4 text-[color:var(--portal-accent)]" />
+						Password
+					</h2>
+					<p class="mb-3 text-sm text-[color:var(--portal-muted)]">
+						Change the password you sign in with. You need your current one to do it.
+					</p>
+
+					<div class="grid gap-3 sm:grid-cols-2">
+						<div class="sm:col-span-2">
+							<label class="portal-section-title mb-1 block">Current password</label>
+							<TextInput
+								v-model="pw.current_password"
+								:type="showPw ? 'text' : 'password'"
+								autocomplete="current-password"
+								class="w-full rounded-xl"
+							/>
+						</div>
+						<div>
+							<label class="portal-section-title mb-1 block">New password</label>
+							<TextInput
+								v-model="pw.new_password"
+								:type="showPw ? 'text' : 'password'"
+								autocomplete="new-password"
+								class="w-full rounded-xl"
+							/>
+						</div>
+						<div>
+							<label class="portal-section-title mb-1 block">Confirm new password</label>
+							<TextInput
+								v-model="pw.confirm"
+								:type="showPw ? 'text' : 'password'"
+								autocomplete="new-password"
+								class="w-full rounded-xl"
+							/>
+						</div>
+					</div>
+
+					<label class="mt-3 flex cursor-pointer items-center gap-2 text-xs text-[color:var(--portal-muted)]">
+						<input v-model="showPw" type="checkbox" class="rounded" />
+						Show passwords
+					</label>
+
+					<p class="mt-2 text-xs text-[color:var(--portal-subtle)]">
+						At least 8 characters. Changing it signs you out everywhere else.
+					</p>
+
+					<p v-if="pwMessage" class="mt-3 text-sm text-green-700">{{ pwMessage }}</p>
+					<p v-if="pwError" class="mt-3 text-sm text-red-600">{{ pwError }}</p>
+
+					<div class="mt-4">
+						<Button
+							variant="solid"
+							class="rounded-xl"
+							style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%); color: #fff;"
+							:loading="pwSaving"
+							@click="changePassword"
+						>
+							Change password
 						</Button>
 					</div>
 				</div>

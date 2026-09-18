@@ -3,9 +3,11 @@ import { ref, onMounted, onBeforeUnmount, watch, inject, computed } from "vue";
 import { call } from "@/api";
 import { useRouter, useRoute } from "vue-router";
 import { Button, TextInput, FeatherIcon } from "frappe-ui";
+import { useToast } from "@/composables/useToast";
 
 const router = useRouter();
 const route = useRoute();
+const toaster = useToast();
 const projects = ref([]);
 const loading = ref(true);
 const search = ref("");
@@ -198,7 +200,9 @@ async function deleteProject(p, e) {
 	try {
 		await call({ method: "portal_app.api.projects.delete_project", type: "POST", args: { project: p.name } });
 		await load();
-	} catch (e) { console.error(e); }
+	} catch (e) {
+		toaster.error(apiErr(e), { title: "Could not delete project" });
+	}
 }
 
 async function load() {
@@ -598,7 +602,7 @@ function printProjects() {
 								<div class="font-semibold text-sm" style="color:var(--portal-text);">{{ p.project_name }}</div>
 								<div v-if="p.portal_project_code" class="text-[10px] mt-0.5" style="color:var(--portal-muted);">{{ p.portal_project_code }}</div>
 							</td>
-							<!-- Assignee (office) -->
+							<!-- Office -->
 							<td class="px-4 py-3 text-xs font-medium" style="color:var(--portal-text);">{{ p.portal_office || "—" }}</td>
 							<!-- Phase -->
 							<td class="px-4 py-3 text-xs font-medium" style="color:var(--portal-text);">{{ p.portal_phase || "—" }}</td>

@@ -825,7 +825,7 @@ watch(activeFolder, (newFolder) => {
 							<td class="max-w-xs px-5 py-3">
 								<a
 									v-if="f.file_url"
-									:href="f.file_url"
+									:href="`/api/method/portal_app.api.files.download_project_file?file_name=${encodeURIComponent(f.name)}`"
 									target="_blank"
 									class="flex items-center gap-3"
 									style="color:var(--portal-text)"
