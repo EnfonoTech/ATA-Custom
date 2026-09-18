@@ -10,10 +10,18 @@ def _team_sort_key(dept):
 	return int(m.group(1)) if m else 999
 
 
-def _assigned_users_by_department(dept_names):
-	"""Team membership = Frappe's standard "Assign To" (ToDo) on the Department doc, not Employee.department."""
+def _assigned_users_by_department(dept_names, lead_by_dept=None):
+	"""Team membership = Frappe's standard "Assign To" (ToDo) on the Department doc, not Employee.department.
+
+	Each department's member list is sorted alphabetically by name, then — if that
+	department has a `portal_team_lead` set (and that user is actually a member) —
+	moved to the front, since callers (Org Chart) show members[0] as "<team> Lead".
+	Without an explicit lead, whoever sorts first alphabetically is shown, which is
+	just an arbitrary fallback, not a real designation.
+	"""
 	if not dept_names:
 		return {}
+	lead_by_dept = lead_by_dept or {}
 	assignments = frappe.get_all(
 		"ToDo",
 		filters={
@@ -41,25 +49,37 @@ def _assigned_users_by_department(dept_names):
 				"company_email": a.allocated_to,
 			}
 		)
-	for members in by_dept.values():
+	for dept_name, members in by_dept.items():
 		members.sort(key=lambda m: m["employee_name"])
+		lead = lead_by_dept.get(dept_name)
+		if lead:
+			idx = next((i for i, m in enumerate(members) if m["name"] == lead), None)
+			if idx is not None and idx != 0:
+				members.insert(0, members.pop(idx))
 	return by_dept
 
 
 @frappe.whitelist()
 def get_teams():
-	# Returns every member's login email — staff-only. Non-staff portal users get an
-	# empty list rather than an error so the shared Dashboard widget still renders.
+	# Returns every member's login email. Staff see every team; a team's own
+	# portal_team_lead sees just that team; everyone else gets an empty list
+	# rather than an error so the shared Dashboard widget still renders.
 	helper.assert_portal_user()
-	if not helper.can_manage_teams():
+	is_staff = helper.has_portal_staff_project_access()
+	led_names = [] if is_staff else helper.led_department_names()
+	if not is_staff and not led_names:
 		return []
-	departments = frappe.get_all(
-		"Department",
-		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
-		fields=["name", "department_name", "portal_office"],
-	)
+	has_lead_field = frappe.get_meta("Department").has_field("portal_team_lead")
+	fields = ["name", "department_name", "portal_office"]
+	if has_lead_field:
+		fields.append("portal_team_lead")
+	filters = {"parent_department": "All Departments", "portal_office": ["!=", ""]}
+	if not is_staff:
+		filters["name"] = ["in", led_names]
+	departments = frappe.get_all("Department", filters=filters, fields=fields)
 	departments = sorted(departments, key=_team_sort_key)
-	members_by_dept = _assigned_users_by_department([d.name for d in departments])
+	lead_by_dept = {d.name: d.portal_team_lead for d in departments if has_lead_field and d.portal_team_lead}
+	members_by_dept = _assigned_users_by_department([d.name for d in departments], lead_by_dept)
 
 	result = []
 	for dept in departments:
@@ -133,7 +153,7 @@ def get_offices():
 @frappe.whitelist()
 def update_team(team, department_name=None, office=None):
 	"""Update editable team (Department) fields from the portal Teams edit modal."""
-	helper.assert_manage_teams()
+	helper.assert_manage_team(team)
 	doc = frappe.get_doc("Department", team)
 	if department_name is not None and department_name.strip():
 		doc.department_name = department_name.strip()
@@ -184,7 +204,10 @@ def create_or_get_team(department_name, office=None):
 def get_assignable_users(team=None):
 	"""Enabled portal users not already assigned to `team`, plus available User Groups,
 	for the Add Member picker — mirrors Frappe's "Assign To" / "Assign To User Group" pair."""
-	helper.assert_manage_teams()
+	if team:
+		helper.assert_manage_team(team)
+	else:
+		helper.assert_manage_teams()
 	assigned = set()
 	if team:
 		assigned = {
@@ -248,7 +271,7 @@ def add_team_member(team, user=None, user_group=None):
 
 	`user_group` resolves to its member users and assigns all of them at once — same
 	behaviour as picking "Assign To User Group" in Frappe's native assign dialog."""
-	helper.assert_manage_teams()
+	helper.assert_manage_team(team)
 	if not frappe.db.exists("Department", team):
 		frappe.throw(_("Team not found"))
 
@@ -280,7 +303,7 @@ def add_team_member(team, user=None, user_group=None):
 
 @frappe.whitelist()
 def remove_team_member(team, user):
-	helper.assert_manage_teams()
+	helper.assert_manage_team(team)
 	from frappe.desk.form.assign_to import remove as assign_remove
 
 	assign_remove("Department", team, user, ignore_permissions=True)

@@ -73,6 +73,49 @@ const visibleMonths = computed(() => {
 	return Array.from({ length: 12 }, (_, i) => ({ year, month: i }));
 });
 
+// Day-of-month sub-columns, shown only in Monthly view so the header carries
+// actual date separation instead of a single unbroken "Jan 2026" block.
+const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"]; // JS getDay(): 0=Sunday
+
+function isoWeekNumber(date) {
+	const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+	const dayNum = d.getUTCDay() || 7;
+	d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+	const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+	return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+}
+
+const monthDayDates = computed(() => {
+	if (viewMode.value !== "month") return [];
+	const m = visibleMonths.value[0];
+	const count = new Date(m.year, m.month + 1, 0).getDate();
+	return Array.from({ length: count }, (_, i) => new Date(m.year, m.month, i + 1));
+});
+
+const monthDays = computed(() => monthDayDates.value.map((d) => d.getDate()));
+
+// Groups the month's days into calendar weeks so the header can show
+// "Week 34 · 31 Aug" spanning that week's day-columns, like a construction Gantt sheet.
+const monthWeeks = computed(() => {
+	const groups = [];
+	for (const d of monthDayDates.value) {
+		const wn = isoWeekNumber(d);
+		const g = groups[groups.length - 1];
+		if (!g || g.weekNumber !== wn) {
+			groups.push({ weekNumber: wn, start: d, count: 1 });
+		} else {
+			g.count += 1;
+		}
+	}
+	return groups;
+});
+
+function fmtWeekStart(date) {
+	return `${date.getDate()} ${MONTH_NAMES[date.getMonth()]}`;
+}
+
+const subColumnCount = computed(() => (viewMode.value === "month" ? monthDays.value.length : visibleMonths.value.length));
+
 const windowStart = computed(() => {
 	const m = visibleMonths.value[0];
 	return new Date(m.year, m.month, 1);
@@ -319,6 +362,31 @@ function pickProjectForMilestone(p) {
 							</div>
 						</div>
 					</div>
+					<!-- Week + day-of-week sub-header (Monthly view only) -->
+					<template v-if="viewMode === 'month'">
+						<div class="grid text-[10px] font-semibold border-b border-[color:var(--portal-border)]" style="grid-template-columns: 220px 1fr;">
+							<div></div>
+							<div class="grid" :style="{ gridTemplateColumns: `repeat(${monthDays.length}, 1fr)` }">
+								<div
+									v-for="w in monthWeeks"
+									:key="w.weekNumber"
+									class="px-1 py-1 text-center border-l border-[color:var(--portal-border)] truncate"
+									:style="{ gridColumn: `span ${w.count}`, color: 'var(--portal-muted)' }"
+								>
+									Week {{ w.weekNumber }} · {{ fmtWeekStart(w.start) }}
+								</div>
+							</div>
+						</div>
+						<div class="grid text-[9px] border-b border-[color:var(--portal-border)]" style="grid-template-columns: 220px 1fr;">
+							<div></div>
+							<div class="relative grid" :style="{ gridTemplateColumns: `repeat(${monthDays.length}, 1fr)` }">
+								<div v-for="d in monthDayDates" :key="d.getTime()" class="py-1 text-center border-l border-[color:var(--portal-border)]" style="color:var(--portal-subtle);">
+									<div>{{ d.getDate() }}</div>
+									<div class="text-[8px] uppercase">{{ DAY_LETTERS[d.getDay()] }}</div>
+								</div>
+							</div>
+						</div>
+					</template>
 
 					<!-- Rows -->
 					<div class="divide-y divide-[color:var(--portal-border)]">
@@ -338,7 +406,7 @@ function pickProjectForMilestone(p) {
 									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.milestones?.length ? '#ef4444' : 'var(--portal-subtle)' }" />
 								</button>
 							</div>
-							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/visibleMonths.length}% 100%` }">
+							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/subColumnCount}% 100%` }">
 								<!-- today line -->
 								<div v-if="todayPct !== null" class="absolute top-0 bottom-0 w-px bg-red-500 z-10" :style="{ left: todayPct + '%' }"></div>
 								<!-- bar -->
@@ -384,6 +452,31 @@ function pickProjectForMilestone(p) {
 							</div>
 						</div>
 					</div>
+					<!-- Week + day-of-week sub-header (Monthly view only) -->
+					<template v-if="viewMode === 'month'">
+						<div class="grid text-[10px] font-semibold border-b border-[color:var(--portal-border)]" style="grid-template-columns: 220px 1fr;">
+							<div></div>
+							<div class="grid" :style="{ gridTemplateColumns: `repeat(${monthDays.length}, 1fr)` }">
+								<div
+									v-for="w in monthWeeks"
+									:key="w.weekNumber"
+									class="px-1 py-1 text-center border-l border-[color:var(--portal-border)] truncate"
+									:style="{ gridColumn: `span ${w.count}`, color: 'var(--portal-muted)' }"
+								>
+									Week {{ w.weekNumber }} · {{ fmtWeekStart(w.start) }}
+								</div>
+							</div>
+						</div>
+						<div class="grid text-[9px] border-b border-[color:var(--portal-border)]" style="grid-template-columns: 220px 1fr;">
+							<div></div>
+							<div class="relative grid" :style="{ gridTemplateColumns: `repeat(${monthDays.length}, 1fr)` }">
+								<div v-for="d in monthDayDates" :key="d.getTime()" class="py-1 text-center border-l border-[color:var(--portal-border)]" style="color:var(--portal-subtle);">
+									<div>{{ d.getDate() }}</div>
+									<div class="text-[8px] uppercase">{{ DAY_LETTERS[d.getDay()] }}</div>
+								</div>
+							</div>
+						</div>
+					</template>
 
 					<div class="divide-y divide-[color:var(--portal-border)]">
 						<div v-for="p in unassigned" :key="p.name" class="grid items-center" style="grid-template-columns: 220px 1fr;">
@@ -402,7 +495,7 @@ function pickProjectForMilestone(p) {
 									<FeatherIcon name="flag" class="h-3.5 w-3.5" :style="{ color: p.milestones?.length ? '#ef4444' : 'var(--portal-subtle)' }" />
 								</button>
 							</div>
-							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/visibleMonths.length}% 100%` }">
+							<div class="relative h-9 border-l border-[color:var(--portal-border)]" style="background-image: linear-gradient(to right, var(--portal-border) 1px, transparent 1px);" :style="{ backgroundSize: `${100/subColumnCount}% 100%` }">
 								<div v-if="todayPct !== null" class="absolute top-0 bottom-0 w-px bg-red-500 z-10" :style="{ left: todayPct + '%' }"></div>
 								<div
 									v-if="barStyle(p)"
