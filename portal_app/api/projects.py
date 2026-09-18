@@ -695,7 +695,11 @@ def get_capabilities():
 		"can_edit_portal_folder_template": helper.can_edit_portal_folder_template()
 		if not effective_customer_portal
 		else False,
-		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
+		# Staff manage every team; a team's own portal_team_lead manages just that team
+		# (the Teams page itself already only lists the team(s) helper.get_teams
+		# scopes to them — see teams.get_teams).
+		"can_manage_teams": (helper.can_manage_teams() or bool(helper.led_department_names()))
+		and not effective_customer_portal,
 		# System Manager / Projects Manager only — gates management-level views (Dashboard,
 		# Org Chart, Teams) and management-level fields (estimated cost, project manager)
 		# away from regular "Projects User" team members.

@@ -3,7 +3,13 @@ import { ref, onMounted, computed } from "vue";
 import { call, uploadFile } from "@/api";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
 
-const caps = ref({ can_create_users: false, can_run_demo_seed: false, can_edit_folder_template: false });
+const caps = ref({
+	can_create_users: false,
+	can_run_demo_seed: false,
+	can_edit_folder_template: false,
+	can_grant_super_admin: false,
+	can_assign_team_manager: false,
+});
 const loadingCaps = ref(true);
 
 const email = ref("");
@@ -12,11 +18,23 @@ const password = ref("");
 const roleProjectsUser = ref(true);
 const roleProjectsManager = ref(false);
 const rolePortalCustomer = ref(false);
+const roleTeamManager = ref(false);
+const roleSuperAdmin = ref(false);
+const teamLeadOf = ref("");
+const teamOptions = ref([]);
 const portalLinkedCustomer = ref("");
 const sendWelcome = ref(false);
 const userBusy = ref(false);
 const userMsg = ref("");
 const userErr = ref("");
+
+async function loadTeamOptions() {
+	try {
+		teamOptions.value = (await call({ method: "portal_app.api.portal_admin.list_teams_for_picker" })) || [];
+	} catch (e) {
+		console.error("list_teams_for_picker error", e);
+	}
+}
 
 // .docx upload seed
 const docxFile       = ref(null);
@@ -195,6 +213,9 @@ onMounted(async () => {
 	if (caps.value.can_run_demo_seed) {
 		await loadSeedRuns();
 	}
+	if (caps.value.can_assign_team_manager) {
+		await loadTeamOptions();
+	}
 });
 
 function apiErr(e) {
@@ -225,6 +246,10 @@ async function createUser() {
 		userErr.value = "Portal Customer requires the Customer ID (link field).";
 		return;
 	}
+	if (roleTeamManager.value && !teamLeadOf.value) {
+		userErr.value = "Team Manager requires picking which team they lead.";
+		return;
+	}
 	userBusy.value = true;
 	try {
 		await call({
@@ -237,6 +262,8 @@ async function createUser() {
 				roles_json: JSON.stringify(roles),
 				send_welcome_email: sendWelcome.value ? 1 : 0,
 				portal_linked_customer: portalLinkedCustomer.value.trim() || undefined,
+				is_super_admin: roleSuperAdmin.value ? 1 : 0,
+				team_lead_of: roleTeamManager.value ? teamLeadOf.value : undefined,
 			},
 		});
 		userMsg.value = "User created.";
@@ -245,6 +272,9 @@ async function createUser() {
 		password.value = "";
 		portalLinkedCustomer.value = "";
 		rolePortalCustomer.value = false;
+		roleTeamManager.value = false;
+		roleSuperAdmin.value = false;
+		teamLeadOf.value = "";
 	} catch (e) {
 		userErr.value = apiErr(e);
 	} finally {
@@ -468,11 +498,35 @@ const totalCreated = computed(() =>
 							<input v-model="rolePortalCustomer" type="checkbox" class="rounded border-gray-300" />
 							Portal Customer
 						</label>
+						<label
+							v-if="caps.can_assign_team_manager"
+							class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
+						>
+							<input v-model="roleTeamManager" type="checkbox" class="rounded border-gray-300" />
+							Team Manager
+						</label>
+						<label
+							v-if="caps.can_grant_super_admin"
+							class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
+						>
+							<input v-model="roleSuperAdmin" type="checkbox" class="rounded border-gray-300" />
+							Super Admin
+						</label>
 					</div>
 					<div v-if="rolePortalCustomer">
 						<label class="portal-section-title mb-1 block">Linked Customer ID</label>
 						<TextInput v-model="portalLinkedCustomer" class="w-full rounded-xl" placeholder="e.g. CUST-00001" />
 					</div>
+					<div v-if="roleTeamManager">
+						<label class="portal-section-title mb-1 block">Team they lead</label>
+						<select v-model="teamLeadOf" class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
+							<option value="" disabled>Select a team…</option>
+							<option v-for="t in teamOptions" :key="t.name" :value="t.name">{{ t.department_name }}</option>
+						</select>
+					</div>
+					<p v-if="roleSuperAdmin" class="text-xs text-amber-700">
+						Super Admin gives full access to the entire system (HR, Accounts, Stock — everything), not just the project portal.
+					</p>
 					<label class="flex items-center gap-2 text-sm text-[color:var(--portal-text)]">
 						<input v-model="sendWelcome" type="checkbox" class="rounded border-gray-300" />
 						Send welcome email (if outgoing email is configured)

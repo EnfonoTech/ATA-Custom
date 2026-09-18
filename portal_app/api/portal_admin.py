@@ -36,6 +36,7 @@ def _can_run_seed_via_portal() -> bool:
 
 
 ALLOWED_PORTAL_USER_ROLES = frozenset({"Projects User", "Projects Manager", "Portal Customer"})
+SUPER_ADMIN_ROLE = "System Manager"
 
 
 @frappe.whitelist()
@@ -47,12 +48,35 @@ def get_portal_admin_capabilities():
 		"can_create_users": _can_create_users(),
 		"can_run_demo_seed": _can_run_seed_via_portal(),
 		"can_edit_folder_template": helper.can_edit_portal_folder_template(),
+		# Only an existing Super Admin (System Manager) may hand that role to someone
+		# else — same self-perpetuating-privilege guard as elsewhere in this app.
+		"can_grant_super_admin": SUPER_ADMIN_ROLE in frappe.get_roles(),
+		"can_assign_team_manager": helper.can_manage_teams(),
 	}
 
 
 @frappe.whitelist()
+def list_teams_for_picker():
+	"""Minimal {name, department_name} list for the "Team Manager" team picker."""
+	helper.assert_manage_teams()
+	return frappe.get_all(
+		"Department",
+		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
+		fields=["name", "department_name"],
+		order_by="department_name asc",
+	)
+
+
+@frappe.whitelist()
 def create_portal_user(
-	email, full_name, password, roles_json=None, send_welcome_email=0, portal_linked_customer=None
+	email,
+	full_name,
+	password,
+	roles_json=None,
+	send_welcome_email=0,
+	portal_linked_customer=None,
+	is_super_admin=0,
+	team_lead_of=None,
 ):
 	if not _can_create_users():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -64,6 +88,7 @@ def create_portal_user(
 	full_name = (full_name or "").strip()
 	password = password or ""
 	portal_linked_customer = (portal_linked_customer or "").strip()
+	team_lead_of = (team_lead_of or "").strip()
 
 	if not email or not full_name or not password:
 		frappe.throw(_("Valid email, full name, and password are required"))
@@ -86,6 +111,20 @@ def create_portal_user(
 
 	if not roles:
 		frappe.throw(_("Select at least one role"))
+
+	if cint(is_super_admin):
+		# Granting full ERP admin access is a privilege only an existing Super
+		# Admin may hand out — not merely anyone who can create portal users.
+		if SUPER_ADMIN_ROLE not in frappe.get_roles():
+			frappe.throw(_("Only a Super Admin can create another Super Admin."), frappe.PermissionError)
+		roles.append(SUPER_ADMIN_ROLE)
+
+	if team_lead_of:
+		# Naming someone a team's Team Manager is a team edit — same tier as
+		# renaming the team or changing its office (see teams.update_team).
+		helper.assert_manage_teams()
+		if not frappe.db.exists("Department", team_lead_of):
+			frappe.throw(_("Team not found"))
 
 	if "Portal Customer" in roles:
 		if not portal_linked_customer:
@@ -121,6 +160,14 @@ def create_portal_user(
 		doc.append("roles", {"role": role})
 
 	doc.insert(ignore_permissions=True)
+
+	if team_lead_of:
+		frappe.db.set_value("Department", team_lead_of, "portal_team_lead", doc.name)
+		# The Lead must also be an actual team member (Assign To), or they simply
+		# wouldn't appear in get_teams()'s member list to be shown as the lead.
+		from frappe.desk.form.assign_to import add as assign_add
+
+		assign_add({"doctype": "Department", "name": team_lead_of, "assign_to": [doc.name]}, ignore_permissions=True)
 
 	return {"ok": True, "name": doc.name, "email": email}
 
