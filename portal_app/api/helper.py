@@ -234,6 +234,30 @@ def assert_manage_teams() -> None:
 		)
 
 
+def led_department_names(user=None) -> list[str]:
+	"""Departments this user is the designated portal_team_lead of."""
+	user = user or frappe.session.user
+	return frappe.get_all("Department", filters={"portal_team_lead": user}, pluck="name")
+
+
+def can_manage_team(team_name: str, user=None) -> bool:
+	"""Editing one team's info and member assignment is either a staff-level
+	action, or something that team's own portal_team_lead may do for that team
+	only — same two-tier shape as can_manage_project_team."""
+	user = user or frappe.session.user
+	if has_portal_staff_project_access(user):
+		return True
+	return frappe.db.get_value("Department", team_name, "portal_team_lead") == user
+
+
+def assert_manage_team(team_name: str) -> None:
+	if not can_manage_team(team_name):
+		frappe.throw(
+			_("Only a Projects Manager, System Manager, or this team's own lead can manage it."),
+			frappe.PermissionError,
+		)
+
+
 def can_manage_project_team(project_name: str, user=None) -> bool:
 	"""Adding/removing a project's own members (Project User rows) is either a
 	staff-level action, or something the project's own portal_project_manager may

@@ -17,6 +17,15 @@ def ensure_department_portal_custom_fields():
 					"in_list_view": 1,
 					"description": "Office location tag used by the portal Teams page (e.g. RIYADH, LISBON, MANILA)",
 				},
+				{
+					"fieldname": "portal_team_lead",
+					"label": "Portal Team Lead",
+					"fieldtype": "Link",
+					"options": "User",
+					"insert_after": "portal_office",
+					"description": "Who the Org Chart shows as this team's Lead. Falls back to the "
+					"alphabetically-first assigned member if left unset.",
+				},
 			]
 		},
 		update=True,

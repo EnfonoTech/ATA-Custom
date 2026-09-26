@@ -38,6 +38,10 @@ onMounted(async () => {
 });
 
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
+// True for staff AND for a team's own portal_team_lead (see teams.get_teams /
+// helper.can_manage_team) — lets a lead reach the Teams page without exposing
+// the other manager-only views (Dashboard, Org Chart, Contracts) to them.
+const canManageTeams = computed(() => !!portalCapabilities.value?.can_manage_teams);
 
 const groups = computed(() => {
 	const a      = portalAdmin.value;
@@ -55,7 +59,8 @@ const groups = computed(() => {
 		{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
 		{ name: "Contracts", path: "/contracts",  icon: "lock"         },
 	];
-	// Management-level views — only System Manager / Projects Manager.
+	// Management-level views — only System Manager / Projects Manager. Teams is the
+	// one exception: a team's own lead needs it too, just to manage that one team.
 	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
 	// Hidden from client contacts. These are internal working tools, not things a
 	// client is here to do:
@@ -72,11 +77,12 @@ const groups = computed(() => {
 	]);
 	const workspace = {
 		title: "Project Management",
-		items: workspaceItems.filter(
+				items: workspaceItems.filter(
 			(i) =>
-				(isManager.value || !managerOnlyPaths.has(i.path)) &&
+				(isManager.value || !managerOnlyPaths.has(i.path) || (i.path === "/teams" && canManageTeams.value)) &&
 				(!isCust || !staffOnlyPaths.has(i.path))
 		),
+
 	};
 
 	// MODULES (HR / Accounts / Stock / Assets / Helpdesk) and ANALYTICS (Reports /

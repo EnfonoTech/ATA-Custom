@@ -133,7 +133,11 @@ router.beforeEach(async (to) => {
 			const caps = await call({
 				method: "portal_app.api.projects.get_capabilities",
 			});
-			if (!caps?.is_manager) {
+			// Teams is the one requiresManager route a team's own lead may also reach
+			// (see Sidebar.vue's matching canManageTeams exception) — Dashboard,
+			// Org Chart and Contracts stay strictly staff-only.
+			const allowed = to.path === "/teams" ? caps?.is_manager || caps?.can_manage_teams : caps?.is_manager;
+			if (!allowed) {
 				return "/projects";
 			}
 		} catch {
