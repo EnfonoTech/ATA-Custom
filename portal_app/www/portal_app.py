@@ -47,4 +47,6 @@ def get_context(context):
 	bundle = get_bundle()
 	context.bundle_js = bundle["js"]
 	context.bundle_css = bundle["css"]
+	# The SPA reads window.csrf_token for its POSTs (frontend/src/api/index.js).
+	context.csrf_token = frappe.sessions.get_csrf_token() if frappe.session.user != "Guest" else ""
 	return context

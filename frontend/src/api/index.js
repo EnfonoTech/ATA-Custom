@@ -22,7 +22,7 @@ function getCsrfToken() {
 async function refreshCsrfToken() {
 	cachedCsrfToken = null;
 	try {
-		const res = await fetch("/api/method/frappe.sessions.get_csrf_token", {
+		const res = await fetch("/api/method/portal_app.api.auth.get_csrf_token", {
 			method: "GET",
 			credentials: "include",
 		});
