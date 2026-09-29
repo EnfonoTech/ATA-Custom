@@ -41,10 +41,13 @@ export default defineConfig({
     rollupOptions: {
       input: path.resolve(__dirname, "index.html"),
       output: {
-        // Entry + css keep fixed names: www/portal_app.html and the desk page
-        // hardcode them, and www/portal_app.py cache-busts them with ?v=<build>.
-        entryFileNames: "frontend.js",
-        assetFileNames: "assets/[name].[ext]",
+        // Entry + css are content-hashed too. Chunks import the entry as
+        // "../frontend-<hash>.js"; a fixed name loaded as "frontend.js?v=…" made
+        // the browser run the bundle twice, and the un-versioned copy came from
+        // cache — an old build that took over the page after every deploy.
+        // www/portal_app.py reads the current names from the built index.html.
+        entryFileNames: "frontend-[hash].js",
+        assetFileNames: "assets/[name]-[hash].[ext]",
         // Chunks ARE content-hashed. They are only referenced from inside the
         // entry bundle, which vite rewrites each build, so nothing hardcodes
         // them — and without a hash a lazy-loaded page like Files.js keeps its

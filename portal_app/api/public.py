@@ -21,3 +21,11 @@ def get_branding():
 		}
 	except Exception:
 		return {}
+
+
+@frappe.whitelist()
+def get_frontend_bundle():
+	"""Current content-hashed bundle paths, for the Desk page loader."""
+	from portal_app.www.portal_app import get_bundle
+
+	return get_bundle()

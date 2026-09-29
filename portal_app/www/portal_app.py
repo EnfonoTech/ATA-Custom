@@ -1,52 +1,50 @@
 """Serves the portal single-page app at /portal-app.
 
-Why this file does more than `context.no_cache = 1`:
-
-The built bundle uses FIXED filenames — `frontend.js` and `assets/index.css` —
-because this page and the desk page hardcode those paths. Nginx sends no
-`Cache-Control` for them, so browsers fall back to heuristic caching and happily
-serve yesterday's JavaScript after a deploy. That is not theoretical: a copy
-rewrite shipped, the server served the new file with a fresh ETag, and the
-browser kept showing the old text.
-
-So we stamp `?v=<build>` on both, derived from the bundle's modification time.
-A rebuild changes the mtime, which changes the URL, which forces a refetch —
-while unchanged builds keep their URL and stay cached.
-
-Lazy-loaded chunks are handled differently: vite content-hashes them
-(`chunks/[name]-[hash].js`) and rewrites the imports inside the entry bundle on
-every build, so they bust themselves.
+The built entry bundle and its CSS are content-hashed (`frontend-<hash>.js`,
+`assets/index-<hash>.css`), so every build has new URLs and nothing can be served
+stale. Lazy chunks import the entry by that same hashed URL, so the browser loads
+exactly one copy of the app. The current names are read from the index.html vite
+writes next to the bundle.
 """
 
 import os
+import re
 
 import frappe
 
-# Path of the built entry bundle, relative to the app's public/ directory.
-_BUNDLE = "frontend/frontend.js"
+_BUILT_INDEX = ("frontend", "index.html")
+_FALLBACK = {"js": ["/assets/portal_app/frontend/frontend.js"], "css": ["/assets/portal_app/frontend/assets/index.css"]}
+_cache = {"mtime": None, "bundle": None}
 
 
-def _build_version() -> str:
-	"""Short, stable token that changes whenever the bundle is rebuilt."""
+def get_bundle() -> dict:
+	"""{"js": [...], "css": [...]} for the current build, re-read only when it changes."""
 	try:
-		path = frappe.get_app_path("portal_app", "public", *_BUNDLE.split("/"))
-		return str(int(os.path.getmtime(path)))
+		path = frappe.get_app_path("portal_app", "public", *_BUILT_INDEX)
+		mtime = os.path.getmtime(path)
+		if _cache["mtime"] == mtime and _cache["bundle"]:
+			return _cache["bundle"]
+		with open(path, encoding="utf-8") as f:
+			html = f.read()
+		bundle = {
+			"js": re.findall(r'<script[^>]+src="(/assets/portal_app/frontend/[^"]+\.js)"', html),
+			"css": re.findall(r'<link[^>]+href="(/assets/portal_app/frontend/[^"]+\.css)"', html),
+		}
+		if not bundle["js"]:
+			return _FALLBACK
+		_cache.update(mtime=mtime, bundle=bundle)
+		return bundle
 	except Exception:
-		# Never break the page over a cache-busting nicety.
-		return frappe.utils.get_build_version()
+		# Never break the page over bundle discovery.
+		return _FALLBACK
 
 
 def get_context(context):
-	# context.no_cache governs FRAPPE's server-side website cache (the X-From-Cache
-	# header). It says nothing to the browser — verified: this page came back with no
-	# Cache-Control header at all, so browsers applied heuristic caching to the HTML,
-	# kept requesting the OLD ?v=, and the asset cache-busting below never got a
-	# chance. A deploy then looked like it had not happened.
-	# Browser cache headers are NOT set here. frappe.local.response is the API
-	# response dict and writing headers onto it from a website page silently does
-	# nothing — verified: the response still came back with no Cache-Control. The
-	# real hook is after_request (see portal_app.utils.set_spa_no_cache), which is
-	# handed the actual response object by frappe/app.py.
+	# context.no_cache governs FRAPPE's server-side website cache only. Browser
+	# no-store for this HTML is set in portal_app.utils.set_spa_no_cache
+	# (after_request), which is what keeps the hashed bundle names fresh.
 	context.no_cache = 1
-	context.build_version = _build_version()
+	bundle = get_bundle()
+	context.bundle_js = bundle["js"]
+	context.bundle_css = bundle["css"]
 	return context

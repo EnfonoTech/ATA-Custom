@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -6,19 +5,20 @@
     <title>Portal App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <!-- This document must never be cached. It carries the ?v= build stamp that
-         busts the JS/CSS below; if the HTML itself is cached the browser keeps
-         asking for an old build and deploys appear not to land. -->
+    <!-- This document must never be cached: it names the current content-hashed
+         bundle, and a cached copy would keep loading an old build. -->
     <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
 
-    <link rel="stylesheet" href="/assets/portal_app/frontend/assets/index.css?v={{ build_version }}">
+    {% for href in bundle_css %}<link rel="stylesheet" crossorigin href="{{ href }}">
+    {% endfor %}
 </head>
 
 <body style="margin:0;">
     <div id="app"></div>
 
-    <script type="module" src="/assets/portal_app/frontend/frontend.js?v={{ build_version }}"></script>
+    {% for src in bundle_js %}<script type="module" crossorigin src="{{ src }}"></script>
+    {% endfor %}
 </body>
 </html>
