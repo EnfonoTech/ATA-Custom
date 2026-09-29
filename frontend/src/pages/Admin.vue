@@ -339,6 +339,9 @@ async function createUser() {
 		password.value = "";
 		clearLinkedCustomer();
 		rolePortalCustomer.value = false;
+		roleProjectsUser.value = true;
+		roleProjectsManager.value = false;
+		sendWelcome.value = false;
 		roleTeamManager.value = false;
 		roleSuperAdmin.value = false;
 		teamLeadOf.value = "";

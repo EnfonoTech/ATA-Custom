@@ -51,6 +51,7 @@ const inviteSendWelcome = ref(true);
 const inviteBusy = ref(false);
 const cpCanReset = ref(false);
 const cpCanInvite = ref(false);
+const cpWarn = ref("");
 const showResetUser = ref(false);
 const resetTarget = ref(null);
 const resetMode = ref("email");
@@ -173,6 +174,12 @@ async function loadCustomerPortalUsers() {
 	}
 }
 
+// Capabilities load in Layout after this page mounts; on a hard load the first
+// loadCustomerPortalUsers() runs with canManage still false, so retry once it flips.
+watch([canManage, () => project.value?.customer], ([manage, customer], [wasManage, wasCustomer]) => {
+	if (manage && customer && (manage !== wasManage || customer !== wasCustomer)) loadCustomerPortalUsers();
+});
+
 function formatLastLogin(value) {
 	if (!value) return "";
 	const d = new Date(String(value).replace(" ", "T"));
@@ -182,6 +189,7 @@ function formatLastLogin(value) {
 function openInviteCustomerUser() {
 	cpError.value = "";
 	cpMessage.value = "";
+	cpWarn.value = "";
 	inviteEmail.value = "";
 	inviteFullName.value = "";
 	invitePassword.value = "";
@@ -480,10 +488,6 @@ async function submitInviteCustomerUser() {
 		cpError.value = "A password set here must be at least 8 characters (or leave it blank).";
 		return;
 	}
-	if (!inviteSendWelcome.value && !invitePassword.value) {
-		cpError.value = "Send the welcome email, or set a password — otherwise they cannot sign in.";
-		return;
-	}
 	inviteBusy.value = true;
 	cpError.value = "";
 	try {
@@ -499,13 +503,17 @@ async function submitInviteCustomerUser() {
 			},
 		});
 		const who = res?.email || inviteEmail.value.trim();
-		const linked = res?.created ? `Created ${who} and linked them` : `Linked the existing user ${who}`;
+		const linked = res?.created
+			? `Created ${who} and linked them to this customer.`
+			: `Linked the existing user ${who} to this customer — they keep their current password.`;
+		cpWarn.value = "";
 		if (inviteSendWelcome.value && res?.email_sent) {
-			cpMessage.value = `${linked} to this customer. An invite email is on its way.`;
+			cpMessage.value = `${linked} An invite email is on its way.`;
 		} else if (inviteSendWelcome.value) {
-			cpMessage.value = `${linked} to this customer, but the invite email could not be sent — check the outgoing email account.`;
+			cpMessage.value = linked;
+			cpWarn.value = "The invite email could not be sent — check the outgoing email account.";
 		} else {
-			cpMessage.value = `${linked} to this customer. No email was sent; share the password with them yourself.`;
+			cpMessage.value = res?.created ? `${linked} No email was sent; share the password with them yourself.` : linked;
 		}
 		showInviteCustomerUser.value = false;
 		inviteEmail.value = "";
@@ -993,7 +1001,7 @@ async function submitNewCustomer() {
 							</div>
 							<div class="flex shrink-0 flex-wrap gap-2">
 								<button
-									v-if="cpCanReset"
+									v-if="cpCanReset && u.can_reset"
 									type="button"
 									class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
 									:disabled="cpSaving"
@@ -1051,6 +1059,7 @@ async function submitNewCustomer() {
 					</div>
 					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
 					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>
+					<p v-if="cpWarn" class="text-sm font-medium text-amber-700">{{ cpWarn }}</p>
 					<p v-if="cpError" class="text-sm text-red-600">{{ cpError }}</p>
 				</div>
 
@@ -1425,7 +1434,7 @@ async function submitNewCustomer() {
 				role="dialog"
 				aria-modal="true"
 			>
-				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showResetUser = false"></div>
+				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="!resetBusy && (showResetUser = false)"></div>
 				<div class="relative z-10 w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
 					<h3 class="text-lg font-semibold text-gray-900">Reset password</h3>
 					<p class="mt-1 text-sm text-gray-600">
@@ -1458,7 +1467,8 @@ async function submitNewCustomer() {
 					<div class="mt-4 flex justify-end gap-2">
 						<button
 							type="button"
-							class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+							class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 disabled:opacity-50"
+							:disabled="resetBusy"
 							@click="showResetUser = false"
 						>
 							Cancel
