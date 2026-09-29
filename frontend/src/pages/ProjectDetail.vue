@@ -176,8 +176,8 @@ async function loadCustomerPortalUsers() {
 
 // Capabilities load in Layout after this page mounts; on a hard load the first
 // loadCustomerPortalUsers() runs with canManage still false, so retry once it flips.
-watch([canManage, () => project.value?.customer], ([manage, customer], [wasManage, wasCustomer]) => {
-	if (manage && customer && (manage !== wasManage || customer !== wasCustomer)) loadCustomerPortalUsers();
+watch(canManage, (manage) => {
+	if (manage) loadCustomerPortalUsers();
 });
 
 function formatLastLogin(value) {
@@ -227,7 +227,7 @@ async function submitResetUser() {
 		const who = res?.email || resetTarget.value.email || resetTarget.value.name;
 		cpMessage.value =
 			resetMode.value === "email"
-				? `Password reset link emailed to ${who}.`
+				? `A password reset link is on its way to ${who}.`
 				: `New password set for ${who}. Their other sessions were signed out.`;
 		showResetUser.value = false;
 		resetPassword.value = "";
@@ -456,7 +456,7 @@ async function syncCustomerPortalUserIds(userIds) {
 		cpMessage.value = "Saved.";
 		await loadCustomerPortalUsers();
 		window.setTimeout(() => {
-			cpMessage.value = "";
+			if (cpMessage.value === "Saved.") cpMessage.value = "";
 		}, 2500);
 	} catch (e) {
 		cpError.value = apiErr(e);

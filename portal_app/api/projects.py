@@ -1262,11 +1262,13 @@ def _send_portal_access_notice(user, customer):
 		+ _("Sign in at {0} with your existing password.").format(link)
 		+ "</p>"
 	)
+	# Queued, never sent inside the request: EmailQueue.send() commits mid-request and
+	# an SMTP failure there would surface after the link was already saved.
 	frappe.sendmail(
 		recipients=[doc.email],
 		subject=_("You now have access to {0} projects").format(customer_name),
 		message=body,
-		now=True,
+		now=False,
 	)
 
 
@@ -1279,6 +1281,7 @@ def _send_portal_invite(user, customer) -> bool:
 		else:
 			doc = frappe.get_doc("User", user)
 			doc.db_set("redirect_url", helper.PORTAL_HOME)
+			doc.flags.delay_emails = True
 			doc.send_welcome_mail_to_user()
 		return True
 	except frappe.OutgoingEmailError:
@@ -1306,6 +1309,8 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	validate_email_address(email, throw=True)
 
 	if frappe.db.exists("User", email):
+		if not frappe.db.get_value("User", email, "enabled"):
+			frappe.throw(_("{0} is a disabled login. Re-enable it in Desk before inviting them.").format(email))
 		_assert_user_eligible_for_customer_link(email, cust)
 		# The typed password is never applied to an existing login; one that has no
 		# password yet can only get in through the welcome link.
@@ -1346,6 +1351,9 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	doc = frappe.get_doc(user_dict)
 	doc.append("roles", {"role": helper.PORTAL_CUSTOMER_ROLE})
 	doc.flags.ignore_permissions = True
+	# Queue the welcome mail instead of sending it inside this request (see
+	# _send_portal_access_notice); email_sent then means "queued".
+	doc.flags.delay_emails = True
 	doc.insert()
 
 	return {
@@ -1402,7 +1410,15 @@ def reset_customer_portal_user_password(project, user, mode="email", new_passwor
 	if mode == "email":
 		doc.db_set("redirect_url", helper.PORTAL_HOME)
 		try:
-			doc.reset_password(send_email=True)
+			# password_reset_mail() hard-codes now=True; queue the same mail instead.
+			link = doc.reset_password(send_email=False)
+			doc.send_login_mail(
+				_("Password Reset"),
+				"password_reset",
+				{"link": link},
+				now=False,
+				custom_template=frappe.db.get_system_setting("reset_password_template"),
+			)
 		except frappe.OutgoingEmailError:
 			frappe.clear_last_message()
 			frappe.throw(_("No outgoing email account is configured, so the reset link could not be sent."))
