@@ -181,6 +181,9 @@ def create_portal_user(
 	for role in roles:
 		doc.append("roles", {"role": role})
 
+	# Queue the welcome mail; sending it inside the request commits mid-request and an
+	# SMTP failure would then surface after the user already exists.
+	doc.flags.delay_emails = True
 	doc.insert(ignore_permissions=True)
 
 	if team_lead_of:

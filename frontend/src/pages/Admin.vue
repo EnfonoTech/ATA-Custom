@@ -35,8 +35,10 @@ const userErr = ref("");
 
 // A Portal Customer that also holds a staff role is treated as staff everywhere
 // (helper.is_customer_only), so the two are mutually exclusive in this form.
+let sendWelcomeBeforeCustomer = false;
 watch(rolePortalCustomer, (on) => {
 	if (on) {
+		sendWelcomeBeforeCustomer = sendWelcome.value;
 		roleProjectsUser.value = false;
 		roleProjectsManager.value = false;
 		roleTeamManager.value = false;
@@ -44,6 +46,7 @@ watch(rolePortalCustomer, (on) => {
 		sendWelcome.value = true;
 	} else {
 		clearLinkedCustomer();
+		sendWelcome.value = sendWelcomeBeforeCustomer;
 	}
 });
 watch([roleProjectsUser, roleProjectsManager, roleTeamManager, roleSuperAdmin], (vals) => {
