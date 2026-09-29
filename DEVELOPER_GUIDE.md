@@ -169,7 +169,8 @@ Every `@frappe.whitelist()` function below is callable as
 | `list_tasks` / `update_task` | Task workspace |
 | `calendar_events` | Project + task events for `Calendar.vue` |
 | `rename_project` / `create_project` / `set_project_customer` | Project mutations |
-| `sync_project_team` / `sync_customer_portal_users` / `create_customer_portal_user_from_project` | Team / external-portal user management |
+| `sync_project_team` / `sync_customer_portal_users` / `create_customer_portal_user_from_project` | Team / external-portal user management. The invite sends Frappe's welcome email (set-password link) by default and sets `User.redirect_url = /portal-app` |
+| `reset_customer_portal_user_password` | System Manager only: email a reset link or set a new password for a contact of THIS project's customer (never staff / Administrator / another customer's contact) |
 | `search_customers` / `create_or_get_customer` / `search_portal_users` | Typeaheads |
 | `get_portal_folder_template` / `save_portal_folder_template` / `import_portal_folder_template_zip` | Auditor-only template editing |
 

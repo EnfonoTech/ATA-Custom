@@ -83,6 +83,8 @@ add_to_apps_screen = [
 # 	"Role": "home_page"
 # }
 
+get_website_user_home_page = "portal_app.api.helper.get_website_user_home_page"
+
 # Generators
 # ----------
 

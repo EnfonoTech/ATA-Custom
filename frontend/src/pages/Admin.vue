@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { call, uploadFile } from "@/api";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
 
@@ -23,10 +23,64 @@ const roleSuperAdmin = ref(false);
 const teamLeadOf = ref("");
 const teamOptions = ref([]);
 const portalLinkedCustomer = ref("");
+const portalLinkedCustomerLabel = ref("");
+const customerQ = ref("");
+const customerHits = ref([]);
+const customerSearchBusy = ref(false);
+let customerSearchTimer;
 const sendWelcome = ref(false);
 const userBusy = ref(false);
 const userMsg = ref("");
 const userErr = ref("");
+
+// A Portal Customer that also holds a staff role is treated as staff everywhere
+// (helper.is_customer_only), so the two are mutually exclusive in this form.
+watch(rolePortalCustomer, (on) => {
+	if (on) {
+		roleProjectsUser.value = false;
+		roleProjectsManager.value = false;
+		roleTeamManager.value = false;
+		roleSuperAdmin.value = false;
+		sendWelcome.value = true;
+	} else {
+		clearLinkedCustomer();
+	}
+});
+watch([roleProjectsUser, roleProjectsManager, roleTeamManager, roleSuperAdmin], (vals) => {
+	if (vals.some(Boolean) && rolePortalCustomer.value) rolePortalCustomer.value = false;
+});
+
+async function runCustomerSearch() {
+	customerSearchBusy.value = true;
+	try {
+		customerHits.value =
+			(await call({ method: "portal_app.api.projects.search_customers", args: { txt: customerQ.value.trim() } })) || [];
+	} catch (e) {
+		console.error("search_customers error", e);
+		customerHits.value = [];
+	} finally {
+		customerSearchBusy.value = false;
+	}
+}
+
+watch(customerQ, () => {
+	clearTimeout(customerSearchTimer);
+	customerSearchTimer = setTimeout(runCustomerSearch, 250);
+});
+
+function pickCustomer(c) {
+	portalLinkedCustomer.value = c.name;
+	portalLinkedCustomerLabel.value = c.customer_name || c.name;
+	customerQ.value = "";
+	customerHits.value = [];
+}
+
+function clearLinkedCustomer() {
+	portalLinkedCustomer.value = "";
+	portalLinkedCustomerLabel.value = "";
+	customerQ.value = "";
+	customerHits.value = [];
+}
 
 async function loadTeamOptions() {
 	try {
@@ -242,35 +296,48 @@ async function createUser() {
 		userErr.value = "Select at least one role.";
 		return;
 	}
-	if (rolePortalCustomer.value && !portalLinkedCustomer.value.trim()) {
-		userErr.value = "Portal Customer requires the Customer ID (link field).";
+	if (rolePortalCustomer.value && !portalLinkedCustomer.value) {
+		userErr.value = "Pick the customer this portal user belongs to.";
 		return;
 	}
 	if (roleTeamManager.value && !teamLeadOf.value) {
 		userErr.value = "Team Manager requires picking which team they lead.";
 		return;
 	}
+	if (!sendWelcome.value && !password.value) {
+		userErr.value = "Send the welcome email, or set a password — otherwise they cannot sign in.";
+		return;
+	}
+	if (password.value && password.value.length < 6) {
+		userErr.value = "A password set here must be at least 6 characters (or leave it blank and send the welcome email).";
+		return;
+	}
 	userBusy.value = true;
 	try {
-		await call({
+		const res = await call({
 			method: "portal_app.api.portal_admin.create_portal_user",
 			type: "POST",
 			args: {
 				email: email.value.trim(),
 				full_name: fullName.value.trim(),
-				password: password.value,
+				password: password.value || undefined,
 				roles_json: JSON.stringify(roles),
 				send_welcome_email: sendWelcome.value ? 1 : 0,
-				portal_linked_customer: portalLinkedCustomer.value.trim() || undefined,
+				portal_linked_customer: rolePortalCustomer.value ? portalLinkedCustomer.value : undefined,
 				is_super_admin: roleSuperAdmin.value ? 1 : 0,
 				team_lead_of: roleTeamManager.value ? teamLeadOf.value : undefined,
 			},
 		});
-		userMsg.value = "User created.";
+		const who = res?.email || email.value.trim();
+		userMsg.value = !sendWelcome.value
+			? `Created ${who}. No email was sent; share the password with them yourself.`
+			: res?.email_sent
+				? `Created ${who}. A welcome email with a set-password link is on its way.`
+				: `Created ${who}, but the welcome email could not be sent — check the outgoing email account.`;
 		email.value = "";
 		fullName.value = "";
 		password.value = "";
-		portalLinkedCustomer.value = "";
+		clearLinkedCustomer();
 		rolePortalCustomer.value = false;
 		roleTeamManager.value = false;
 		roleSuperAdmin.value = false;
@@ -467,22 +534,31 @@ const totalCreated = computed(() =>
 						<div>
 							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Create portal user</h2>
 							<p class="text-xs text-[color:var(--portal-muted)]">
-								Creates a System User with portal roles. For full HR setup, use Desk → User.
+								Staff roles create an internal login; Portal Customer creates a client login that only sees its
+								customer’s projects. For full HR setup, use Desk → User.
 							</p>
 						</div>
 					</div>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<div class="sm:col-span-2">
 							<label class="portal-section-title mb-1 block">Email (username)</label>
-							<TextInput v-model="email" type="email" class="w-full rounded-xl" placeholder="name@company.com" />
+							<TextInput
+								v-model="email"
+								type="email"
+								class="w-full rounded-xl"
+								placeholder="name@company.com"
+								autocomplete="off"
+							/>
 						</div>
 						<div>
 							<label class="portal-section-title mb-1 block">Full name</label>
-							<TextInput v-model="fullName" class="w-full rounded-xl" />
+							<TextInput v-model="fullName" class="w-full rounded-xl" placeholder="Their name" autocomplete="off" />
 						</div>
 						<div>
-							<label class="portal-section-title mb-1 block">Password (min 6)</label>
-							<Password v-model="password" class="w-full rounded-xl" />
+							<label class="portal-section-title mb-1 block">
+								{{ sendWelcome ? "Password (optional)" : "Password (min 6)" }}
+							</label>
+							<Password v-model="password" class="w-full rounded-xl" autocomplete="new-password" />
 						</div>
 					</div>
 					<div class="flex flex-wrap gap-2">
@@ -513,9 +589,49 @@ const totalCreated = computed(() =>
 							Super Admin
 						</label>
 					</div>
-					<div v-if="rolePortalCustomer">
-						<label class="portal-section-title mb-1 block">Linked Customer ID</label>
-						<TextInput v-model="portalLinkedCustomer" class="w-full rounded-xl" placeholder="e.g. CUST-00001" />
+					<div v-if="rolePortalCustomer" class="space-y-2">
+						<label class="portal-section-title mb-1 block">Customer</label>
+						<div
+							v-if="portalLinkedCustomer"
+							class="flex items-center justify-between gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm"
+						>
+							<span class="min-w-0">
+								<span class="font-medium text-[color:var(--portal-text)]">{{ portalLinkedCustomerLabel }}</span>
+								<span class="ml-2 text-xs text-[color:var(--portal-muted)]">{{ portalLinkedCustomer }}</span>
+							</span>
+							<button type="button" class="text-xs font-medium text-red-700 hover:underline" @click="clearLinkedCustomer">
+								Change
+							</button>
+						</div>
+						<div v-else class="space-y-2" @focusin="runCustomerSearch">
+							<TextInput
+								v-model="customerQ"
+								class="w-full rounded-xl"
+								placeholder="Search customers by name…"
+								autocomplete="off"
+							/>
+							<div
+								v-if="customerHits.length"
+								class="max-h-48 overflow-auto rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] text-sm"
+							>
+								<button
+									v-for="c in customerHits"
+									:key="c.name"
+									type="button"
+									class="flex w-full flex-col gap-0.5 border-b border-[color:var(--portal-border)] px-3 py-2 text-left last:border-0 hover:bg-white"
+									@click="pickCustomer(c)"
+								>
+									<span class="font-medium text-[color:var(--portal-text)]">{{ c.customer_name || c.name }}</span>
+									<span class="text-xs text-[color:var(--portal-muted)]">{{ c.name }}</span>
+								</button>
+							</div>
+							<p v-else-if="customerQ && !customerSearchBusy" class="text-xs text-[color:var(--portal-muted)]">
+								No customer matches. Create it first from a project’s Customer card.
+							</p>
+						</div>
+						<p class="text-xs text-[color:var(--portal-muted)]">
+							They will see every project whose Customer is this one — nothing else.
+						</p>
 					</div>
 					<div v-if="roleTeamManager">
 						<label class="portal-section-title mb-1 block">Team they lead</label>
@@ -529,7 +645,7 @@ const totalCreated = computed(() =>
 					</p>
 					<label class="flex items-center gap-2 text-sm text-[color:var(--portal-text)]">
 						<input v-model="sendWelcome" type="checkbox" class="rounded border-gray-300" />
-						Send welcome email (if outgoing email is configured)
+						Send welcome email with a link to set their own password
 					</label>
 					<p v-if="userMsg" class="text-sm text-green-700">{{ userMsg }}</p>
 					<p v-if="userErr" class="text-sm text-red-600">{{ userErr }}</p>

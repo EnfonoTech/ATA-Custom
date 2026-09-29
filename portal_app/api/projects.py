@@ -6,7 +6,7 @@ import zipfile
 
 import frappe
 from frappe import _
-from frappe.utils import cstr, flt, getdate
+from frappe.utils import cint, cstr, escape_html, flt, getdate, validate_email_address
 
 from erpnext import get_default_company
 
@@ -1165,11 +1165,15 @@ def get_customer_portal_users(project):
 	users = frappe.get_all(
 		"User",
 		filters={"portal_linked_customer": cust, "enabled": 1},
-		fields=["name", "full_name", "email"],
+		fields=["name", "full_name", "email", "last_login"],
 		order_by="name asc",
 		limit_page_length=200,
 	)
-	return {"users": users}
+	return {
+		"users": users,
+		"can_invite": bool(frappe.has_permission("User", "create", user=frappe.session.user)),
+		"can_reset_password": _can_reset_customer_portal_passwords(),
+	}
 
 
 @frappe.whitelist()
@@ -1221,8 +1225,67 @@ def sync_customer_portal_users(project, users):
 	return {"ok": True, "users": sorted(new_set)}
 
 
-@frappe.whitelist()
-def create_customer_portal_user_from_project(project, email, full_name, password=None):
+def _can_reset_customer_portal_passwords(user=None) -> bool:
+	return "System Manager" in frappe.get_roles(user or frappe.session.user)
+
+
+def _user_has_password(user) -> bool:
+	auth = frappe.qb.Table("__Auth")
+	rows = (
+		frappe.qb.from_(auth)
+		.select(auth.name)
+		.where((auth.doctype == "User") & (auth.name == user) & (auth.fieldname == "password"))
+		.limit(1)
+		.run()
+	)
+	return bool(rows)
+
+
+def _send_portal_access_notice(user, customer):
+	"""Tell an existing login that it can now see this customer's projects."""
+	doc = frappe.get_doc("User", user)
+	customer_name = frappe.db.get_value("Customer", customer, "customer_name") or customer
+	inviter = frappe.utils.get_fullname(frappe.session.user) or frappe.session.user
+	login_url = frappe.utils.get_url(helper.PORTAL_HOME + "/login")
+	link = '<a href="' + escape_html(login_url) + '">' + escape_html(login_url) + "</a>"
+	body = (
+		"<p>"
+		+ _("Hi {0},").format(escape_html(doc.full_name or doc.email))
+		+ "</p><p>"
+		+ _("{0} has given you access to the {1} projects on the client portal.").format(
+			"<strong>" + escape_html(inviter) + "</strong>",
+			"<strong>" + escape_html(customer_name) + "</strong>",
+		)
+		+ "</p><p>"
+		+ _("Sign in at {0} with your existing password.").format(link)
+		+ "</p>"
+	)
+	frappe.sendmail(
+		recipients=[doc.email],
+		subject=_("You now have access to {0} projects").format(customer_name),
+		message=body,
+		now=True,
+	)
+
+
+def _send_portal_invite(user, customer) -> bool:
+	"""Invite an EXISTING user to the portal. A user who has never set a password gets
+	Frappe's welcome mail (set-password link); one who has gets an access notice."""
+	try:
+		if _user_has_password(user):
+			_send_portal_access_notice(user, customer)
+		else:
+			doc = frappe.get_doc("User", user)
+			doc.db_set("redirect_url", helper.PORTAL_HOME)
+			doc.send_welcome_mail_to_user()
+		return True
+	except frappe.OutgoingEmailError:
+		frappe.clear_last_message()
+		return False
+
+
+@frappe.whitelist(methods=["POST"])
+def create_customer_portal_user_from_project(project, email, full_name, password=None, send_welcome_email=1):
 	helper.assert_manage_project(project)
 	# Managing a project is not authority to mint a login on the ERPNext site.
 	if not frappe.has_permission("User", "create", user=frappe.session.user):
@@ -1234,14 +1297,20 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	email = cstr(email).strip().lower()
 	full_name = cstr(full_name).strip()
 	password = cstr(password)
+	send_welcome_email = cint(send_welcome_email)
 
 	if not email or not full_name:
 		frappe.throw(_("Valid email and full name are required"))
+	validate_email_address(email, throw=True)
 
 	if frappe.db.exists("User", email):
 		_assert_user_eligible_for_customer_link(email, cust)
 		_attach_portal_customer_user(email, cust)
-		return {"name": email, "email": email, "attached": True, "created": False}
+		email_sent = _send_portal_invite(email, cust) if send_welcome_email else False
+		return {"name": email, "email": email, "attached": True, "created": False, "email_sent": email_sent}
+
+	if not send_welcome_email and not password:
+		frappe.throw(_("Either send the welcome email or set a password, otherwise they cannot sign in."))
 
 	parts = full_name.split(None, 1)
 	first_name = parts[0]
@@ -1253,10 +1322,13 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 		"first_name": first_name,
 		"last_name": last_name,
 		"enabled": 1,
-		# No password supplied -> send the standard welcome/set-password email instead
-		# of having a manager choose someone else's credential.
-		"send_welcome_email": 0 if password else 1,
+		# Frappe's welcome mail carries a set-password link; with a password also
+		# given, the password is set first and the link still lets them change it.
+		"send_welcome_email": send_welcome_email,
 		"user_type": "Website User",
+		# update_password() sends a Website User to redirect_url after they set their
+		# password from the welcome link; without it they land on /me.
+		"redirect_url": helper.PORTAL_HOME,
 	}
 	if frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = cust
@@ -1270,7 +1342,71 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	doc.flags.ignore_permissions = True
 	doc.insert()
 
-	return {"name": doc.name, "email": email, "created": True, "attached": True}
+	return {
+		"name": doc.name,
+		"email": email,
+		"created": True,
+		"attached": True,
+		"email_sent": bool(doc.flags.email_sent),
+	}
+
+
+def _assert_resettable_customer_contact(user, customer):
+	"""Only an enabled, external contact of THIS project's customer may have their
+	password reset from a project — never staff, Administrator, or another customer's
+	contact, whatever the caller's own rights."""
+	if not user or user in ("Administrator", "Guest") or not frappe.db.exists("User", user):
+		frappe.throw(_("Unknown customer portal user."), frappe.DoesNotExistError)
+	if not frappe.db.get_value("User", user, "enabled"):
+		frappe.throw(_("This user is disabled."))
+	if (
+		helper.has_portal_staff_project_access(user)
+		or frappe.db.exists("Project User", {"user": user})
+		or not helper.user_is_customer_portal_user(user)
+		or helper.get_portal_linked_customer(user) != customer
+	):
+		frappe.throw(
+			_("Only a customer portal user of this project's customer can be reset here."),
+			frappe.PermissionError,
+		)
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_customer_portal_user_password(project, user, mode="email", new_password=None):
+	helper.assert_manage_project(project)
+	if not _can_reset_customer_portal_passwords():
+		frappe.throw(
+			_("Only a System Manager can reset a customer portal user's password."), frappe.PermissionError
+		)
+	cust = _project_customer_required(project)
+	user = cstr(user).strip()
+	_assert_resettable_customer_contact(user, cust)
+
+	doc = frappe.get_doc("User", user)
+	mode = cstr(mode).strip() or "email"
+	if mode == "email":
+		doc.db_set("redirect_url", helper.PORTAL_HOME)
+		try:
+			doc.reset_password(send_email=True)
+		except frappe.OutgoingEmailError:
+			frappe.clear_last_message()
+			frappe.throw(_("No outgoing email account is configured, so the reset link could not be sent."))
+		return {"ok": True, "mode": "email", "email": doc.email}
+
+	if mode == "set":
+		new_password = cstr(new_password)
+		if len(new_password) < 8:
+			frappe.throw(_("The new password must be at least 8 characters."))
+		doc.flags.ignore_permissions = True
+		# new_password on save runs the site Password Policy, then updates __Auth.
+		doc.new_password = new_password
+		doc.save()
+		from frappe.sessions import clear_sessions
+
+		clear_sessions(user=user, force=True)
+		return {"ok": True, "mode": "set", "email": doc.email}
+
+	frappe.throw(_("Unknown reset mode."))
 
 
 @frappe.whitelist()
