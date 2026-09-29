@@ -1169,6 +1169,8 @@ def get_customer_portal_users(project):
 		order_by="name asc",
 		limit_page_length=200,
 	)
+	for u in users:
+		u["can_reset"] = _is_resettable_customer_contact(u.name, cust)
 	return {
 		"users": users,
 		"can_invite": bool(frappe.has_permission("User", "create", user=frappe.session.user)),
@@ -1305,6 +1307,10 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 
 	if frappe.db.exists("User", email):
 		_assert_user_eligible_for_customer_link(email, cust)
+		# The typed password is never applied to an existing login; one that has no
+		# password yet can only get in through the welcome link.
+		if not send_welcome_email and not _user_has_password(email):
+			frappe.throw(_("{0} already exists but has no password yet. Tick Send a welcome email.").format(email))
 		_attach_portal_customer_user(email, cust)
 		email_sent = _send_portal_invite(email, cust) if send_welcome_email else False
 		return {"name": email, "email": email, "attached": True, "created": False, "email_sent": email_sent}
@@ -1349,6 +1355,15 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 		"attached": True,
 		"email_sent": bool(doc.flags.email_sent),
 	}
+
+
+def _is_resettable_customer_contact(user, customer) -> bool:
+	try:
+		_assert_resettable_customer_contact(user, customer)
+		return True
+	except (frappe.PermissionError, frappe.DoesNotExistError, frappe.ValidationError):
+		frappe.clear_last_message()
+		return False
 
 
 def _assert_resettable_customer_contact(user, customer):
