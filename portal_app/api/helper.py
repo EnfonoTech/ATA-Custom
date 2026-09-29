@@ -5,6 +5,16 @@ from frappe import _
 
 PORTAL_ROLES = frozenset({"System Manager", "Projects Manager", "Projects User"})
 PORTAL_CUSTOMER_ROLE = "Portal Customer"
+PORTAL_HOME = "/portal-app"
+
+
+def get_website_user_home_page(user):
+	"""hooks.get_website_user_home_page: after Frappe's own /login or password reset a
+	customer contact lands on the portal instead of /me. Returning None for anyone else
+	lets Frappe fall through to its normal home-page resolution."""
+	if user and user != "Guest" and is_customer_only(user):
+		return PORTAL_HOME.strip("/")
+	return None
 
 
 def ensure_user_portal_linked_customer_field() -> None:

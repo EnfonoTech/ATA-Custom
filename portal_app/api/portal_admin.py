@@ -67,11 +67,11 @@ def list_teams_for_picker():
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_portal_user(
 	email,
 	full_name,
-	password,
+	password=None,
 	roles_json=None,
 	send_welcome_email=0,
 	portal_linked_customer=None,
@@ -90,8 +90,11 @@ def create_portal_user(
 	portal_linked_customer = (portal_linked_customer or "").strip()
 	team_lead_of = (team_lead_of or "").strip()
 
-	if not email or not full_name or not password:
-		frappe.throw(_("Valid email, full name, and password are required"))
+	if not email or not full_name:
+		frappe.throw(_("Valid email and full name are required"))
+	frappe.utils.validate_email_address(email, throw=True)
+	if not password and not cint(send_welcome_email):
+		frappe.throw(_("Either send the welcome email or set a password, otherwise they cannot sign in."))
 
 	if frappe.db.exists("User", email):
 		frappe.throw(_("User already exists"))
@@ -134,11 +137,18 @@ def create_portal_user(
 		if not frappe.db.exists("Department", team_lead_of):
 			frappe.throw(_("Team not found"))
 
-	if "Portal Customer" in roles:
+	is_portal_customer = "Portal Customer" in roles
+	if is_portal_customer:
+		# Staff access always wins over the customer link (helper.is_customer_only), so a
+		# customer contact that also holds a staff role would see the whole portfolio.
+		if len(set(roles)) > 1 or team_lead_of:
+			frappe.throw(_("A Portal Customer cannot also have staff roles. Create it with Portal Customer only."))
 		if not portal_linked_customer:
-			frappe.throw(_("Portal Customer role requires a linked Customer (ID)."))
+			frappe.throw(_("Pick the customer this portal user belongs to."))
 		if not frappe.db.exists("Customer", portal_linked_customer):
 			frappe.throw(_("Invalid Customer for portal link."))
+	else:
+		portal_linked_customer = ""
 
 	parts = full_name.split(None, 1)
 	first_name = parts[0]
@@ -155,11 +165,15 @@ def create_portal_user(
 		# rewrite this anyway; being explicit keeps headcount queries honest and avoids
 		# consuming a System User licence seat per client contact.
 		"user_type": "Website User" if roles == ["Portal Customer"] else "System User",
+	}
+	if password:
 		# new_password runs the site Password Policy and strength scoring during insert.
 		# frappe.utils.password.update_password(), used previously, bypasses both, so a
 		# 6-character password was accepted on a site that requires far more.
-		"new_password": password,
-	}
+		user_dict["new_password"] = password
+	if is_portal_customer:
+		# update_password() sends a Website User here after the welcome/reset link.
+		user_dict["redirect_url"] = helper.PORTAL_HOME
 	if portal_linked_customer and frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = portal_linked_customer
 
@@ -177,7 +191,7 @@ def create_portal_user(
 
 		assign_add({"doctype": "Department", "name": team_lead_of, "assign_to": [doc.name]}, ignore_permissions=True)
 
-	return {"ok": True, "name": doc.name, "email": email}
+	return {"ok": True, "name": doc.name, "email": email, "email_sent": bool(doc.flags.email_sent)}
 
 
 def run_demo_seed():

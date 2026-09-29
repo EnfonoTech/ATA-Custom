@@ -47,7 +47,16 @@ const showInviteCustomerUser = ref(false);
 const inviteEmail = ref("");
 const inviteFullName = ref("");
 const invitePassword = ref("");
+const inviteSendWelcome = ref(true);
 const inviteBusy = ref(false);
+const cpCanReset = ref(false);
+const cpCanInvite = ref(false);
+const showResetUser = ref(false);
+const resetTarget = ref(null);
+const resetMode = ref("email");
+const resetPassword = ref("");
+const resetBusy = ref(false);
+const resetErr = ref("");
 const customerDisplayName = ref("");
 const customerSearchQ = ref("");
 const customerHits = ref([]);
@@ -144,6 +153,8 @@ async function loadDashboard() {
 async function loadCustomerPortalUsers() {
 	if (!canManage.value || !project.value?.customer) {
 		customerPortalUsers.value = [];
+		cpCanReset.value = false;
+		cpCanInvite.value = false;
 		return;
 	}
 	try {
@@ -152,9 +163,70 @@ async function loadCustomerPortalUsers() {
 			args: { project: props.name },
 		});
 		customerPortalUsers.value = res.users || [];
+		cpCanReset.value = !!res.can_reset_password;
+		cpCanInvite.value = !!res.can_invite;
 	} catch (e) {
 		console.error(e);
 		customerPortalUsers.value = [];
+		cpCanReset.value = false;
+		cpCanInvite.value = false;
+	}
+}
+
+function formatLastLogin(value) {
+	if (!value) return "";
+	const d = new Date(String(value).replace(" ", "T"));
+	return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+}
+
+function openInviteCustomerUser() {
+	cpError.value = "";
+	cpMessage.value = "";
+	inviteEmail.value = "";
+	inviteFullName.value = "";
+	invitePassword.value = "";
+	inviteSendWelcome.value = true;
+	showInviteCustomerUser.value = true;
+}
+
+function openResetUser(u) {
+	resetTarget.value = u;
+	resetMode.value = "email";
+	resetPassword.value = "";
+	resetErr.value = "";
+	showResetUser.value = true;
+}
+
+async function submitResetUser() {
+	if (!resetTarget.value) return;
+	if (resetMode.value === "set" && resetPassword.value.length < 8) {
+		resetErr.value = "The new password must be at least 8 characters.";
+		return;
+	}
+	resetBusy.value = true;
+	resetErr.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.projects.reset_customer_portal_user_password",
+			type: "POST",
+			args: {
+				project: props.name,
+				user: resetTarget.value.name,
+				mode: resetMode.value,
+				new_password: resetMode.value === "set" ? resetPassword.value : undefined,
+			},
+		});
+		const who = res?.email || resetTarget.value.email || resetTarget.value.name;
+		cpMessage.value =
+			resetMode.value === "email"
+				? `Password reset link emailed to ${who}.`
+				: `New password set for ${who}. Their other sessions were signed out.`;
+		showResetUser.value = false;
+		resetPassword.value = "";
+	} catch (e) {
+		resetErr.value = apiErr(e);
+	} finally {
+		resetBusy.value = false;
 	}
 }
 
@@ -400,28 +472,45 @@ async function removeCustomerPortalUserImmediate(userId) {
 }
 
 async function submitInviteCustomerUser() {
-	if (!inviteEmail.value.trim() || !inviteFullName.value.trim() || invitePassword.value.length < 6) {
-		cpError.value = "Email, name, and password (min 6) are required.";
+	if (!inviteEmail.value.trim() || !inviteFullName.value.trim()) {
+		cpError.value = "Email and full name are required.";
+		return;
+	}
+	if (invitePassword.value && invitePassword.value.length < 8) {
+		cpError.value = "A password set here must be at least 8 characters (or leave it blank).";
+		return;
+	}
+	if (!inviteSendWelcome.value && !invitePassword.value) {
+		cpError.value = "Send the welcome email, or set a password — otherwise they cannot sign in.";
 		return;
 	}
 	inviteBusy.value = true;
 	cpError.value = "";
 	try {
-		await call({
+		const res = await call({
 			method: "portal_app.api.projects.create_customer_portal_user_from_project",
 			type: "POST",
 			args: {
 				project: props.name,
 				email: inviteEmail.value.trim(),
 				full_name: inviteFullName.value.trim(),
-				password: invitePassword.value,
+				password: invitePassword.value || undefined,
+				send_welcome_email: inviteSendWelcome.value ? 1 : 0,
 			},
 		});
+		const who = res?.email || inviteEmail.value.trim();
+		const linked = res?.created ? `Created ${who} and linked them` : `Linked the existing user ${who}`;
+		if (inviteSendWelcome.value && res?.email_sent) {
+			cpMessage.value = `${linked} to this customer. An invite email is on its way.`;
+		} else if (inviteSendWelcome.value) {
+			cpMessage.value = `${linked} to this customer, but the invite email could not be sent — check the outgoing email account.`;
+		} else {
+			cpMessage.value = `${linked} to this customer. No email was sent; share the password with them yourself.`;
+		}
 		showInviteCustomerUser.value = false;
 		inviteEmail.value = "";
 		inviteFullName.value = "";
 		invitePassword.value = "";
-		cpMessage.value = "User created and linked to this project’s customer.";
 		await loadCustomerPortalUsers();
 	} catch (e) {
 		cpError.value = apiErr(e);
@@ -852,8 +941,117 @@ async function submitNewCustomer() {
 						</template>
 						<p v-if="customerMsg" class="text-sm text-green-700">{{ customerMsg }}</p>
 						<p v-if="customerErr" class="text-sm text-red-600">{{ customerErr }}</p>
+						<div
+							v-if="hasProjectCustomer && cpCanInvite"
+							class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3"
+						>
+							<p class="min-w-0 flex-1 text-sm text-gray-700">
+								Give someone at <strong>{{ customerDisplayName || project.customer }}</strong> a portal login. They get
+								a welcome email, set their own password, and see this customer’s projects.
+							</p>
+							<Button variant="solid" class="rounded-xl bg-black text-white" @click="openInviteCustomerUser">
+								Invite customer user
+							</Button>
+						</div>
 					</div>
 					<p v-else class="text-sm text-gray-500">You can view the customer link; only project managers can change it.</p>
+				</div>
+
+				<div
+					v-if="canManage && hasProjectCustomer"
+					class="portal-card-strong p-5"
+				>
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
+							<FeatherIcon name="user-plus" class="h-4 w-4 text-[color:var(--portal-accent)]" />
+							Customer portal users
+						</h2>
+						<Button v-if="cpCanInvite" type="button" variant="outline" size="sm" @click="openInviteCustomerUser">
+							Invite new user
+						</Button>
+					</div>
+					<p class="mb-3 text-sm text-gray-600">
+						One ERPNext <strong>Customer</strong> can have <strong>many</strong> portal logins. Everyone here shares
+						that customer link, gets the Portal Customer role, and sees the same customer’s projects. Use
+						<strong>Remove from portal</strong> to unlink them from this customer (they lose customer portal access
+						for that customer).
+					</p>
+
+					<p class="mb-2 text-xs font-medium uppercase text-gray-500">People with access</p>
+					<ul class="mb-4 divide-y rounded-xl border border-gray-200 bg-white text-sm">
+						<li
+							v-for="u in customerPortalUsers"
+							:key="u.name"
+							class="flex flex-wrap items-center justify-between gap-3 py-3 px-4"
+						>
+							<div class="min-w-0 flex-1">
+								<p class="font-medium text-gray-900">{{ u.full_name || u.name }}</p>
+								<p class="truncate text-xs text-gray-500">{{ u.email || u.name }}</p>
+								<p class="mt-0.5 text-xs" :class="u.last_login ? 'text-gray-500' : 'text-amber-700'">
+									{{ u.last_login ? `Last signed in ${formatLastLogin(u.last_login)}` : "Invited — hasn’t signed in yet" }}
+								</p>
+							</div>
+							<div class="flex shrink-0 flex-wrap gap-2">
+								<button
+									v-if="cpCanReset"
+									type="button"
+									class="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+									:disabled="cpSaving"
+									@click="openResetUser(u)"
+								>
+									Reset password
+								</button>
+								<button
+									type="button"
+									class="rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+									:disabled="cpSaving"
+									@click="removeCustomerPortalUserImmediate(u.name)"
+								>
+									Remove from portal
+								</button>
+							</div>
+						</li>
+						<li
+							v-if="!customerPortalUsers.length"
+							class="py-8 px-4 text-center text-sm text-gray-500"
+						>
+							No customer portal users yet. Search below to add someone, or use Invite new user.
+						</li>
+					</ul>
+
+					<p class="mb-2 text-xs font-medium uppercase text-gray-500">Add existing user</p>
+					<label class="mb-2 block text-xs text-gray-600">Search by email, username, or full name — they are added as soon as you choose one.</label>
+					<div ref="cpPickerRef" class="mb-3 space-y-2" @focusin="onCpFocus">
+						<TextInput
+							v-model="cpSearchQ"
+							class="w-full rounded-xl"
+							placeholder="Click to see existing portal users, or type to filter…"
+							:disabled="cpSaving"
+						/>
+						<div
+							v-if="cpHits.length"
+							class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
+						>
+							<button
+								v-for="u in cpHits"
+								:key="u.name"
+								type="button"
+								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+								:disabled="cpSaving || customerPortalUserIds.has(u.name)"
+								@click="addCustomerPortalUserImmediate(u.name)"
+							>
+								<span class="min-w-0">
+									<span class="font-medium text-gray-900">{{ u.full_name || u.name }}</span>
+									<span class="mt-0.5 block truncate text-xs text-gray-500">{{ u.email || u.name }}</span>
+								</span>
+								<span v-if="customerPortalUserIds.has(u.name)" class="shrink-0 text-xs text-gray-400">Added</span>
+								<span v-else class="shrink-0 text-xs font-medium text-blue-600">Add</span>
+							</button>
+						</div>
+					</div>
+					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
+					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>
+					<p v-if="cpError" class="text-sm text-red-600">{{ cpError }}</p>
 				</div>
 
 				<div class="portal-card-strong p-5">
@@ -998,97 +1196,6 @@ async function submitNewCustomer() {
 						<p v-if="teamMessage" class="text-sm text-green-700">{{ teamMessage }}</p>
 						<p v-if="teamError" class="text-sm text-red-600">{{ teamError }}</p>
 					</div>
-				</div>
-
-				<div
-					v-if="canManage && hasProjectCustomer"
-					class="portal-card-strong p-5"
-				>
-					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
-							<FeatherIcon name="user-plus" class="h-4 w-4 text-[color:var(--portal-accent)]" />
-							Customer portal users
-						</h2>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							@click="
-								cpError = '';
-								showInviteCustomerUser = true
-							"
-						>
-							Invite new user
-						</Button>
-					</div>
-					<p class="mb-3 text-sm text-gray-600">
-						One ERPNext <strong>Customer</strong> can have <strong>many</strong> portal logins. Everyone here shares
-						that customer link, gets the Portal Customer role, and sees the same customer’s projects. Use
-						<strong>Remove from portal</strong> to unlink them from this customer (they lose customer portal access
-						for that customer).
-					</p>
-
-					<p class="mb-2 text-xs font-medium uppercase text-gray-500">People with access</p>
-					<ul class="mb-4 divide-y rounded-xl border border-gray-200 bg-white text-sm">
-						<li
-							v-for="u in customerPortalUsers"
-							:key="u.name"
-							class="flex flex-wrap items-center justify-between gap-3 py-3 px-4"
-						>
-							<div class="min-w-0 flex-1">
-								<p class="font-medium text-gray-900">{{ u.full_name || u.name }}</p>
-								<p class="truncate text-xs text-gray-500">{{ u.email || u.name }}</p>
-							</div>
-							<button
-								type="button"
-								class="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-								:disabled="cpSaving"
-								@click="removeCustomerPortalUserImmediate(u.name)"
-							>
-								Remove from portal
-							</button>
-						</li>
-						<li
-							v-if="!customerPortalUsers.length"
-							class="py-8 px-4 text-center text-sm text-gray-500"
-						>
-							No customer portal users yet. Search below to add someone, or use Invite new user.
-						</li>
-					</ul>
-
-					<p class="mb-2 text-xs font-medium uppercase text-gray-500">Add existing user</p>
-					<label class="mb-2 block text-xs text-gray-600">Search by email, username, or full name — they are added as soon as you choose one.</label>
-					<div ref="cpPickerRef" class="mb-3 space-y-2" @focusin="onCpFocus">
-						<TextInput
-							v-model="cpSearchQ"
-							class="w-full rounded-xl"
-							placeholder="Click to see existing portal users, or type to filter…"
-							:disabled="cpSaving"
-						/>
-						<div
-							v-if="cpHits.length"
-							class="max-h-48 overflow-auto rounded-xl border border-gray-200 bg-gray-50 text-sm"
-						>
-							<button
-								v-for="u in cpHits"
-								:key="u.name"
-								type="button"
-								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
-								:disabled="cpSaving || customerPortalUserIds.has(u.name)"
-								@click="addCustomerPortalUserImmediate(u.name)"
-							>
-								<span class="min-w-0">
-									<span class="font-medium text-gray-900">{{ u.full_name || u.name }}</span>
-									<span class="mt-0.5 block truncate text-xs text-gray-500">{{ u.email || u.name }}</span>
-								</span>
-								<span v-if="customerPortalUserIds.has(u.name)" class="shrink-0 text-xs text-gray-400">Added</span>
-								<span v-else class="shrink-0 text-xs font-medium text-blue-600">Add</span>
-							</button>
-						</div>
-					</div>
-					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
-					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>
-					<p v-if="cpError" class="text-sm text-red-600">{{ cpError }}</p>
 				</div>
 
 				<div class="portal-card-strong p-5">
@@ -1258,21 +1365,40 @@ async function submitNewCustomer() {
 				<div class="relative z-10 w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
 					<h3 class="text-lg font-semibold text-gray-900">Invite customer portal user</h3>
 					<p class="mt-1 text-sm text-gray-600">
-						Creates a user with the Portal Customer role linked to this project’s customer. If the email already
-						exists, that user is linked when allowed.
+						Gives this person a portal login linked to
+						<strong>{{ customerDisplayName || project?.customer }}</strong>. They will see every project of that
+						customer, and only its client-submittal files. If the email already has a login, that user is linked
+						instead.
 					</p>
 					<div class="mt-4 space-y-3">
 						<div>
 							<label class="mb-1 block text-xs font-medium text-gray-600">Email (username)</label>
-							<TextInput v-model="inviteEmail" type="email" class="w-full rounded-xl" placeholder="name@company.com" />
+							<TextInput
+								v-model="inviteEmail"
+								type="email"
+								class="w-full rounded-xl"
+								placeholder="name@company.com"
+								autocomplete="off"
+							/>
 						</div>
 						<div>
 							<label class="mb-1 block text-xs font-medium text-gray-600">Full name</label>
-							<TextInput v-model="inviteFullName" class="w-full rounded-xl" />
+							<TextInput v-model="inviteFullName" class="w-full rounded-xl" placeholder="Their name" autocomplete="off" />
 						</div>
+						<label class="flex items-start gap-2 text-sm text-gray-800">
+							<input v-model="inviteSendWelcome" type="checkbox" class="mt-0.5 rounded border-gray-300" />
+							<span>
+								Send a welcome email
+								<span class="block text-xs text-gray-500">
+									It contains a link to set their own password, then opens the portal.
+								</span>
+							</span>
+						</label>
 						<div>
-							<label class="mb-1 block text-xs font-medium text-gray-600">Password (min 6)</label>
-							<Password v-model="invitePassword" class="w-full rounded-xl" />
+							<label class="mb-1 block text-xs font-medium text-gray-600">
+								{{ inviteSendWelcome ? "Password (optional — leave blank to let them choose)" : "Password (min 8)" }}
+							</label>
+							<Password v-model="invitePassword" class="w-full rounded-xl" autocomplete="new-password" />
 						</div>
 					</div>
 					<p v-if="cpError" class="mt-3 text-sm text-red-600">{{ cpError }}</p>
@@ -1285,7 +1411,60 @@ async function submitNewCustomer() {
 							Cancel
 						</button>
 						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="inviteBusy" @click="submitInviteCustomerUser">
-							Create &amp; link
+							{{ inviteSendWelcome ? "Create & send invite" : "Create & link" }}
+						</Button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
+
+		<Teleport to="body">
+			<div
+				v-if="showResetUser && resetTarget"
+				class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showResetUser = false"></div>
+				<div class="relative z-10 w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
+					<h3 class="text-lg font-semibold text-gray-900">Reset password</h3>
+					<p class="mt-1 text-sm text-gray-600">
+						For <strong>{{ resetTarget.full_name || resetTarget.name }}</strong>
+						<span class="text-gray-500">({{ resetTarget.email || resetTarget.name }})</span>
+					</p>
+					<div class="mt-4 space-y-3">
+						<label class="flex items-start gap-2 text-sm text-gray-800">
+							<input v-model="resetMode" type="radio" value="email" class="mt-1" />
+							<span>
+								Email them a reset link
+								<span class="block text-xs text-gray-500">They choose a new password themselves. Recommended.</span>
+							</span>
+						</label>
+						<label class="flex items-start gap-2 text-sm text-gray-800">
+							<input v-model="resetMode" type="radio" value="set" class="mt-1" />
+							<span>
+								Set a new password now
+								<span class="block text-xs text-gray-500">
+									Signs them out everywhere. You must pass the new password on to them.
+								</span>
+							</span>
+						</label>
+						<div v-if="resetMode === 'set'">
+							<label class="mb-1 block text-xs font-medium text-gray-600">New password (min 8)</label>
+							<Password v-model="resetPassword" class="w-full rounded-xl" autocomplete="new-password" />
+						</div>
+					</div>
+					<p v-if="resetErr" class="mt-3 text-sm text-red-600">{{ resetErr }}</p>
+					<div class="mt-4 flex justify-end gap-2">
+						<button
+							type="button"
+							class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+							@click="showResetUser = false"
+						>
+							Cancel
+						</button>
+						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="resetBusy" @click="submitResetUser">
+							{{ resetMode === "email" ? "Send reset link" : "Set password" }}
 						</Button>
 					</div>
 				</div>

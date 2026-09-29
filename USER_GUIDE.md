@@ -674,8 +674,9 @@ Saving here also updates the avatar/name shown in the header.
 Visible only to portal admins. Two main flows:
 
 * **Create portal user** — make a Frappe `User`, set roles
-  (Projects User / Projects Manager / Portal Customer), optionally link a
-  Customer record (for client-side users), optionally send a welcome email.
+  (Projects User / Projects Manager / Portal Customer). Portal Customer cannot be
+  combined with staff roles; pick the customer from the search box. Tick
+  *Send welcome email* and the password becomes optional — they set their own.
 * **Run demo seed** — populate Customers, Projects, Tasks for a showcase. Gated
   behind *Allow portal demo seed* in **Portal Project Settings**, plus
   developer mode.
@@ -710,7 +711,10 @@ Visible only to portal admins. Two main flows:
 The standard folder tree is created on first visit to /files for that project.
                 ↓
 Add team members:  Project detail → Team → search → Save
-Add customer-portal users: Project detail → Customer portal → search → Save
+Invite a client contact:   Project detail → Customer card → Invite customer user
+                           (welcome email → they set a password → /portal-app)
+Reset a contact's password: Project detail → Customer portal users → Reset password
+                           (System Manager only: email a link, or set one)
                 ↓
 Drag a few files into 01-DOCUMENTS / … to seed the project.
 ```
