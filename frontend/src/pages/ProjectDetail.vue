@@ -328,7 +328,7 @@ async function runCpSearch(q) {
 	try {
 		cpHits.value = await call({
 			method: "portal_app.api.projects.search_portal_users",
-			args: { txt: (q || "").trim() },
+			args: { txt: (q || "").trim(), customer_portal: 1 },
 		});
 	} catch (e) {
 		console.error(e);
@@ -448,12 +448,15 @@ async function syncCustomerPortalUserIds(userIds) {
 	cpMessage.value = "";
 	cpError.value = "";
 	try {
-		await call({
+		const res = await call({
 			method: "portal_app.api.projects.sync_customer_portal_users",
 			type: "POST",
 			args: { project: props.name, users: JSON.stringify(userIds) },
 		});
-		cpMessage.value = "Saved.";
+		const notified = Object.keys(res?.notified || {});
+		cpMessage.value = notified.length
+			? `Added ${notified.join(", ")}. An access email is on its way.`
+			: "Saved.";
 		await loadCustomerPortalUsers();
 		window.setTimeout(() => {
 			if (cpMessage.value === "Saved.") cpMessage.value = "";
@@ -979,10 +982,9 @@ async function submitNewCustomer() {
 						</Button>
 					</div>
 					<p class="mb-3 text-sm text-gray-600">
-						One ERPNext <strong>Customer</strong> can have <strong>many</strong> portal logins. Everyone here shares
-						that customer link, gets the Portal Customer role, and sees the same customer’s projects. Use
-						<strong>Remove from portal</strong> to unlink them from this customer (they lose customer portal access
-						for that customer).
+						Everyone here can sign in to the portal and see this customer’s projects. One login can belong to
+						<strong>several</strong> customers and sees all of their projects. <strong>Remove from portal</strong>
+						takes away this customer only; their other customers stay.
 					</p>
 
 					<p class="mb-2 text-xs font-medium uppercase text-gray-500">People with access</p>

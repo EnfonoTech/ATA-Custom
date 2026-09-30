@@ -185,6 +185,10 @@ def create_portal_user(
 	# SMTP failure would then surface after the user already exists.
 	doc.flags.delay_emails = True
 	doc.insert(ignore_permissions=True)
+	if is_portal_customer:
+		frappe.get_doc(
+			{"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": portal_linked_customer}
+		).insert(ignore_permissions=True)
 
 	if team_lead_of:
 		frappe.db.set_value("Department", team_lead_of, "portal_team_lead", doc.name)

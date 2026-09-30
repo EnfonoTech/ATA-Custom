@@ -85,6 +85,45 @@ def get_portal_linked_customer(user=None) -> str | None:
 	return frappe.db.get_value("User", user, "portal_linked_customer")
 
 
+PORTAL_USER_CUSTOMER = "Portal User Customer"
+
+
+def get_portal_linked_customers(user=None) -> list[str]:
+	"""Every customer a portal login can see: its Portal User Customer rows plus the
+	legacy single User.portal_linked_customer (kept as the primary / display value)."""
+	user = user or frappe.session.user
+	if user == "Guest":
+		return []
+	out = []
+	primary = get_portal_linked_customer(user)
+	if primary:
+		out.append(primary)
+	if frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		for cust in frappe.get_all(PORTAL_USER_CUSTOMER, filters={"user": user}, pluck="customer"):
+			if cust not in out:
+				out.append(cust)
+	return out
+
+
+def get_customer_contact_users(customer) -> list[str]:
+	"""Every login with access to this customer (either source)."""
+	users = set()
+	if frappe.get_meta("User").has_field("portal_linked_customer"):
+		users.update(frappe.get_all("User", filters={"portal_linked_customer": customer}, pluck="name"))
+	if frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		users.update(frappe.get_all(PORTAL_USER_CUSTOMER, filters={"customer": customer}, pluck="user"))
+	return sorted(users)
+
+
+def delete_portal_user_customer_rows(doc, method=None):
+	"""doc_events on_trash for User / Customer: runs before Frappe's link check, so the
+	access rows never block deleting the login or the customer."""
+	if not frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		return
+	field = "user" if doc.doctype == "User" else "customer"
+	frappe.db.delete(PORTAL_USER_CUSTOMER, {field: doc.name})
+
+
 def user_can_use_portal(user=None) -> bool:
 	user = user or frappe.session.user
 	if user == "Guest":
@@ -112,10 +151,10 @@ def get_allowed_project_names(user=None) -> list[str]:
 		return frappe.get_all("Project", pluck="name")
 
 	if user_is_customer_portal_user(user):
-		cust = get_portal_linked_customer(user)
-		if not cust:
+		custs = get_portal_linked_customers(user)
+		if not custs:
 			return []
-		return frappe.get_all("Project", filters={"customer": cust}, pluck="name")
+		return frappe.get_all("Project", filters={"customer": ["in", custs]}, pluck="name")
 
 	# Internal staff (Projects User) READ the whole portfolio. ATA is one practice and
 	# people need to find each other's drawings; the restriction that matters is WRITE,

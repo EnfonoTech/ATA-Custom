@@ -131,3 +131,33 @@ class TestCustomerPortalAccess(FrappeTestCase):
 		self.assertEqual(user.redirect_url, helper.PORTAL_HOME)
 		self.assertEqual(user.portal_linked_customer, self.cust_a)
 		self.assertEqual({r.role for r in user.roles}, {"Portal Customer"})
+
+
+class TestMultiCustomerLogin(FrappeTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		helper.ensure_portal_customer_role()
+		helper.ensure_user_portal_linked_customer_field()
+		cls.cust_a = _make_customer("Portal Test Customer A")
+		cls.cust_b = _make_customer("Portal Test Customer B")
+		cls.contact = _make_user("portal.test.multi@example.com", ["Portal Customer"], cls.cust_a)
+
+	def test_one_login_can_hold_several_customers(self):
+		projects._attach_portal_customer_user(self.contact, self.cust_b)
+		self.assertEqual(set(helper.get_portal_linked_customers(self.contact)), {self.cust_a, self.cust_b})
+		self.assertIn(self.contact, helper.get_customer_contact_users(self.cust_b))
+		projects._assert_resettable_customer_contact(self.contact, self.cust_b)
+
+	def test_removing_one_customer_keeps_the_others_and_the_role(self):
+		projects._attach_portal_customer_user(self.contact, self.cust_b)
+		projects._detach_portal_customer_user(self.contact, self.cust_a)
+		self.assertEqual(helper.get_portal_linked_customers(self.contact), [self.cust_b])
+		self.assertEqual(frappe.db.get_value("User", self.contact, "portal_linked_customer"), self.cust_b)
+		self.assertIn("Portal Customer", frappe.get_roles(self.contact))
+
+	def test_removing_the_last_customer_drops_the_role(self):
+		for cust in list(helper.get_portal_linked_customers(self.contact)):
+			projects._detach_portal_customer_user(self.contact, cust)
+		self.assertEqual(helper.get_portal_linked_customers(self.contact), [])
+		self.assertNotIn("Portal Customer", frappe.get_roles(self.contact))

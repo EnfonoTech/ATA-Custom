@@ -30,6 +30,10 @@ def get_my_profile():
 			out["portal_linked_customer_name"] = (
 				frappe.db.get_value("Customer", cust, "customer_name") or cust
 			)
+	out["portal_linked_customers"] = [
+		{"name": c, "customer_name": frappe.db.get_value("Customer", c, "customer_name") or c}
+		for c in helper.get_portal_linked_customers(frappe.session.user)
+	]
 	return out
 
 
