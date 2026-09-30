@@ -680,23 +680,6 @@ def revoke_user_shares_on_projects(user: str, projects: list) -> None:
 			frappe.delete_doc("DocShare", ds.name, ignore_permissions=True, flags={"ignore_share_permission": True})
 
 
-def _restrict_files_for_customer(project: str, filters: list) -> list:
-	"""Append a folder restriction to a File query when the caller is a customer.
-
-	Enforced HERE, in the query, rather than by hiding things in the UI — a customer
-	who calls the endpoint directly must get the same answer as one who clicks.
-	"""
-	if not helper.is_customer_only():
-		return filters
-	roots = _customer_folder_roots(project)
-	# get_all cannot express OR across LIKEs in a filter list, and there is only ever
-	# a handful of roots, so match the prefix in one LIKE per root via or_filters at
-	# the call site. Callers that pass a plain filter list use the single-root form.
-	filters = list(filters)
-	filters.append(["folder", "like", roots[0] + "%"])
-	return filters
-
-
 @frappe.whitelist()
 def list_project_files(project):
 	helper.assert_project_access(project)
@@ -3103,10 +3086,9 @@ def list_all_files(
 		["is_folder", "=", 0],
 	]
 	if helper.is_customer_only():
-		# Client contacts browse only the submittal folder of their own projects.
-		# The folder path embeds the project, so one LIKE on the folder suffix is
-		# enough across every project they can see, and it is applied in the QUERY
-		# so a direct API call gets the same answer as the UI.
+		# Client contacts browse only the submittal folder of their own projects: the
+		# exact folder set (see _customer_folder_names), applied in the QUERY so a
+		# direct API call gets the same answer as the UI.
 		file_filters.append(["folder", "in", _customer_folder_names(allowed) or [""]])
 	elif not helper.has_portal_staff_project_access():
 		# Contracts are manager-only (download_project_file / contracts.py).

@@ -99,7 +99,7 @@ section,figure,table{page-break-inside:avoid}}
 <aside class="sidebar">
   <div class="brand">
     <h1>ATA Project Portal</h1>
-    <p>Handbook · updated 30 September 2026</p>
+    <p>Handbook · updated 1 October 2026</p>
   </div>
   <nav>
     <div class="navlbl">A · Getting started</div>
@@ -155,7 +155,7 @@ section,figure,table{page-break-inside:avoid}}
       <span>{{ project_count }} projects in total</span>
       <span>{{ register_2026 }} from 2026</span>
       <span>{{ team_count }} departments with an office</span>
-      <span>Updated 30 Sep 2026</span>
+      <span>Updated 1 Oct 2026</span>
       <span>Read time ~45 min</span>
     </div>
   </header>
@@ -330,7 +330,8 @@ section,figure,table{page-break-inside:avoid}}
         <li>Being on a <b>team</b> on the Teams page does <b>not</b> give access to any project. Only the project's own <b>Team</b> card does.</li>
         <li>Being on <b>any</b> project team counts as portal access. A login on a project team can sign in and read
             <b>every</b> project, even without a portal role. This includes someone added with <b>Assign To</b> on a
-            Project in the Desk. Only put ATA staff on project teams. Never assign a project to a client login or an outside person.</li>
+            Project in the Desk. Only put ATA staff on project teams. In the Desk, never assign a project to a client login
+            or to any other outside person. The portal refuses client logins on a project team.</li>
       </ul>
       <div class="warn"><strong>This rule is enforced in the portal only</strong>In the ERPNext Desk, the standard
         <b>Projects User</b> role can edit and delete <b>any</b> Project. Keep staff working in the portal, and give Desk access with care.</div>
@@ -353,7 +354,7 @@ section,figure,table{page-break-inside:avoid}}
             <tr><td>Set the Portal Team (Gantt grouping)</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">If Lead Architect</span></td><td><span class="badge b-part">If Lead Architect and lead of that team</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Change the Lead Architect once it names someone else</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Upload files</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Only into 06-CLIENT SUBMITTAL</span></td></tr>
-            <tr><td>Submit a file to the client (File Browser)</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
+            <tr><td>Submit a file to the client (File Browser)</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Share a folder or file, create a guest link</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Rename folders, delete anyone's file, revoke anyone's share</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Only own uploads and own shares</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Add an existing client login to a customer</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
@@ -384,6 +385,8 @@ section,figure,table{page-break-inside:avoid}}
       <ul>
         <li>Anyone who can change the project may set the Lead Architect while the field is <b>empty</b>, or when it already names <b>themselves</b>.</li>
         <li>Once it names <b>someone else</b>, only a <b>System Manager</b> can change it.</li>
+        <li>Saving a project without changing its Lead Architect (for example in <b>Edit Project</b>, 6.5) does not count as a change,
+            so anyone who can change the project can save it.</li>
       </ul>
       <p>In practice only System Managers and Projects Managers can pick a Lead Architect in the portal. The
          <b>Lead Architect</b> / <b>Select Architect</b> list is empty for Projects Users, so a Projects User must
@@ -403,7 +406,8 @@ section,figure,table{page-break-inside:avoid}}
         </table>
       </div>
       <p>This rule applies everywhere money appears: the Dashboard, the Projects list, the project page and
-         ATA AI Chat. So two managers can correctly see different totals.</p>
+         ATA AI Chat. So two managers can correctly see different totals. The project's other money fields (for example
+         billing totals and the margin) are hidden from the same people.</p>
 
       <h3>2.6 How ATA is set up today</h3>
       <p>At handover, most staff are <b>Projects Users</b>. They can open any project and upload to it, but can
@@ -542,9 +546,9 @@ section,figure,table{page-break-inside:avoid}}
             <tr><td>Contracts</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td><b>AI</b></td><td>ATA AI CHAT</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td><b>Team Structure</b></td><td>ATA Teams (head count per team)</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-no">No</span></td><td><span class="badge b-no">No</span></td></tr>
-            <tr><td rowspan="6"><b>Files</b></td><td>Files</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Hidden (known issue)</span></td></tr>
-            <tr><td>File Browser</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Hidden (known issue)</span></td></tr>
-            <tr><td>Shared</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Hidden; open <code>/portal-app/shared-with-me</code></span></td></tr>
+            <tr><td rowspan="6"><b>Files</b></td><td>Files</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Yes (only 06-CLIENT SUBMITTAL)</span></td></tr>
+            <tr><td>File Browser</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">Yes (only 06-CLIENT SUBMITTAL)</span></td></tr>
+            <tr><td>Shared</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-yes">Yes</span></td></tr>
             <tr><td>Shares</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">If on at least one project team</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>Routing rules</td><td><span class="badge b-yes">Yes</span></td><td><span class="badge b-part">If on at least one project team</span></td><td><span class="badge b-no">No</span></td></tr>
             <tr><td>File tools</td><td><span class="badge b-part">With Auditor role, or System Manager</span></td><td><span class="badge b-part">With Auditor role</span></td><td><span class="badge b-no">No</span></td></tr>
@@ -553,8 +557,10 @@ section,figure,table{page-break-inside:avoid}}
           </tbody>
         </table>
       </div>
-      <div class="note"><strong>Known issue (clients)</strong>Client contacts see a <b>FILES</b> heading with no
-        links under it. To reach files, a client opens a project and clicks <b>Files</b>. See <a href="#clients">section 22</a>.</div>
+      <div class="note"><strong>Client contacts</strong>A client contact's side menu has <b>Projects</b>, <b>Files</b>,
+        <b>File Browser</b>, <b>Shared</b> and <b>Profile</b>. Tasks, Kanban, Calendar, Gantt Chart, Daily Task and ATA AI Chat are
+        for ATA staff only. If a client contact opens the address of one of these pages, the portal takes them to <b>Projects</b>
+        instead. See <a href="#clients">section 22</a>.</div>
       <p>The <b>ATA Teams</b> block under Team Structure shows the number of active employees per team. It is for
          information only. Click <b>ATA Teams</b> to open or close the list; clicking a team does nothing. At the bottom
          of the menu there is a <b>Need Help?</b> card.</p>
@@ -588,7 +594,7 @@ section,figure,table{page-break-inside:avoid}}
       </ol>
       <ul>
         <li><b>Projects</b> are found by project name or portal code, not by the project ID (such as <code>PROJ-0001</code>) or the customer.</li>
-        <li><b>Tasks</b> are found by task subject. <b>Teams</b> by team name; client contacts get no team results.</li>
+        <li><b>Tasks</b> are found by task subject. <b>Teams</b> by team name. Client contacts get only project results, never tasks or teams.</li>
         <li>Search does <b>not</b> look inside files. To find a file, use the Files hub or the File Browser (<a href="#files-hub">section 15</a>).</li>
         <li>You only get results from projects you are allowed to see.</li>
       </ul>
@@ -765,23 +771,34 @@ section,figure,table{page-break-inside:avoid}}
         <li><strong>Change what you need</strong><b>Project Name</b>, <b>Office</b> (the list shows the offices of existing teams; to add a
             new office, create a team with it, section 18), <b>Phase</b>, <b>Status</b>, <b>Lead Architect</b>,
             <b>Start Date</b>, <b>End Date</b>, <b>Progress</b> (slider), <b>Estimated Cost (SAR)</b> (managers only),
-            <b>Servers (links)</b> — T-Server (Google Drive link), A-Server (Autodesk link), ERP Server (client server link) — and <b>Remarks</b>.</li>
-        <li><strong>Click Save Changes</strong></li>
+            <b>Servers (links)</b> — T-Server (Google Drive link), A-Server (Autodesk link), ERP Server (client server link) — and <b>Remarks</b>.
+            The form opens with the project's current values, Remarks included.</li>
+        <li><strong>Click Save Changes</strong>Only the boxes you changed are saved. Everything else stays as it was, except as listed
+            under <b>Known issues</b> below.</li>
       </ol>
+      <ul>
+        <li><b>Lead Architect:</b> you can always save the form without touching this box. Changing it follows the rules in
+            <a href="#s2-4">2.4</a>. Once it names someone else, only a <b>System Manager</b> can change it; others get
+            "Only a System Manager can reassign the portal project manager."</li>
+        <li><b>Projects Users:</b> the <b>Lead Architect</b> box is empty for you. Saving the form leaves the Lead Architect as it is.</li>
+        <li><b>Remarks</b> shows plain text, one paragraph per line. If you change it, it is saved as plain paragraphs, so any
+            formatting added in the Desk (for example bold text or lists) is replaced.</li>
+        <li>Estimated Cost is ignored for people who cannot see the value.</li>
+      </ul>
       <div class="warn"><strong>Known issues with this form</strong>
         <ul>
-          <li>If the project's Lead Architect is someone else, only a <b>System Manager</b> can save this form. Others get
-              "Only a System Manager can reassign the portal project manager." Ask a System Manager, or rename the project from its project page.</li>
-          <li><b>Projects Users:</b> the <b>Lead Architect</b> box is always empty for you. If you are the Lead Architect and click
-              <b>Save Changes</b>, the Lead Architect is <b>cleared</b>. If it is someone else, the save is refused. Ask a manager to
-              make the edit, and use the project page (<b>Rename project</b>, <b>Customer</b> card) for what you can change there.</li>
-          <li>The <b>Remarks</b> box always opens empty. Saving the form clears any earlier remarks.</li>
           <li><b>Progress</b> is normally worked out by ERPNext from the project's tasks. The slider value is replaced, unless the
               project's <b>% Complete Method</b> in the Desk is <b>Manual</b>.</li>
-          <li>ERPNext only knows the statuses Open, Completed and Cancelled. <b>In Progress</b> and <b>On Hold</b> are saved, but the
-              next save anywhere turns them back to Open or Completed. Use the <b>Kanban stage</b> for working stages instead.</li>
-          <li>If <b>% Complete Method</b> is <b>Manual</b>, choosing In Progress or On Hold makes the save fail with a "Status cannot be…" error.</li>
-          <li>Estimated Cost is ignored for people who cannot see the value.</li>
+          <li>ERPNext only knows the statuses Open, Completed and Cancelled. <b>In Progress</b> and <b>On Hold</b> are portal
+              statuses. They stay when you save this form without changing <b>Status</b>, and when someone sets the Lead Architect
+              (6.6) or the Portal Team (7.5). Other changes turn them back to Open or Completed: renaming the project, moving it on the
+              Kanban board, adding or removing a milestone, saving the team or the customer, adding, changing or deleting one of the
+              project's tasks, or any save in the Desk. Use the <b>Kanban stage</b> for working stages instead.</li>
+          <li>If <b>% Complete Method</b> is <b>Manual</b>, task changes leave the status alone, but the other changes above fail with a
+              "Status cannot be…" error while the status is In Progress or On Hold. Set <b>Status</b> back to Open in this form first.</li>
+          <li>If you choose <b>Completed</b> while some of the project's tasks are still open, the next change to the project or its
+              tasks sets it back to Open (a save of this form counts, unless it chooses Completed again). This does not happen when
+              <b>% Complete Method</b> is <b>Manual</b>. Close the tasks first.</li>
         </ul>
       </div>
 
@@ -824,6 +841,9 @@ section,figure,table{page-break-inside:avoid}}
       <p class="who"><b class="lbl">Who</b>Anyone who can open the project. Buttons that change things appear only for
         people who can change the project.</p>
       <p><b>Where:</b> click a project on the Projects list. The address is <code>/portal-app/projects/&lt;project ID&gt;</code>.</p>
+      <div class="note"><strong>What client contacts see</strong>The header (with <b>Files</b>, but no <b>Tasks</b> button), the summary
+        cards, the <b>Customer</b> card (view only) and the <b>Files</b> card. The <b>Portal Team</b>, <b>Team</b> and <b>Tasks</b> cards
+        are for ATA staff only.</div>
       <figure>
         <a class="full" href="/assets/portal_app/images/handbook/05-project-detail.svg" target="_blank" rel="noopener"><img src="/assets/portal_app/images/handbook/05-project-detail.svg" alt="Project page"
              onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Illustration: a project page&lt;/div&gt;'"></a>
@@ -836,7 +856,7 @@ section,figure,table{page-break-inside:avoid}}
       <ul>
         <li><b>Back to projects</b> returns to the list.</li>
         <li>The header shows the status, the Kanban stage, the title and the project ID.</li>
-        <li><b>Files</b> opens the Files hub for this project. <b>Tasks</b> opens the Tasks page filtered to this project.</li>
+        <li><b>Files</b> opens the Files hub for this project. <b>Tasks</b> (staff only) opens the Tasks page filtered to this project.</li>
         <li><b>Rename project</b> (people who can change the project): type a new title and click <b>Save title</b>. The project ID never changes.
             The new title must not be used by any other project, or ERPNext refuses the save (see 6.4).</li>
       </ul>
@@ -928,11 +948,10 @@ section,figure,table{page-break-inside:avoid}}
         <li><strong>Remove people</strong>Click <b>Remove</b> next to a person.</li>
         <li><strong>Click Save team</strong></li>
       </ol>
-      <div class="warn"><strong>Never add a client login to a project team</strong>The <b>Add user</b> search also lists client
-        logins. Such a login keeps seeing only its customers' projects, but the portal's checks then count it as internal: it can
-        no longer be linked to another customer, and its password cannot be reset from the project page. If it later loses the
-        <b>Portal Customer</b> role (for example when its last customer is removed), it can read <b>every</b> project and change the
-        projects whose team it is on.</div>
+      <div class="note"><strong>Client logins cannot join a project team</strong>The <b>Add user</b> search also lists client
+        logins. If the team holds one (added now or earlier), <b>Save team</b> fails with "Client contacts cannot be added to the project team: &lt;login&gt;".
+        Click <b>Remove</b> next to that person, then <b>Save team</b>. Clients get access through the project's <b>Customer</b>
+        instead (<a href="#client-access">section 23</a>).</div>
       <div class="warn"><strong>Disabled members block Save team</strong>If a person on the team has a disabled login, <b>Save team</b>
         fails with "User is disabled: &lt;login&gt;". Click <b>Remove</b> next to that person first, then <b>Save team</b>.</div>
       <div class="erp"><b class="lbl">In ERPNext</b>The people are saved in the project's <b>Users</b> table. Each person also
@@ -940,7 +959,8 @@ section,figure,table{page-break-inside:avoid}}
         <b>Known issue:</b> every <b>Save team</b> sends that email again to every member.</div>
       <div class="note"><strong>It also works the other way</strong>If someone assigns the project to a person in the Desk
         (<b>Assigned To</b> in the sidebar), that person joins the team. If the assignment is closed or cancelled (for example
-        ticked done in their To Do list), they leave the team.</div>
+        ticked done in their To Do list), they leave the team. A client login never joins the team this way, but never assign
+        a project to a client login in the Desk.</div>
 
       <h3>7.7 Files card</h3>
       <ul>
@@ -953,12 +973,12 @@ section,figure,table{page-break-inside:avoid}}
       </ul>
 
       <h3>7.8 Tasks card</h3>
-      <p>A list of the project's latest 50 tasks with their status. <b>Open task workspace</b> opens the Tasks page filtered to this project.</p>
+      <p>Staff only. A list of the project's latest 50 tasks with their status. <b>Open task workspace</b> opens the Tasks page filtered to this project.</p>
     </section>
 
     <section id="kanban">
       <h2>8. Kanban board</h2>
-      <p class="who"><b class="lbl">Who</b>Staff. Only people who can change a project can move it.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects). Only people who can change a project can move it.</p>
       <p><b>Where:</b> side menu → <b>Kanban</b>. The page is called <b>Project board</b>.</p>
       <p>Each project is a card in a column for its <b>Kanban stage</b>: <b>Planning</b>, <b>Active</b>, <b>On Hold</b>,
          <b>Review</b> or <b>Done</b>. A card shows the portal code, the name and the customer ID ("No client" if none).</p>
@@ -978,7 +998,7 @@ section,figure,table{page-break-inside:avoid}}
 
     <section id="gantt">
       <h2>9. Gantt chart and milestones</h2>
-      <p class="who"><b class="lbl">Who</b>Staff. Adding or removing milestones needs the right to change that project.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects). Adding or removing milestones needs the right to change that project.</p>
       <p><b>Where:</b> side menu → <b>Gantt Chart</b>. The page is called <b>Gantt Chart &amp; Milestones</b>.</p>
       <figure>
         <a class="full" href="/assets/portal_app/images/handbook/12-gantt.svg" target="_blank" rel="noopener"><img src="/assets/portal_app/images/handbook/12-gantt.svg" alt="Gantt chart"
@@ -1023,7 +1043,7 @@ section,figure,table{page-break-inside:avoid}}
 
     <section id="calendar">
       <h2>10. Calendar</h2>
-      <p class="who"><b class="lbl">Who</b>Staff.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects).</p>
       <p><b>Where:</b> side menu → <b>Calendar</b>. The page is called <b>Project &amp; task timeline</b>.</p>
       <p>Each project and each task is drawn on every day from its start to its end. Projects are blue. Tasks are violet.</p>
       <ul>
@@ -1044,8 +1064,8 @@ section,figure,table{page-break-inside:avoid}}
 
     <section id="tasks">
       <h2>11. Tasks</h2>
-      <p class="who"><b class="lbl">Who</b>Staff. Creating a task needs the right to change at least one project. Saving a
-        task row or commenting needs the right to change its project, or being assigned to the task.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects). Creating a task needs the right to
+        change at least one project. Saving a task row or commenting needs the right to change its project, or being assigned to the task.</p>
       <p><b>Where:</b> side menu → <b>Tasks</b>. The page is called <b>Tasks workspace</b>.</p>
       <figure>
         <a class="full" href="/assets/portal_app/images/handbook/10-tasks.svg" target="_blank" rel="noopener"><img src="/assets/portal_app/images/handbook/10-tasks.svg" alt="Tasks workspace"
@@ -1085,26 +1105,32 @@ section,figure,table{page-break-inside:avoid}}
         <li><strong>Type and send</strong>Type in the box and click <b>Send</b> (or press <b>Ctrl + Enter</b> / <b>Cmd + Enter</b>).</li>
       </ol>
       <p>Comments can be up to 5000 characters. Anything longer is cut off at 5000 without a warning.</p>
-      <div class="warn"><strong>Clients can read task comments</strong>A project's client contacts can open the Tasks page from the
-        project page (the <b>Tasks</b> and <b>Open task workspace</b> buttons). There they can read every task's title, who it is
-        assigned to, and its <b>Comments</b>. They cannot change tasks or add comments. Write task titles and comments as if the
-        client will read them, and keep internal discussion out of the portal.</div>
+      <div class="note"><strong>Tasks are internal</strong>Client contacts cannot open the Tasks page. They do not see tasks on the
+        project page or in search, so task titles, assignees and comments stay inside ATA.</div>
       <div class="erp"><b class="lbl">In ERPNext</b>Comments appear on the task's timeline in the Desk.</div>
 
       <h3>11.4 Creating a task</h3>
       <ol class="steps">
         <li><strong>Click New task</strong></li>
-        <li><strong>Fill in the form</strong><b>Subject *</b>, <b>Project *</b> (search; only projects you can change), <b>Priority</b> and <b>Due date</b>.</li>
-        <li><strong>Click Create Task</strong></li>
+        <li><strong>Fill in the form</strong><b>Subject *</b>, <b>Project *</b> (search; only projects you can change), <b>Assign to</b>
+            (optional; search by name or email), <b>Priority</b> and <b>Due date</b>.</li>
+        <li><strong>Click Create Task</strong>You see "Task created on &lt;project&gt;."</li>
       </ol>
       <p>The <b>Due date</b> must not be after the project's end date, or ERPNext refuses the task.</p>
-      <div class="warn"><strong>Known issue: Assign to</strong>The <b>Assign to</b> box in this form is not saved. Tasks are created
-        with nobody assigned. To assign a task, open it in the Desk and use <b>Assign To</b>.</div>
+      <ul>
+        <li><b>Assign to</b> lists ATA staff logins only. If the person is not an active staff login, the task is not created and
+            you see "Assign the task to an active ATA staff login."</li>
+        <li>The person you pick gets an <b>Assign To</b> on the task (a ToDo) and ERPNext's usual assignment notification (not when
+            you assign yourself). The task shows in their
+            <b>Assigned to you (open)</b> list and in <b>Only my tasks</b>. They can open and update it even if they are not on the project team.</li>
+        <li>If ERPNext refuses the task, the reason is shown on screen.</li>
+      </ul>
     </section>
 
     <section id="daily-task">
       <h2>12. Daily Task</h2>
-      <p class="who"><b class="lbl">Who</b>Staff. Only System Managers and Projects Managers can put a reminder on someone else's board.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects). Only System Managers and Projects
+        Managers can put a reminder on someone else's board.</p>
       <p><b>Where:</b> side menu → <b>Daily Task</b>. This is a private four-week board of personal reminders. It is not linked to projects.</p>
       <ul>
         <li><b>Prev 4 Weeks</b> / <b>Next 4 Weeks</b> move the board. "(Current)" marks the present four weeks.</li>
@@ -1119,7 +1145,7 @@ section,figure,table{page-break-inside:avoid}}
         <li><strong>Click Add Task</strong></li>
       </ol>
       <p>A reminder you put on a colleague's board is <b>not</b> on your own board. To change or remove it later, use the Desk
-         calendar (<b>Event</b>). The <b>Assign to</b> search also lists client logins. <b>Never pick a client login.</b></p>
+         calendar (<b>Event</b>). The <b>Assign to</b> search lists ATA staff logins only.</p>
       <ul>
         <li>Click the circle to mark it done or not done.</li>
         <li>Click the title to edit the title or time, then <b>Save</b> (or <b>Cancel</b>).</li>
@@ -1130,9 +1156,10 @@ section,figure,table{page-break-inside:avoid}}
       <div class="erp"><b class="lbl">In ERPNext</b>Each reminder is a private <b>Event</b>. The person who creates it stays its owner.
         So a reminder a manager creates for you shows on <b>your</b> board, but in the Desk it belongs to the manager. ERPNext may
         also send the owner a daily "Upcoming Events for Today" email.</div>
-      <div class="warn"><strong>Known issue: dates one day off</strong>In Saudi time the dates are one day off. The <b>TODAY</b> badge
-        appears on tomorrow's tile, and in the Desk calendar each reminder shows one day earlier. Inside the portal, a reminder stays
-        on the tile where you added it. Go by the date labels, not by the TODAY badge.</div>
+      <div class="note"><strong>Dates follow your own calendar</strong>The board uses the date on your computer, so the <b>TODAY</b>
+        badge is on today's tile and a reminder is saved on the day you clicked. The Desk calendar shows the same day.
+        Reminders added with an earlier version of the portal may now show one day earlier than the tile you added them on; that
+        is the date they were saved with. To move one, delete it and add it again.</div>
     </section>
 
     <!-- ============================================================ PART C -->
@@ -1320,7 +1347,8 @@ section,figure,table{page-break-inside:avoid}}
             is grey only when the project has no folders yet.</li>
         <li><strong>Click Upload ZIP</strong>Pick the <code>.zip</code> file.</li>
         <li><strong>Confirm the destination</strong>In the browser box.</li>
-        <li><strong>Wait</strong>It shows <b>Extracting…</b>, then "ZIP extracted: N file(s) uploaded, M failed."</li>
+        <li><strong>Wait</strong>It shows <b>Extracting…</b>, then "ZIP extracted: N file(s) uploaded, M failed." The file list
+            and the folders refresh by themselves.</li>
       </ol>
       <ul>
         <li>The folders inside the ZIP are kept. If everything sits in one top folder, that top folder is dropped.</li>
@@ -1331,11 +1359,9 @@ section,figure,table{page-break-inside:avoid}}
             bigger ZIP is refused before anything is unpacked. Each file inside must be within the per-file limit (about <b>10 MB</b>),
             or it counts as failed. If the developer sets <code>max_file_size</code> in the site configuration, that one number becomes
             the limit for both. Split big ZIPs, or use <b>Upload folder</b>.</li>
-        <li>The message shows only <b>how many</b> files failed, not which. Reload, compare the folder with your ZIP, and upload any
+        <li>The message shows only <b>how many</b> files failed, not which. Compare the folder with your ZIP, and upload any
             missing files with <b>Upload files</b> to see the reason.</li>
       </ul>
-      <div class="note"><strong>Known issue</strong>After a successful ZIP upload you may also see a red message
-        "loadFilesAndFolders is not defined". The files were uploaded. Reload the page to see them.</div>
 
       <h3 id="s14-7">14.7 Private and public</h3>
       <p>The <b>Private upload</b> box is ticked by default. <b>Leave it ticked.</b></p>
@@ -1494,6 +1520,7 @@ section,figure,table{page-break-inside:avoid}}
         <li>Category chips (for example Presentation, Drawing, 3D Model, Feasibility, Design Source, Renders, Other) filter by file extension. PDFs always count as Presentation. <b>Clear</b> resets them.</li>
         <li>Sort by <b>File</b>, <b>Date</b> or <b>Size</b> by clicking the column header. Click a file name to open it.</li>
         <li>The File Browser remembers each project's files until you reload the page. Reload to see new uploads.</li>
+        <li>Client contacts see only their own projects, and only the files in 06-CLIENT SUBMITTAL. They get no <b>Submit</b> or share buttons.</li>
       </ul>
       <p><b>To submit a file to the client (copy into 06-CLIENT SUBMITTAL):</b></p>
       <ol class="steps">
@@ -1505,16 +1532,18 @@ section,figure,table{page-break-inside:avoid}}
       <p>If you submitted the wrong file, open the Files hub, open <b>06-CLIENT SUBMITTAL</b> and <b>Delete</b> the copy (you uploaded it,
          so you may delete it). The serial number <code>NN</code> is the number of files already at the top of that folder plus one. So
          after a deletion, the next copy can get a number that is already used.</p>
-      <p class="who"><b class="lbl">Who</b>Staff only. The project must have a folder named exactly 06-CLIENT SUBMITTAL, or you get
-        "This project has no 06-CLIENT SUBMITTAL folder."</p>
-      <p>The share icon opens <b>Share File</b> (see 16.2).</p>
+      <p class="who"><b class="lbl">Who</b>Anyone who can change the project: its team members, Projects Managers and System Managers.
+        The <b>Submit</b> button appears only on those projects. The project must have a folder named exactly 06-CLIENT SUBMITTAL, or
+        you get "This project has no 06-CLIENT SUBMITTAL folder." Contract files can never be submitted to the client.</p>
+      <p>The share icon opens <b>Share File</b> (see 16.2). It is shown to all staff.</p>
     </section>
 
     <section id="share">
       <h2>16. Sharing files and folders</h2>
       <p>There are two kinds of sharing: <b>with a named person</b> who has a login (they see it on their <b>Shared</b> page), and
          <b>with a guest link</b> for someone without a login.</p>
-      <p class="who"><b class="lbl">Who</b>All staff, on any project they can open. Client contacts can never share.</p>
+      <p class="who"><b class="lbl">Who</b>All staff, on any project they can open. Client contacts can never share. Contract files
+        can never be shared (<a href="#s17-3">section 17.3</a>).</p>
 
       <h3 id="s16-1">16.1 Sharing a folder with a person</h3>
       <ol class="steps">
@@ -1535,17 +1564,17 @@ section,figure,table{page-break-inside:avoid}}
          (see below) the rows show "· shared directly" instead of a date.</p>
       <p>What the person gets: read access to every file in the folder and its sub-folders until the share ends; the folder on
          their <b>Shared</b> page; and, if ticked, an email "You were granted access to a folder on &lt;project title&gt;" with a link to the Shared page.</p>
-      <div class="warn"><strong>Sharing with a client contact</strong>Any share with a client contact, of a folder or of a single file,
-        also opens the <b>project record</b> to them. While the share is active, ERPNext may then let them open other files of that
-        project too, not only the shared ones. Files you add to a shared folder later also become visible to them. So share with a
-        client contact only if they may see <b>everything</b> in that project. If they may not, copy the files into 06-CLIENT
-        SUBMITTAL instead (<b>File Browser → Submit</b>, <a href="#s15-5">section 15.5</a>).</div>
+      <div class="warn"><strong>Sharing with a client contact</strong>While the share is active, a client contact can open
+        <b>every</b> file in the shared folder and its sub-folders, including files you add there later. So share a folder with a
+        client contact only if they may see everything in it. If they may not, copy the files into 06-CLIENT SUBMITTAL instead
+        (<b>File Browser → Submit</b>, <a href="#s15-5">section 15.5</a>), or share single files (16.2).</div>
       <div class="note"><strong>New files after sharing</strong>Files you add to a shared folder later show on the person's <b>Shared</b>
         page by themselves while the share is active. You do not need to share again.</div>
       <p>Sharing the same folder with the same person again <b>extends</b> the existing share. It does not make a second one. The share
          is then recorded as made by you. The colleague who shared it first can then no longer revoke it, unless they can change the project.</p>
       <div class="erp"><b class="lbl">In ERPNext</b>A <b>Portal Folder Share</b> record is saved (the audit record). ERPNext <b>DocShare</b>
-        entries give read access to the folder, to each file in it at that moment, and to the project.</div>
+        entries give read access to the folder and to each file in it at that moment. A staff member also gets read access to the
+        project; a client contact never does.</div>
       <div class="note"><strong>Sharing with colleagues</strong>All staff can already read every project. So sharing with a colleague
         mainly puts the folder on their Shared page and sends the email. Sharing matters most for <b>client contacts</b>.</div>
       <p>If the box says "Sharing is running in basic mode. Expiry dates and public share links will be available once your administrator
@@ -1557,7 +1586,10 @@ section,figure,table{page-break-inside:avoid}}
         <li>In the File Browser, click the share icon. The <b>Share File</b> box lets you search "by name or email" and click a person.
             It always shares for 30 days and sends no email. <b>Shared with</b> lists people with a revoke button. Click <b>Done</b> to close.</li>
       </ul>
-      <p>Sharing one file with a client contact also opens the project record to them. Read the warning in <a href="#s16-1">16.1</a> first.</p>
+      <ul>
+        <li>For a client contact, a single-file share adds only that one file to their <b>Shared</b> page, not the rest of its folder.</li>
+        <li>Contract files cannot be shared. The portal says "Contract files cannot be shared."</li>
+      </ul>
 
       <h3>16.3 Who may receive a share</h3>
       <ul>
@@ -1754,10 +1786,11 @@ section,figure,table{page-break-inside:avoid}}
       </ol>
       <p><b>To open a contract:</b> click its file name. <b>To delete a contract:</b> click the bin and confirm "Delete "&lt;name&gt;"?
          This cannot be undone."</p>
-      <div class="warn"><strong>Give contract files neutral names</strong>Contract files never appear in the Files hub or the File Browser.
-        But their <b>file names</b> (not their contents) can still appear to staff in the Dashboard's <b>Recent Activity</b>, in ATA
-        AI Chat answers about recent files, and on the <b>Shares</b> page under "Project folder (all files)". Name contracts neutrally,
-        for example <code>PROJ-0001_contract_2026-09.pdf</code>.</div>
+      <div class="warn"><strong>Give contract files neutral names</strong>Contract files never appear in the Files hub or the File Browser,
+        and they cannot be shared or submitted to the client. But their <b>file names</b> (not their contents) can still appear to
+        System Managers and Projects Managers in the Dashboard's <b>Recent Activity</b> and in ATA AI Chat answers about recent files,
+        and to staff on the <b>Shares</b> page under "Project folder (all files)". Name contracts neutrally, for example
+        <code>PROJ-0001_contract_2026-09.pdf</code>.</div>
       <div class="erp"><b class="lbl">In ERPNext</b>Contracts are private Files attached to the project, in the folder
         <code>Home / Contracts / &lt;project ID&gt;</code>. Because they are attached to the project, Desk users with access to the
         project can see them in the Project's attachments.</div>
@@ -1961,7 +1994,7 @@ section,figure,table{page-break-inside:avoid}}
 
     <section id="ai-chat">
       <h2>21. ATA AI Chat</h2>
-      <p class="who"><b class="lbl">Who</b>Staff.</p>
+      <p class="who"><b class="lbl">Who</b>Staff only (client contacts are taken to Projects).</p>
       <p><b>Where:</b> side menu → <b>ATA AI CHAT</b>. This screen answers simple questions about the portal's data.
          <b>It is not a real AI.</b> It looks for certain words in your question and runs fixed counts and lists. It cannot answer open
          questions. It only reads; it never changes anything.</p>
@@ -1977,8 +2010,8 @@ section,figure,table{page-break-inside:avoid}}
             <tr><td>"how many projects", "summary", "overview"</td><td>Project counts by status</td></tr>
             <tr><td>"active projects"</td><td>Up to 15 open projects</td></tr>
             <tr><td>"completed projects"</td><td>Up to 15 completed projects</td></tr>
-            <tr><td>"files uploaded" + "today" / "this week" / "this month"</td><td>Up to 20 recent files (this month = last 30 days)</td></tr>
-            <tr><td>"how many files"</td><td>The number of project files</td></tr>
+            <tr><td>"files uploaded" + "today" / "this week" / "this month"</td><td>Up to 20 recent files (this month = last 30 days). Contracts are included only for System Managers and Projects Managers.</td></tr>
+            <tr><td>"how many files"</td><td>The number of project files (contracts counted only for System Managers and Projects Managers)</td></tr>
             <tr><td>"tasks"</td><td>Task counts by status (all statuses)</td></tr>
             <tr><td>"budget", "cost", "value"</td><td>The top 10 projects by value, and the total, only for projects whose value you may see</td></tr>
             <tr><td>"find" / "show" / "list" + words</td><td>Up to 10 projects whose name or code contains any of the words</td></tr>
@@ -2003,16 +2036,18 @@ section,figure,table{page-break-inside:avoid}}
           <thead><tr><th>You can</th><th>You cannot</th></tr></thead>
           <tbody>
             <tr><td>See the projects of your company (or companies)</td><td>See any other client's projects</td></tr>
-            <tr><td>Open each project's page: status, stage, dates, progress, the ATA team and the latest tasks</td><td>See project values or costs</td></tr>
+            <tr><td>Open each project's page: status, stage, dates, progress, the customer and the files</td><td>See project values or costs</td></tr>
             <tr><td>Open and download files in the <b>06-CLIENT SUBMITTAL</b> folder</td><td>Open files in ATA's internal folders (unless ATA shares a folder with you by name)</td></tr>
             <tr><td>Download several files as one ZIP</td><td>Rename folders or share files. The portal gives you no <b>Delete</b> button either.</td></tr>
             <tr><td>Upload files into <b>06-CLIENT SUBMITTAL</b></td><td>Create projects or change project details</td></tr>
             <tr><td>See files ATA shared with you personally</td><td>Use ATA's internal office system</td></tr>
-            <tr><td>See your project's tasks and their comments (the <b>Tasks</b> button on the project page)</td><td>Change tasks or add comments</td></tr>
+            <tr><td>Reach your files from the side menu: <b>Files</b>, <b>File Browser</b> and <b>Shared</b></td><td>Use ATA's internal planning pages: Tasks, Kanban, Calendar, Gantt Chart, Daily Task and ATA AI Chat</td></tr>
             <tr><td>Open the project's drive links on the Projects list: the <b>T</b> (Google Drive), <b>A</b> (Autodesk) and <b>erp</b> badges in the <b>Servers</b> column, if ATA has given you access to those drives</td><td>—</td></tr>
           </tbody>
         </table>
       </div>
+      <p>Your side menu has <b>Projects</b>, <b>Files</b>, <b>File Browser</b>, <b>Shared</b> and <b>Profile</b>. If you open a link to
+         one of ATA's internal pages (for example Tasks or Kanban), the portal takes you to <b>Projects</b> instead.</p>
 
       <h3>22.2 Signing in for the first time</h3>
       <div class="tip"><strong>Already have a portal login?</strong>For example for another of your companies. You get the email
@@ -2032,7 +2067,8 @@ section,figure,table{page-break-inside:avoid}}
       <ol class="steps">
         <li><strong>Click Projects</strong>In the side menu. You see only your company's projects.</li>
         <li><strong>Click a project</strong>Its page opens.</li>
-        <li><strong>Click Files</strong>At the top of the page (or <b>Open in Files hub</b> on the Files card).</li>
+        <li><strong>Click Files</strong>At the top of the page (or <b>Open in Files hub</b> on the Files card). You can also click
+            <b>Files</b> in the side menu and pick the project in <b>Active project</b>.</li>
         <li><strong>The Project files page opens</strong>You see a <b>Project folder (all files)</b> card and the <b>06-CLIENT SUBMITTAL</b>
             folder with any folders inside it. Both show only the files you may see.</li>
         <li><strong>Click a folder</strong>To show its files.</li>
@@ -2043,18 +2079,18 @@ section,figure,table{page-break-inside:avoid}}
              onerror="this.outerHTML='&lt;div class=\'shot-missing\'&gt;Illustration: the Project files page for a client&lt;/div&gt;'"></a>
         <figcaption><b>What a client sees (simplified).</b> 06-CLIENT SUBMITTAL, the <b>Upload to 06-CLIENT SUBMITTAL</b> card, and
           the file list. The real page also shows a <b>Project folder (all files)</b> card and three drive cards (see below). Files you uploaded
-          carry the <span class="badge b-client">Client upload</span> badge. The side menu shows an empty <b>FILES</b> heading (a known
-          issue).</figcaption>
+          carry the <span class="badge b-client">Client upload</span> badge. The side menu lists <b>Files</b>, <b>File Browser</b> and
+          <b>Shared</b> under <b>FILES</b>.</figcaption>
       </figure>
       <p>You may also see a <b>Client portal guidance</b> box with a note from ATA; read it. The three cards <b>Frappe Drive</b>,
          <b>Google Drive</b> and <b>BIM 360 / ACC</b> are for ATA staff; ignore them. The <b>Use this folder for upload</b> button does
          nothing for you. Your files go into the folder you are looking at, if it is inside 06-CLIENT SUBMITTAL; otherwise into
          06-CLIENT SUBMITTAL itself. Always check the line <b>Files go into &lt;folder&gt;</b> in the <b>Upload to 06-CLIENT
          SUBMITTAL</b> card (22.4).</p>
-      <div class="note"><strong>The empty FILES heading</strong>The side menu shows a <b>FILES</b> heading with nothing under it. This is a
-        known issue. Use the <b>Files</b> button on the project page, as above.</div>
       <p>To switch to another project, use <b>Active project</b> at the top of the Project files page.
          <b>To download several files at once:</b> tick them, then click <b>Download as ZIP</b>.</p>
+      <p><b>File Browser</b> (side menu) lists your projects by year. Click a project to see its 06-CLIENT SUBMITTAL folders and
+         files, and click a file name to open it.</p>
 
       <h3>22.4 Sending files to ATA</h3>
       <ol class="steps">
@@ -2074,8 +2110,8 @@ section,figure,table{page-break-inside:avoid}}
       </ul>
 
       <h3>22.5 Files shared with you</h3>
-      <p>ATA may share a folder or file with you by name. It then appears on the <b>Shared</b> page, which you open at
-         <code>/portal-app/shared-with-me</code>. Click <b>Open</b> next to a file. Shares can have an end date ("Expires &lt;date&gt;").
+      <p>ATA may share a folder or file with you by name. It then appears on the <b>Shared</b> page (side menu → <b>Shared</b>).
+         Click <b>Open</b> next to a file. Shares can have an end date ("Expires &lt;date&gt;").
          If a shared file will not open, ask your ATA contact to share it again.</p>
       <p>Files you uploaded yourself are not always listed here. To check them, open the project's <b>Project files</b> page (22.3).</p>
       <p>ATA may also send you a <b>guest link</b> (a link that needs no login). It opens a page called <b>Shared folder</b> with a
@@ -2180,13 +2216,15 @@ section,figure,table{page-break-inside:avoid}}
       <h3>23.6 Step 4: what the client sees</h3>
       <ul>
         <li>Projects: all projects of their customer(s).</li>
-        <li>On each project page: status, stage, client, dates, progress, the task list, and the <b>Team</b> card (with the ATA team's login emails). Keep task titles professional.</li>
+        <li>On each project page: status, stage, client, dates, progress, the <b>Customer</b> card (view only) and the <b>Files</b> card.
+            They do not see the tasks, the <b>Team</b> card or the <b>Portal Team</b> card.</li>
         <li>Files: only <b>06-CLIENT SUBMITTAL</b> and its sub-folders, plus anything you shared with them by name. Name every
             file as if the client will read the name (<a href="#rules">section 26</a>).</li>
         <li>They can upload into 06-CLIENT SUBMITTAL. They cannot share or change anything, and the portal shows them no
             <b>Delete</b> button.</li>
-        <li>Tasks, Kanban, Gantt, Calendar, Daily Task and AI Chat are not in their menu. However, the <b>Tasks</b> buttons on the
-            project page open the Tasks page for them, read-only. They can see task titles, assignees and task comments.</li>
+        <li>Their side menu has <b>Projects</b>, <b>Files</b>, <b>File Browser</b>, <b>Shared</b> and <b>Profile</b>. Tasks, Kanban,
+            Gantt, Calendar, Daily Task and AI Chat are for staff only. If they open one of those addresses, the portal takes them to
+            <b>Projects</b>. Search gives them projects only.</li>
         <li>On the Projects list they also see the <b>Servers</b> badges (<b>T</b>, <b>A</b>, <b>erp</b>) with the links you entered.
             Only enter links there that the client may see, or make sure the drive itself controls who can open it.</li>
       </ul>
@@ -2206,7 +2244,8 @@ section,figure,table{page-break-inside:avoid}}
       <h3>23.8 Giving files to the client</h3>
       <ul>
         <li><b>Upload into 06-CLIENT SUBMITTAL</b> from the Files hub or the project page. Your upload goes into a dated sub-folder inside it; the client sees sub-folders too.</li>
-        <li><b>File Browser → Submit</b>: copies an existing file into 06-CLIENT SUBMITTAL as <code>NN_&lt;date&gt;_&lt;name&gt;</code> (<a href="#s15-5">section 15.5</a>).</li>
+        <li><b>File Browser → Submit</b>: copies an existing file into 06-CLIENT SUBMITTAL as <code>NN_&lt;date&gt;_&lt;name&gt;</code>
+            (<a href="#s15-5">section 15.5</a>). For the project's team members and managers.</li>
         <li><b>Share a folder or file by name</b> with the client contact (<a href="#s16-1">section 16.1</a>; read the warning there first). They find it on their Shared page.</li>
         <li><b>Guest link</b> for someone without a login (<a href="#s16-4">16.4</a>). Use a short expiry. Never link the whole project.</li>
       </ul>
@@ -2284,7 +2323,7 @@ section,figure,table{page-break-inside:avoid}}
           <thead><tr><th>In the portal</th><th>In the Desk</th></tr></thead>
           <tbody>
             <tr><td>A project</td><td><b>Project</b> record. The portal adds fields such as Portal Project Code, Portal Project Manager, Portal Kanban Stage, Portal Office, Portal Phase, Portal Team, the server links and Portal Milestones.</td></tr>
-            <tr><td>Project team</td><td>The Project's <b>Users</b> table, kept in step with <b>Assign To</b> on the Project.</td></tr>
+            <tr><td>Project team</td><td>The Project's <b>Users</b> table, kept in step with <b>Assign To</b> on the Project. The portal and Assign To never add client logins.</td></tr>
             <tr><td>Files</td><td><b>File</b> records under <code>Home / Attachments / &lt;project&gt;</code>. Contracts under <code>Home / Contracts / &lt;project&gt;</code>.</td></tr>
             <tr><td>Client uploads</td><td>Files with the tag <b>Client Upload</b>.</td></tr>
             <tr><td>Shares and guest links</td><td><b>Portal Folder Share</b> list (audit: who, what, expiry, revoked, opens), plus ERPNext <b>DocShare</b> entries. <b>Always revoke from the portal.</b> Never tick <b>Revoked</b> or delete rows here by hand. The technical guide (<code>/tech-guide</code>) explains why.</td></tr>
@@ -2313,7 +2352,9 @@ section,figure,table{page-break-inside:avoid}}
           </tbody>
         </table>
       </div>
-      <div class="warn"><strong>Never put secrets in these settings</strong>Never put a password or secret key in a webhook address or in the notes.</div>
+      <div class="warn"><strong>Never put secrets in these settings</strong>The three upload webhook addresses stay on the server; the portal
+        never sends them to a browser. Every other setting here (branding, the Drive base URL, the notes and the welcome text) can be
+        read by every signed-in user, clients included. Never put a password or secret key in any of them.</div>
       <p>Other Desk settings the portal depends on:</p>
       <ul>
         <li><b>System Settings → Reset Password Link Expiry Duration</b>: how long welcome and reset links last (72 hours on the ATA site).</li>
@@ -2345,7 +2386,7 @@ section,figure,table{page-break-inside:avoid}}
             <tr><td>"Password Reset"</td><td><b>Forgot Password?</b>; or a System Manager uses <b>Email them a reset link</b></td><td>The user</td></tr>
             <tr><td>"You were granted access to a folder on &lt;project&gt;" / "…a file on &lt;project&gt;"</td><td>A share with <b>Email the user when I add them</b> ticked</td><td>The person shared with</td></tr>
             <tr><td>"Project Collaboration Invitation" (from ERPNext)</td><td>Someone is added to a project team; also on every <b>Save team</b></td><td>Team members</td></tr>
-            <tr><td>"&lt;name&gt; assigned a new task Project &lt;title&gt; to you" and "Your assignment on … has been removed by &lt;name&gt;" (from ERPNext)</td><td>Someone is added to or removed from a project team (<b>Save team</b> or Desk <b>Assign To</b>), or to or from a team on the Teams page</td><td>The person (not when you add or remove yourself), unless they turned off assignment emails in their Notification Settings</td></tr>
+            <tr><td>"&lt;name&gt; assigned a new task Project &lt;title&gt; to you" (or "…Task &lt;subject&gt;…") and "Your assignment on … has been removed by &lt;name&gt;" (from ERPNext)</td><td>Someone is added to or removed from a project team (<b>Save team</b> or Desk <b>Assign To</b>), or to or from a team on the Teams page; also when a task is created with <b>Assign to</b> filled in (11.4)</td><td>The person (not when you add or remove yourself), unless they turned off assignment emails in their Notification Settings</td></tr>
             <tr><td>"Upcoming Events for Today" (from ERPNext)</td><td>Daily, for Daily Task reminders</td><td>The reminder's owner</td></tr>
           </tbody>
         </table>
@@ -2370,33 +2411,28 @@ section,figure,table{page-break-inside:avoid}}
         <li><strong>Never run a demo seed on the live site</strong></li>
         <li><strong>Name files as if the client will read the name</strong>Keep file names professional and neutral, in every folder,
             contracts included.</li>
-        <li><strong>Write task titles and comments for the client too</strong>Client contacts can read them (<a href="#s11-3">section 11.3</a>).</li>
+        <li><strong>Share a folder with a client contact only if they may see everything in it</strong>Otherwise use
+            <b>File Browser → Submit</b> (<a href="#s16-1">section 16.1</a>).</li>
       </ol>
     </section>
 
     <section id="known-issues">
       <h2>27. Known issues and workarounds</h2>
-      <p class="lede">These were found while writing this guide (30 September 2026). They may be fixed later.</p>
+      <p class="lede">These are known at the time of writing (1 October 2026). They may be fixed later.</p>
       <div class="table-wrap">
         <table class="tight">
           <thead><tr><th>Where</th><th>Problem</th><th>Workaround</th></tr></thead>
           <tbody>
-            <tr><td>Side menu (clients)</td><td>The <b>FILES</b> heading shows no links.</td><td>Open a project and click <b>Files</b>.</td></tr>
             <tr><td>Sign-in</td><td>A login without a portal role sees "Server error. Please try again."</td><td>Give the user a portal role.</td></tr>
-            <tr><td>Edit Project form</td><td>Non-System Managers cannot save when the Lead Architect is someone else.</td><td>Ask a System Manager, or rename from the project page.</td></tr>
-            <tr><td>Edit Project form (Projects Users)</td><td>The Lead Architect box is empty. Saving clears the Lead Architect if it named you.</td><td>Ask a manager to edit, or rename on the project page.</td></tr>
-            <tr><td>Edit Project form</td><td>Remarks are cleared on every save; Progress is replaced by ERPNext; On Hold / In Progress do not stick (and fail to save on Manual projects).</td><td>Keep notes elsewhere; use the Kanban stage for working stages.</td></tr>
+            <tr><td>Edit Project form</td><td>Progress is replaced by ERPNext (unless the project is Manual). On Hold / In Progress are reset by other changes (rename, Kanban, milestones, team, customer, task changes, Desk saves), and on Manual projects the non-task changes fail while the status is On Hold / In Progress. Completed with open tasks goes back to Open (unless Manual).</td><td>Use the Kanban stage for working stages; set Status back to Open first; close the tasks before choosing Completed.</td></tr>
             <tr><td>Project team</td><td><b>Save team</b> re-sends the "Project Collaboration Invitation" email to every member.</td><td>Save the team only when needed.</td></tr>
-            <tr><td>Tasks → New task</td><td><b>Assign to</b> is not saved.</td><td>Assign the task in the Desk.</td></tr>
             <tr><td>Tasks table</td><td>The <b>Assigned</b> column shows login emails, not names.</td><td>—</td></tr>
             <tr><td>Kanban</td><td>Empty stages have no column.</td><td>Set the stage in the Desk.</td></tr>
             <tr><td>Gantt</td><td>Picking an office moves other offices' projects into "Unassigned to a team".</td><td>Use the <b>All Teams</b> filter too, or ignore that group.</td></tr>
-            <tr><td>Daily Task</td><td>Dates are one day off in Saudi time; TODAY badge on tomorrow's tile.</td><td>Go by the date labels.</td></tr>
+            <tr><td>Daily Task</td><td>Reminders added with an older version of the portal may show one day early.</td><td>Delete and add them again if the day matters.</td></tr>
             <tr><td>Dashboard</td><td><b>Projects Delayed</b> counts finished projects; period drop-downs do nothing; Team Performance is empty.</td><td>Read the cards as described in section 5.</td></tr>
-            <tr><td>Files hub → Upload ZIP</td><td>A red "loadFilesAndFolders is not defined" message after success.</td><td>Reload the page.</td></tr>
             <tr><td>Folder rename</td><td>Shares and guest links on the old name may stop working.</td><td>Share again after renaming.</td></tr>
             <tr><td>Shares page</td><td><b>Created by me</b> shows everyone's shares; <b>Revoke</b> fails on "ERPNext share" rows; the opens counter stops at 1.</td><td>Remove Desk shares in the Desk.</td></tr>
-            <tr><td>File Browser</td><td>If a client opens the File Browser address directly, they see <b>Submit</b> and share buttons that always fail.</td><td>—</td></tr>
             <tr><td>Top bar</td><td><b>New Project</b> only opens the Projects page for people who cannot create; <b>Switch to Desk</b> errors for clients.</td><td>Ignore.</td></tr>
             <tr><td>Teams</td><td>Team leads see <b>Create team</b> but cannot use it.</td><td>Ask a manager.</td></tr>
             <tr><td>Routing rules</td><td>Team members can open the page but cannot save.</td><td>Ask a System Manager or Projects Manager.</td></tr>
@@ -2434,7 +2470,7 @@ section,figure,table{page-break-inside:avoid}}
           <li><b>Server error. Please try again.</b>: your login has no portal role (3.1).</li>
           <li><b>Sign-in did not keep a session…</b>: see the entry above.</li>
         </ul></details>
-      <details><summary>I can see a project but cannot change it.</summary>
+      <details><summary>I can see a project but cannot change it (or the File Browser shows no Submit button).</summary>
         <p>You are not on its <b>Team</b>. Ask a Projects Manager or the Lead Architect to add you (<a href="#s7-6">section 7.6</a>).</p></details>
       <details><summary>Why can I see the project but not its value?</summary>
         <p>See <a href="#s2-5">section 2.5</a>. Only System Managers see all values. A Projects Manager sees only projects where they are the Lead Architect.</p></details>
@@ -2451,6 +2487,16 @@ section,figure,table{page-break-inside:avoid}}
         </ul></details>
       <details><summary>The client cannot see the 06-CLIENT SUBMITTAL folder.</summary>
         <p>The folder name must be exactly <code>06-CLIENT SUBMITTAL</code>. See <a href="#s23-7">section 23.7</a>.</p></details>
+      <details><summary>A client opened a link to Tasks (or Kanban, Calendar, Gantt Chart, Daily Task, AI Chat) and landed on Projects.</summary>
+        <p>That is expected. These pages are for ATA staff only, so the portal takes client contacts to <b>Projects</b>. Send
+           clients links to their project page or their files instead.</p></details>
+      <details><summary>Save team fails with "Client contacts cannot be added to the project team".</summary>
+        <p>A client login was picked in the <b>Team</b> card, is in a User Group you added, or was already on the team from before.
+           Click <b>Remove</b> next to it, then
+           <b>Save team</b>. Clients get access through the project's <b>Customer</b> (<a href="#client-access">section 23</a>).</p></details>
+      <details><summary>New task says "Assign the task to an active ATA staff login."</summary>
+        <p>The person in <b>Assign to</b> is disabled or is not an ATA staff login. Pick someone else, or leave the box empty
+           (<a href="#tasks">section 11.4</a>).</p></details>
       <details><summary>My upload was refused.</summary>
         <ul>
           <li>The file type may be blocked (<a href="#app-c">Appendix C</a>), or the file may be too big.</li>

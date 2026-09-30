@@ -183,7 +183,8 @@ async function createNewTask() {
 				status: "Open",
 				priority: newTaskPriority.value || "Medium",
 				exp_end_date: newTaskEnd.value || undefined,
-				assigned_to: userSelected.value?.email || undefined,
+				// User.name (the login ID); it can differ from the email if the email was changed.
+				assigned_to: userSelected.value?.name || userSelected.value?.email || undefined,
 			},
 		});
 		const label = projSelected.value?.project_name || proj;

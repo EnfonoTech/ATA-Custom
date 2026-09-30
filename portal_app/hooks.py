@@ -168,7 +168,9 @@ has_permission = {
 # Hook on document methods and events
 
 doc_events = {
+	"Project": {"validate": "portal_app.api.projects.refuse_client_project_users"},
 	"ToDo": {
+		"validate": "portal_app.api.projects.refuse_client_project_todo",
 		"after_insert": "portal_app.api.projects.sync_project_access_from_todo",
 		"on_update": "portal_app.api.projects.sync_project_access_from_todo",
 		"on_trash": "portal_app.api.projects.sync_project_access_from_todo",

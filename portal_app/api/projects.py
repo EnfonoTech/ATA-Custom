@@ -54,6 +54,43 @@ def _project_fields():
 	return base
 
 
+def _strip_internal_people(project_dict: dict) -> None:
+	"""For client contacts: drop the team roster and every owner / modified_by, on the
+	Project and on its child rows (e.g. milestones), which carry staff login emails."""
+	for key in ("users", "owner", "modified_by"):
+		project_dict.pop(key, None)
+	for value in project_dict.values():
+		if isinstance(value, list):
+			for row in value:
+				if isinstance(row, dict):
+					row.pop("owner", None)
+					row.pop("modified_by", None)
+
+
+def refuse_client_project_todo(doc, method=None):
+	"""doc_events ToDo.validate: a Desk "Assign To" on a Project for a client contact.
+	frappe.desk.form.assign_to.add inserts this ToDo BEFORE it shares the Project with
+	an assignee who cannot read it, so refusing here also prevents that share (which
+	would let the contact read the whole Project record, possibly another customer's)."""
+	if doc.reference_type != "Project" or not doc.allocated_to or doc.status in ("Cancelled", "Closed"):
+		return
+	if helper.is_customer_only(doc.allocated_to):
+		frappe.throw(
+			_("Client contacts cannot be assigned to a project. Use Customer portal users on the project page."),
+			frappe.PermissionError,
+		)
+
+
+def refuse_client_project_users(doc, method=None):
+	"""doc_events Project.validate: no client contact in the Project Users table (Desk
+	edits included). A row there is internal team membership."""
+	for row in doc.get("users") or []:
+		if row.user and helper.is_customer_only(row.user):
+			frappe.throw(
+				_("Client contacts cannot be on the project team: {0}").format(row.user), frappe.PermissionError
+			)
+
+
 def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
 	"""Re-sending the current Lead Architect is not a change; neither is a blank from a
 	caller who is never shown the field (list_projects strips it for non-staff).
@@ -77,6 +114,9 @@ def _assert_may_set_project_manager(project: str, payload: dict) -> None:
 	"""
 	if payload.get("portal_project_manager") is None:
 		return
+	new_pm = cstr(payload.get("portal_project_manager")).strip()
+	if new_pm and helper.is_customer_only(new_pm):
+		frappe.throw(_("A client contact cannot be the Lead Architect."), frappe.PermissionError)
 	if "System Manager" in frappe.get_roles():
 		return
 	current = frappe.db.get_value("Project", project, "portal_project_manager")
@@ -197,8 +237,7 @@ def get_project(name):
 		out.pop("portal_project_manager", None)
 	if helper.is_customer_only():
 		# Team roster (login emails) and audit users are internal.
-		for key in ("users", "owner", "modified_by"):
-			out.pop(key, None)
+		_strip_internal_people(out)
 	return {"project": out}
 
 
@@ -311,8 +350,7 @@ def project_dashboard(name):
 	if not helper.has_portal_staff_project_access():
 		project_data.pop("portal_project_manager", None)
 	if helper.is_customer_only():
-		for key in ("users", "owner", "modified_by"):
-			project_data.pop(key, None)
+		_strip_internal_people(project_data)
 
 	# Tasks are ATA's internal work breakdown; client contacts do not get them here
 	# either (the Tasks page and APIs refuse them).
