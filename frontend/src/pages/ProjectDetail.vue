@@ -1083,7 +1083,7 @@ async function submitNewCustomer() {
 					<p v-if="cpError" class="text-sm text-red-600">{{ cpError }}</p>
 				</div>
 
-				<div class="portal-card-strong p-5">
+				<div v-if="!isCustomerPortalUser" class="portal-card-strong p-5">
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="grid" class="h-4 w-4 text-[color:var(--portal-accent)]" />
@@ -1145,7 +1145,7 @@ async function submitNewCustomer() {
 					<p v-else class="text-sm text-gray-500">You can view the team; only project managers can change it.</p>
 				</div>
 
-				<div class="portal-card-strong p-5">
+				<div v-if="!isCustomerPortalUser" class="portal-card-strong p-5">
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="users" class="h-4 w-4 text-[color:var(--portal-accent)]" />
