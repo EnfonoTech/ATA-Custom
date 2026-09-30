@@ -196,7 +196,13 @@ async function createNewTask() {
 		newTaskOpen.value = false;
 		await loadTasks();
 	} catch (e) {
-		toaster.error(e?.responseBody?.message || "Could not create task.");
+		// frappe.throw text arrives in _server_messages, not responseBody.message.
+		let msg = e?.responseBody?.message;
+		try {
+			const sm = e?.responseBody?._server_messages;
+			if (sm) msg = JSON.parse(JSON.parse(sm)[0]).message || msg;
+		} catch { /* keep msg */ }
+		toaster.error(msg || "Could not create task.");
 	} finally {
 		newTaskBusy.value = false;
 	}

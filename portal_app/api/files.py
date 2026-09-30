@@ -521,6 +521,18 @@ def _customer_folder_roots(project: str) -> list:
 	return [base + "/" + f for f in _CUSTOMER_VISIBLE_FOLDERS]
 
 
+def _customer_folder_names(projects) -> list:
+	"""Exact File folder names a client contact may list: each 06-CLIENT SUBMITTAL root
+	and every folder below it. An exact list, not a LIKE prefix, so a sibling such as
+	"06-CLIENT SUBMITTAL - DRAFTS" never matches."""
+	roots = [r for p in projects for r in _customer_folder_roots(p)]
+	if not roots:
+		return []
+	or_filters = [["name", "like", r + "/%"] for r in roots]
+	below = frappe.get_all("File", filters={"is_folder": 1}, or_filters=or_filters, pluck="name")
+	return roots + [b for b in below if any(b.startswith(r + "/") for r in roots)]
+
+
 def _in_customer_roots(project: str, folder: str) -> bool:
 	f = cstr(folder).replace("\\", "/")
 	return any(f == r or f.startswith(r + "/") for r in _customer_folder_roots(project))
@@ -698,13 +710,11 @@ def list_project_files(project):
 	}
 	if is_customer:
 		# A client contact sees only the submittal folder, never the internal tree.
-		roots = _customer_folder_roots(project)
-		file_filters["folder"] = ["like", roots[0] + "%"]
+		file_filters["folder"] = ["in", _customer_folder_names([project]) or [""]]
 		folders = {
 			"project_root": folders.get("project_root"),
 			"subfolders": [
-				f for f in (folders.get("subfolders") or [])
-				if any(str(f.get("name", "")).startswith(r) for r in roots)
+				f for f in (folders.get("subfolders") or []) if _in_customer_roots(project, f.get("name", ""))
 			],
 		}
 
@@ -725,7 +735,7 @@ def list_project_files(project):
 		order_by="creation desc",
 	)
 	_flag_client_uploads(files)
-	return {"files": files, "settings": helper.get_portal_settings_dict(), "folders": folders}
+	return {"files": files, "settings": helper.get_public_portal_settings(), "folders": folders}
 
 
 @frappe.whitelist()
@@ -738,7 +748,13 @@ def list_project_folders(project):
 	# folder to every existing project the next time someone merely looked
 	# at it, not just to new projects going forward.
 	helper.assert_project_access(project)
-	return get_project_folders(project)
+	ctx = get_project_folders(project)
+	if helper.is_customer_only():
+		ctx = {
+			**ctx,
+			"subfolders": [f for f in (ctx.get("subfolders") or []) if _in_customer_roots(project, f.get("name", ""))],
+		}
+	return ctx
 
 
 @frappe.whitelist()
@@ -893,6 +909,8 @@ def download_files_zip(project, file_names=None, folder_path=None):
 			if row.get("attached_to_doctype") != "Project" or row.get("attached_to_name") != project:
 				continue
 			if not _customer_may_read_file(project, n, row.get("folder")):
+				continue
+			if cstr(row.get("folder")).startswith("Home/Contracts/") and not helper.can_manage_project(project):
 				continue
 			names.append(n)
 	elif folder_path:
@@ -1334,8 +1352,10 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30, notif
 	)
 	for row in nested:
 		_grant("File", row["name"])
-	# Parent Project doc — read-only access for navigation.
-	if frappe.db.exists("Project", project):
+	# Parent Project doc — read-only access for navigation. Never for a client contact:
+	# a Project DocShare lets them read the whole Project record (every amount) through
+	# /api/resource, and the portal has_permission hook cannot deny past a share.
+	if frappe.db.exists("Project", project) and not helper.is_customer_only(uid):
 		_grant("Project", project)
 
 	# Optional email to the recipient (caller passes notify=1).
@@ -1396,11 +1416,14 @@ def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)
 	row = frappe.db.get_value(
 		"File",
 		fname,
-		["is_folder", "attached_to_doctype", "attached_to_name", "file_name"],
+		["is_folder", "attached_to_doctype", "attached_to_name", "file_name", "folder"],
 		as_dict=True,
 	)
 	if not row:
 		frappe.throw(_("File not found."))
+	if cstr(row.get("folder")).startswith("Home/Contracts/"):
+		# Contracts are manager-only; sharing one would hand it to anyone.
+		frappe.throw(_("Contract files cannot be shared."), frappe.PermissionError)
 	if int(row.get("is_folder") or 0):
 		frappe.throw(_("This is a folder, not a file. Use Share on the folder instead."))
 	if row.get("attached_to_doctype") != "Project" or row.get("attached_to_name") != project:
@@ -1477,7 +1500,7 @@ def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)
 	except Exception:
 		frappe.log_error(frappe.get_traceback(), f"Portal: file docshare grant {fname}")
 
-	if frappe.db.exists("Project", project):
+	if frappe.db.exists("Project", project) and not helper.is_customer_only(uid):
 		try:
 			from frappe.share import add_docshare
 
@@ -1536,6 +1559,9 @@ def list_folder_shares(project, folder_path=None):
 	Frappe's built-in sharing system. Visible to any user allocated to the project.
 	"""
 	helper.assert_project_access(project)
+	# Client contacts never manage shares; the list carries other people's emails and
+	# the URL of every guest link, which may point at internal folders.
+	_assert_not_customer_sharer()
 	if not _share_doctype_available():
 		return {"shares": _list_native_docshares(project, folder_path), "tracking_available": False}
 
@@ -1892,6 +1918,7 @@ def list_shared_with_me():
 	# gets a synthetic "Team access" root row so they have one place to browse all
 	# the project files they can see by virtue of being on the team.
 	team_member_projects = []
+	customer_only = helper.is_customer_only(user)
 	try:
 		rows = frappe.db.sql(
 			"SELECT DISTINCT parent FROM `tabProject User` WHERE user=%s",
@@ -1899,6 +1926,10 @@ def list_shared_with_me():
 		)
 		team_member_projects = [r[0] for r in rows if r and r[0]]
 	except Exception:
+		team_member_projects = []
+	if customer_only:
+		# Team access means the whole internal tree; a client contact is never a team
+		# member even if a Project Users row exists.
 		team_member_projects = []
 	for pj in team_member_projects:
 		if not frappe.db.exists("Project", pj):
@@ -2525,8 +2556,10 @@ def download_shared_file(token, file):
 	if not project or not folder:
 		frappe.throw(_("Invalid share link payload"), frappe.PermissionError)
 
+	# Fail CLOSED, like get_shared_folder_files: a missing share row (deleted instead
+	# of revoked) used to leave direct download URLs working until the token expired.
 	rec = _share_record_for_token(token)
-	if rec is not None and not _share_record_active(rec):
+	if not _share_record_active(rec):
 		frappe.throw(_("This share link has been revoked or expired."), frappe.PermissionError)
 
 	doc = frappe.get_doc("File", cstr(file))
@@ -2964,6 +2997,12 @@ def submit_to_client_submittal(file_name, project):
 		frappe.throw(_("Invalid file"))
 	if src.is_folder:
 		frappe.throw(_("Cannot submit a folder"))
+	# Submitting hands a file to the client, so it is a manage action (project team or
+	# manager), and never for contracts — those are manager-only and must not be
+	# copied into the client's folder by anyone who merely knows the docname.
+	helper.assert_manage_project(project)
+	if cstr(src.folder or "").startswith("Home/Contracts/"):
+		frappe.throw(_("Contract files cannot be submitted to the client."), frappe.PermissionError)
 
 	folder_ctx = get_project_folders(project)
 	target_folder = None
@@ -3068,7 +3107,10 @@ def list_all_files(
 		# The folder path embeds the project, so one LIKE on the folder suffix is
 		# enough across every project they can see, and it is applied in the QUERY
 		# so a direct API call gets the same answer as the UI.
-		file_filters.append(["folder", "like", "%/" + _CUSTOMER_VISIBLE_FOLDERS[0] + "%"])
+		file_filters.append(["folder", "in", _customer_folder_names(allowed) or [""]])
+	elif not helper.has_portal_staff_project_access():
+		# Contracts are manager-only (download_project_file / contracts.py).
+		file_filters.append(["folder", "not like", "Home/Contracts/%"])
 	if search:
 		file_filters.append(["file_name", "like", f"%{search}%"])
 	if folder_search:
@@ -3377,6 +3419,8 @@ def ensure_project_subfolder(project, relative_path):
 	doesn't yet exist in the standard template (e.g. 03-BALADIYA/01-DOCUMENTS/04-DRAWINGS).
 	"""
 	helper.assert_project_access(project)
+	# Creates folders in ATA's internal tree; routing rules are a staff feature.
+	helper.assert_not_customer_only()
 	rel = _normalize_template_path(cstr(relative_path).strip())
 	if not rel:
 		frappe.throw(_("relative_path is required."))

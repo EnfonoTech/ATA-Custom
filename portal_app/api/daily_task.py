@@ -27,6 +27,7 @@ def _ensure_fields():
 def _require_portal_user():
 	if not helper.user_can_use_portal():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	helper.assert_not_customer_only()
 
 
 def _get_task(name):

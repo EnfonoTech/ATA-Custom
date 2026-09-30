@@ -20,6 +20,7 @@ def get_gantt_data(office=None, team=None):
 	real data for this portal — no new field needed. Scoped to whatever projects
 	the current user is allowed to see (same rule as the Projects page).
 	"""
+	helper.assert_not_customer_only()
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return {"teams": [], "unassigned": []}

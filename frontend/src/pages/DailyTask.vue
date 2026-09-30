@@ -27,7 +27,10 @@ function apiErr(e) {
 }
 
 function fmt(d) {
-	return d.toISOString().slice(0, 10);
+	// LOCAL calendar date. toISOString() is UTC, which in Saudi time (UTC+3) turned
+	// local midnight into the previous day and put "TODAY" on tomorrow's tile.
+	const pad = (n) => String(n).padStart(2, "0");
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function startOfWeek(d) {
 	const date = new Date(d);

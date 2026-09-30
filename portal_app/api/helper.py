@@ -67,6 +67,14 @@ def is_customer_only(user=None) -> bool:
 	return user_is_customer_portal_user(user)
 
 
+def assert_not_customer_only(user=None) -> None:
+	"""Gate for internal working tools (tasks, Kanban, calendar, Gantt, daily tasks,
+	AI chat). The sidebar hides them from client contacts; this makes the server agree,
+	so opening the page by URL or calling the API directly returns nothing."""
+	if is_customer_only(user):
+		frappe.throw(_("This part of the portal is for ATA staff."), frappe.PermissionError)
+
+
 def has_portal_staff_project_access(user=None) -> bool:
 	"""System / Projects Manager: full project portfolio in ERPNext; overrides customer-only portal scoping."""
 	user = user or frappe.session.user
@@ -433,7 +441,17 @@ def kanban_fieldname() -> str:
 def get_portal_workspace_settings():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
-	return get_portal_settings_dict()
+	return get_public_portal_settings()
+
+
+_SERVER_ONLY_SETTINGS = ("frappe_drive_upload_webhook", "google_drive_upload_webhook", "bim_360_upload_webhook")
+
+
+def get_public_portal_settings():
+	"""Settings safe to hand to the browser. The external-upload webhook URLs are used
+	only server-side (files.upload_project_file) and often embed a token, so they never
+	leave the server — every signed-in user, client contacts included, reads this."""
+	return {k: v for k, v in get_portal_settings_dict().items() if k not in _SERVER_ONLY_SETTINGS}
 
 
 def get_portal_settings_dict():

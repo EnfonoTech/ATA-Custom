@@ -89,10 +89,28 @@ const saving     = ref(false);
 const editError  = ref("");
 const portalUsers = ref([]);
 const editForm   = ref({});
+// Snapshot of the form as opened; submitEdit sends only what the user changed.
+const editOriginal = ref({});
+// Guards openEdit against a slow get_project reply for a project the user already left.
+let editSeq = 0;
+
+// Project.notes is a Text Editor field: Desk stores Quill HTML. Show plain text in the
+// textarea and send paragraphs back, so nobody edits raw markup.
+function htmlToText(html) {
+	if (!html || !/<[a-z][\s\S]*>/i.test(html)) return html || "";
+	const doc = new DOMParser().parseFromString(html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li|h[1-6])>/gi, "$&\n"), "text/html");
+	return (doc.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim();
+}
+function textToHtml(text) {
+	const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+	const t = String(text || "").trim();
+	return t ? t.split(/\n/).map((line) => `<p>${esc(line) || "<br>"}</p>`).join("") : "";
+}
 const canManage  = computed(() => (portalCapabilities.value?.manageable_project_names || []).length > 0);
 
 async function openEdit(p, e) {
 	e.stopPropagation();
+	const seq = ++editSeq;
 	editError.value = "";
 	editForm.value = {
 		name:                   p.name,
@@ -110,11 +128,23 @@ async function openEdit(p, e) {
 		portal_server_a:        p.portal_server_a || "",
 		portal_server_c:        p.portal_server_c || "",
 	};
+	// The list does not carry Remarks (notes), so fetch the project itself; without
+	// this the modal opened with Remarks blank and saving wiped them.
+	try {
+		const full = (await call({ method: "portal_app.api.projects.get_project", args: { name: p.name } }))?.project || {};
+		if (seq !== editSeq) return; // a newer Edit click took over
+		editForm.value.notes = htmlToText(full.notes);
+		if (full.portal_project_manager) editForm.value.portal_project_manager = full.portal_project_manager;
+	} catch {
+		if (seq !== editSeq) return;
+	}
+	editOriginal.value = { ...editForm.value };
 	if (!portalUsers.value.length) {
 		try {
 			portalUsers.value = await call({ method: "portal_app.api.projects.get_portal_users" });
 		} catch { portalUsers.value = []; }
 	}
+	if (seq !== editSeq) return;
 	showEdit.value = true;
 }
 
@@ -124,10 +154,18 @@ async function submitEdit() {
 	if (!editForm.value.project_name?.trim()) { editError.value = "Project name required."; return; }
 	saving.value = true; editError.value = "";
 	try {
+		// Send only changed fields. Sending everything re-submitted Lead Architect on
+		// every save, which the server refuses for anyone but a System Manager.
+		const changed = {};
+		for (const [k, v] of Object.entries(editForm.value)) {
+			if (k === "name") continue;
+			if (String(v ?? "") !== String(editOriginal.value[k] ?? "")) changed[k] = v;
+		}
+		if ("notes" in changed) changed.notes = textToHtml(changed.notes);
 		await call({
 			method: "portal_app.api.projects.update_project",
 			type: "POST",
-			args: { project: editForm.value.name, ...editForm.value },
+			args: { project: editForm.value.name, ...changed },
 		});
 		showEdit.value = false;
 		await load();

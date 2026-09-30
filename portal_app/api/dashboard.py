@@ -43,7 +43,7 @@ def get_dashboard_data():
 	if not allowed:
 		return {
 			**portfolio_dashboard(),
-			"portal_settings": helper.get_portal_settings_dict(),
+			"portal_settings": helper.get_public_portal_settings(),
 			"my_tasks": [],
 			"upcoming_projects": [],
 			"budget_health": {"under_80": 0, "at_risk": 0, "over_100": 0},
@@ -273,7 +273,7 @@ def get_dashboard_data():
 
 	return {
 		**portfolio,
-		"portal_settings": settings,
+		"portal_settings": helper.get_public_portal_settings(),
 		"my_tasks": my_tasks,
 		"upcoming_projects": upcoming_projects,
 		"budget_health": budget_health,

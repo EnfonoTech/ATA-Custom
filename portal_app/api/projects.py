@@ -54,6 +54,19 @@ def _project_fields():
 	return base
 
 
+def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
+	"""Re-sending the current Lead Architect is not a change; neither is a blank from a
+	caller who is never shown the field (list_projects strips it for non-staff).
+	Without this, every Edit-modal save from a non-System-Manager was refused, and a
+	team member's save would have cleared the lead."""
+	if "portal_project_manager" not in payload:
+		return
+	new = cstr(payload.get("portal_project_manager")).strip() or None
+	current = frappe.db.get_value("Project", project, "portal_project_manager") or None
+	if new == current or (new is None and not helper.has_portal_staff_project_access()):
+		payload.pop("portal_project_manager")
+
+
 def _assert_may_set_project_manager(project: str, payload: dict) -> None:
 	"""Only a System Manager may hand the portal-manager role to someone else.
 
@@ -173,11 +186,19 @@ def get_project(name):
 	helper.assert_project_access(name)
 	doc = frappe.get_doc("Project", name)
 	out = doc.as_dict()
+	# Same rule as project_dashboard: strip EVERY Currency field (and the margin %),
+	# not just estimated_costing — as_dict() carries all of ERPNext's billing amounts.
+	if not helper.can_view_project_value(name):
+		for df in frappe.get_meta("Project").fields:
+			if df.fieldtype == "Currency":
+				out.pop(df.fieldname, None)
+		out.pop("per_gross_margin", None)
 	if not helper.has_portal_staff_project_access():
-		out.pop("estimated_costing", None)
 		out.pop("portal_project_manager", None)
-	elif not helper.can_view_project_value(name):
-		out.pop("estimated_costing", None)
+	if helper.is_customer_only():
+		# Team roster (login emails) and audit users are internal.
+		for key in ("users", "owner", "modified_by"):
+			out.pop(key, None)
 	return {"project": out}
 
 
@@ -185,6 +206,7 @@ def get_project(name):
 def portfolio_dashboard():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	helper.assert_not_customer_only()
 
 	names = helper.get_allowed_project_names()
 	if not names:
@@ -288,6 +310,14 @@ def project_dashboard(name):
 		project_data.pop("per_gross_margin", None)
 	if not helper.has_portal_staff_project_access():
 		project_data.pop("portal_project_manager", None)
+	if helper.is_customer_only():
+		for key in ("users", "owner", "modified_by"):
+			project_data.pop(key, None)
+
+	# Tasks are ATA's internal work breakdown; client contacts do not get them here
+	# either (the Tasks page and APIs refuse them).
+	if helper.is_customer_only():
+		tasks = []
 
 	return {
 		"project": project_data,
@@ -299,6 +329,7 @@ def project_dashboard(name):
 
 @frappe.whitelist()
 def kanban_board():
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
@@ -358,9 +389,12 @@ def rename_project(project, project_name):
 def update_project(project, **kwargs):
 	"""Update editable project fields from the portal edit modal."""
 	helper.assert_manage_project(project)
+	_drop_unchanged_project_manager(project, kwargs)
 	_assert_may_set_project_manager(project, kwargs)
 	_assert_may_set_team(project, kwargs)
 	doc = frappe.get_doc("Project", project)
+	prev_status = doc.status
+	status_options = (frappe.get_meta("Project").get_field("status").options or "").split("\n")
 
 	for k in (
 		"project_name",
@@ -410,7 +444,15 @@ def update_project(project, **kwargs):
 	):
 		frappe.throw(_("Pick the date this milestone falls on."))
 
-	requested_status = kwargs.get("status")
+	# Callers that do not send a status (the Edit modal now sends only changed fields;
+	# the team and Lead Architect savers never did) must not lose a portal-only status
+	# such as "On Hold": ERPNext's validate() resets anything but Cancelled to Open /
+	# Completed. Core values are left to ERPNext so 100% still auto-completes.
+	requested_status = kwargs.get("status") or (prev_status if prev_status not in status_options else None)
+	if doc.status and doc.status not in status_options:
+		# A portal-only status would fail the Select check when the % Complete method is
+		# Manual (validate() leaves it alone); the requested value is re-applied below.
+		doc.status = "Open"
 	doc.save(ignore_permissions=True)
 
 	# ERPNext core's Project.validate() -> update_percent_complete() unconditionally
@@ -879,6 +921,13 @@ def sync_project_team(project, users):
 			frappe.throw(_("Unknown user: {0}").format(u))
 		if not frappe.db.get_value("User", u, "enabled"):
 			frappe.throw(_("User is disabled: {0}").format(u))
+		# A Project Users row makes someone an internal team member (whole file tree via
+		# Shared, a Project DocShare). Client contacts get access through Customer
+		# portal users instead.
+		if helper.is_customer_only(u):
+			frappe.throw(
+				_("Client contacts cannot be added to the project team: {0}").format(u), frappe.PermissionError
+			)
 		seen.add(u)
 		clean.append(u)
 
@@ -963,6 +1012,9 @@ def sync_project_access_from_todo(doc, method=None):
 	project = doc.reference_name
 	user = doc.allocated_to
 	if not project or not user or not frappe.db.exists("Project", project):
+		return
+	# Never promote a client contact to team member from a Desk "Assign To".
+	if helper.is_customer_only(user):
 		return
 
 	is_active = method != "on_trash" and doc.status not in ("Cancelled", "Closed")
@@ -1497,7 +1549,7 @@ def reset_customer_portal_user_password(project, user, mode="email", new_passwor
 
 
 @frappe.whitelist()
-def search_portal_users(txt="", customer_portal=0):
+def search_portal_users(txt="", customer_portal=0, staff_only=0):
 	if not helper.user_can_use_portal():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if helper.user_is_customer_portal_user() and not helper.has_portal_staff_project_access():
@@ -1513,6 +1565,9 @@ def search_portal_users(txt="", customer_portal=0):
 		# Customer-portal picker: only external (Website User) logins — staff can never
 		# be linked as a customer contact, so listing them only produced errors.
 		filters.append(["user_type", "=", "Website User"])
+	elif cint(staff_only):
+		# Task assignees: ATA staff logins only (create_task refuses anyone else).
+		filters.append(["user_type", "=", "System User"])
 	kwargs = dict(
 		filters=filters,
 		fields=["name", "full_name", "email", "user_image"],
@@ -1569,7 +1624,7 @@ def search_projects(query=""):
 @frappe.whitelist()
 def search_assignable_users(query=""):
 	"""Assignee combobox for the Tasks quick-create form."""
-	return search_portal_users(query)
+	return search_portal_users(query, staff_only=1)
 
 
 def _task_is_assigned_to_user(task_name: str, user: str) -> bool:
@@ -1588,6 +1643,7 @@ def _assert_task_access(task_name: str) -> str:
 @frappe.whitelist()
 def list_tasks(status=None, priority=None, project=None, search=None, only_mine=0):
 	"""Task workspace feed (FR-TM-001/002/003): filters + my tasks + project scope."""
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
@@ -1671,6 +1727,7 @@ def list_tasks(status=None, priority=None, project=None, search=None, only_mine=
 @frappe.whitelist()
 def update_task(task, status=None, priority=None, progress=None, exp_start_date=None, exp_end_date=None):
 	"""Inline task updates with access control for portal task board."""
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if helper.user_is_customer_portal_user() and not helper.has_portal_staff_project_access():
@@ -1710,6 +1767,7 @@ def update_task(task, status=None, priority=None, progress=None, exp_start_date=
 @frappe.whitelist()
 def list_task_comments(task):
 	"""Read-only thread for a Task. Anyone with access to the task's project can see them."""
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	task = cstr(task or "").strip()
@@ -1749,6 +1807,7 @@ def list_task_comments(task):
 @frappe.whitelist()
 def add_task_comment(task, content):
 	"""Append a comment to a Task using Frappe's built-in Comment doctype."""
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if helper.user_is_customer_portal_user() and not helper.has_portal_staff_project_access():
@@ -1783,7 +1842,7 @@ def add_task_comment(task, content):
 
 
 @frappe.whitelist()
-def create_task(project, subject, status="Open", priority="Medium", exp_end_date=None):
+def create_task(project, subject, status="Open", priority="Medium", exp_end_date=None, assigned_to=None):
 	"""Quick-create a Task on a project the caller can manage.
 
 	Restricted to project managers (Portal Project Manager / Projects Manager / System
@@ -1801,6 +1860,14 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 
 	allowed_statuses = {"Open", "Working", "Pending Review", "Overdue", "Completed", "Cancelled"}
 	allowed_priorities = {"Low", "Medium", "High", "Urgent"}
+	# The quick-create form always sent assigned_to, but this method had no such
+	# argument, so Frappe dropped it and every task was created unassigned.
+	assignee = cstr(assigned_to or "").strip()
+	if assignee:
+		if not frappe.db.get_value("User", {"name": assignee, "enabled": 1, "user_type": "System User"}):
+			frappe.throw(_("Assign the task to an active ATA staff login."))
+		if helper.is_customer_only(assignee):
+			frappe.throw(_("Tasks cannot be assigned to customer portal users."))
 	doc = frappe.get_doc(
 		{
 			"doctype": "Task",
@@ -1813,10 +1880,24 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 		}
 	)
 	doc.insert(ignore_permissions=True)
+	if assignee:
+		import frappe.share as _share
+		from frappe.desk.form.assign_to import add as assign_add
+
+		# assign_to.add() shares the Task with an assignee who cannot read it, and that
+		# share step checks the CALLER's own Task share permission (Projects Manager-only
+		# logins have none), which rolled the whole create back. Pre-share with the
+		# supported bypass, as _sync_project_assignment does for Projects.
+		if not frappe.has_permission("Task", "read", doc=doc, user=assignee):
+			_share.add_docshare(
+				"Task", doc.name, user=assignee, read=1, flags={"ignore_share_permission": True}, notify=0
+			)
+		assign_add({"assign_to": [assignee], "doctype": "Task", "name": doc.name}, ignore_permissions=True)
 	frappe.db.commit()
 	return {
 		"ok": True,
 		"name": doc.name,
+		"assigned_to": assignee or None,
 		"subject": doc.subject,
 		"project": doc.project,
 		"status": doc.status,
@@ -1879,6 +1960,7 @@ def _task_calendar_range(t) -> tuple:
 @frappe.whitelist()
 def calendar_events(search=None, type_filter="all", project=None):
 	"""Calendar feed with optional search (title / id), type (all|project|task), and project scope."""
+	helper.assert_not_customer_only()
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 

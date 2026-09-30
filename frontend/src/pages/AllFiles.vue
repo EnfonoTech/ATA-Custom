@@ -1,7 +1,15 @@
 <script setup>
-import { ref, computed, onMounted, watch, reactive } from "vue";
+import { ref, computed, onMounted, watch, reactive, inject } from "vue";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
+
+// Submit / Share match the server rules: never for client contacts; Submit also
+// needs manage rights on the project (team member or manager).
+const portalCapabilities = inject("portalCapabilities", ref({}));
+const isCustomerPortalUser = computed(() => !!portalCapabilities.value?.is_customer_portal_user);
+function canSubmitFor(projectName) {
+	return !isCustomerPortalUser.value && (portalCapabilities.value?.manageable_project_names || []).includes(projectName);
+}
 
 // ── Projects ──────────────────────────────────────────────────────────────────
 const projects     = ref([]);
@@ -879,6 +887,7 @@ watch(activeFolder, (newFolder) => {
 								<div class="flex items-center justify-center gap-1.5">
 									<!-- Submit to Client -->
 									<button
+										v-if="canSubmitFor(activeProj?.name)"
 										type="button"
 										class="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold shadow-sm transition active:scale-95"
 										style="border-color:rgba(245,158,11,0.35);background:var(--portal-accent-soft);color:var(--portal-accent)"
@@ -890,6 +899,7 @@ watch(activeFolder, (newFolder) => {
 									</button>
 									<!-- Share -->
 									<button
+										v-if="!isCustomerPortalUser"
 										type="button"
 										class="inline-flex items-center justify-center rounded-lg border px-2 py-1.5 transition active:scale-95"
 										style="border-color:rgba(59,130,246,0.3);background:rgba(59,130,246,0.08);color:#93c5fd"
