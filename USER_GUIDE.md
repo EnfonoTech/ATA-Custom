@@ -40,7 +40,7 @@ than one.
 
 | Role | What you see |
 |---|---|
-| **Customer Portal User** | A read-only view of *your* projects' files. No upload, no share, no team chrome. Your linked customer is shown on Profile. |
+| **Customer Portal User** | *Your* customers' projects, 06-CLIENT SUBMITTAL only. You can upload into 06-CLIENT SUBMITTAL (Files hub); ATA sees those files tagged **Client upload**. No share, no team chrome. Your customers are listed on Profile. |
 | **Project Member** | Anyone listed on a Project (`Project Users` table or as Portal Project Manager). Can browse, upload, **share** folders/files with teammates, and revoke shares they themselves created. |
 | **Portal Project Manager** | The user named in `portal_project_manager` on a Project (or its Owner if blank). Can rename folder segments, delete any file, revoke any share, manage Customer Portal Users on that project. |
 | **Projects Manager / System Manager** | Full Frappe-side access. Can do everything a Portal Project Manager can do, on every project. |

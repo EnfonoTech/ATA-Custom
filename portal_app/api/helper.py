@@ -89,30 +89,34 @@ PORTAL_USER_CUSTOMER = "Portal User Customer"
 
 
 def get_portal_linked_customers(user=None) -> list[str]:
-	"""Every customer a portal login can see: its Portal User Customer rows plus the
-	legacy single User.portal_linked_customer (kept as the primary / display value)."""
+	"""Every customer a portal login can see.
+
+	Only Portal User Customer rows grant access. User.portal_linked_customer is a
+	display value: every user has write on their OWN User record (Frappe's
+	share_with_self), so a client contact could set that field to another customer
+	and read that customer's projects. The legacy field is read only before the
+	table exists (site not migrated yet)."""
 	user = user or frappe.session.user
 	if user == "Guest":
 		return []
-	out = []
+	if not frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		primary = get_portal_linked_customer(user)
+		return [primary] if primary else []
+	rows = frappe.get_all(PORTAL_USER_CUSTOMER, filters={"user": user}, pluck="customer", order_by="creation asc")
 	primary = get_portal_linked_customer(user)
-	if primary:
-		out.append(primary)
-	if frappe.db.table_exists(PORTAL_USER_CUSTOMER):
-		for cust in frappe.get_all(PORTAL_USER_CUSTOMER, filters={"user": user}, pluck="customer"):
-			if cust not in out:
-				out.append(cust)
-	return out
+	if primary in rows:
+		rows.remove(primary)
+		rows.insert(0, primary)
+	return rows
 
 
 def get_customer_contact_users(customer) -> list[str]:
-	"""Every login with access to this customer (either source)."""
-	users = set()
-	if frappe.get_meta("User").has_field("portal_linked_customer"):
-		users.update(frappe.get_all("User", filters={"portal_linked_customer": customer}, pluck="name"))
-	if frappe.db.table_exists(PORTAL_USER_CUSTOMER):
-		users.update(frappe.get_all(PORTAL_USER_CUSTOMER, filters={"customer": customer}, pluck="user"))
-	return sorted(users)
+	"""Every login with access to this customer (Portal User Customer rows)."""
+	if not frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		if not frappe.get_meta("User").has_field("portal_linked_customer"):
+			return []
+		return sorted(frappe.get_all("User", filters={"portal_linked_customer": customer}, pluck="name"))
+	return sorted(set(frappe.get_all(PORTAL_USER_CUSTOMER, filters={"customer": customer}, pluck="user")))
 
 
 def delete_portal_user_customer_rows(doc, method=None):
@@ -122,6 +126,20 @@ def delete_portal_user_customer_rows(doc, method=None):
 		return
 	field = "user" if doc.doctype == "User" else "customer"
 	frappe.db.delete(PORTAL_USER_CUSTOMER, {field: doc.name})
+
+
+def drop_customer_rows_without_role(doc, method=None):
+	"""doc_events User.on_update: taking the Portal Customer role away (e.g. in Desk)
+	removes every customer the login had. Otherwise the rows would silently grant the
+	old customers back the next time anyone re-adds the role."""
+	if not frappe.db.table_exists(PORTAL_USER_CUSTOMER):
+		return
+	if any(r.role == PORTAL_CUSTOMER_ROLE for r in (doc.get("roles") or [])):
+		return
+	for name in frappe.get_all(PORTAL_USER_CUSTOMER, filters={"user": doc.name}, pluck="name"):
+		# delete_doc, not a raw delete: PortalUserCustomer.on_trash revokes the
+		# folder shares and a Deleted Document records who removed the access.
+		frappe.delete_doc(PORTAL_USER_CUSTOMER, name, ignore_permissions=True)
 
 
 def user_can_use_portal(user=None) -> bool:

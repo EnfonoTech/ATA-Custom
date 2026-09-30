@@ -837,6 +837,7 @@ watch(activeFolder, (newFolder) => {
 										<FeatherIcon :name="extIcon(f.file_name)" class="h-4 w-4" style="color:var(--portal-accent)" />
 									</span>
 									<span class="min-w-0 truncate font-medium group-hover:underline" style="color:var(--portal-text)">{{ f.file_name }}</span>
+									<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 								</a>
 								<span v-else class="flex items-center gap-3" style="color:var(--portal-muted)">
 									<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style="background:var(--portal-surface-alt)">

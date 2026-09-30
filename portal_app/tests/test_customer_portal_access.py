@@ -45,7 +45,24 @@ def _make_user(email: str, roles: list[str], customer: str | None = None) -> str
 	if customer:
 		doc.portal_linked_customer = customer
 	doc.insert(ignore_permissions=True)
+	if customer:
+		# Rows are the only access source; mirror the backfilled state.
+		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": customer}).insert(
+			ignore_permissions=True
+		)
 	return doc.name
+
+
+def _make_project(name: str, customer: str) -> str:
+	existing = frappe.db.get_value("Project", {"project_name": name})
+	if existing:
+		frappe.db.set_value("Project", existing, "customer", customer)
+		return existing
+	return (
+		frappe.get_doc({"doctype": "Project", "project_name": name, "customer": customer})
+		.insert(ignore_permissions=True)
+		.name
+	)
 
 
 class TestCustomerPortalAccess(FrappeTestCase):
@@ -142,6 +159,91 @@ class TestMultiCustomerLogin(FrappeTestCase):
 		cls.cust_a = _make_customer("Portal Test Customer A")
 		cls.cust_b = _make_customer("Portal Test Customer B")
 		cls.contact = _make_user("portal.test.multi@example.com", ["Portal Customer"], cls.cust_a)
+		cls.project_a = _make_project("Portal Test Project A", cls.cust_a)
+		cls.project_b = _make_project("Portal Test Project B", cls.cust_b)
+
+	def setUp(self):
+		# Tests must not depend on order: rebuild the contact as "customer A only".
+		frappe.set_user("Administrator")
+		frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": self.contact})
+		user = frappe.get_doc("User", self.contact)
+		if not any(r.role == "Portal Customer" for r in user.roles):
+			user.append("roles", {"role": "Portal Customer"})
+			user.save(ignore_permissions=True)
+		frappe.db.set_value("User", self.contact, "portal_linked_customer", self.cust_a)
+		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": self.contact, "customer": self.cust_a}).insert(
+			ignore_permissions=True
+		)
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def test_sync_adds_a_contact_already_linked_to_another_customer(self):
+		# The reported bug: "already linked to another customer".
+		projects.sync_customer_portal_users(self.project_b, [self.contact])
+		self.assertEqual(set(helper.get_portal_linked_customers(self.contact)), {self.cust_a, self.cust_b})
+		allowed = set(helper.get_allowed_project_names(self.contact))
+		self.assertTrue({self.project_a, self.project_b} <= allowed)
+
+	def test_editing_own_user_field_grants_nothing(self):
+		# Every user can write their own User doc (share_with_self); the field is
+		# permlevel 1 and is not an access source anyway.
+		frappe.set_user(self.contact)
+		user = frappe.get_doc("User", self.contact)
+		user.portal_linked_customer = self.cust_b
+		user.save()
+		frappe.set_user("Administrator")
+		self.assertNotEqual(frappe.db.get_value("User", self.contact, "portal_linked_customer"), self.cust_b)
+		frappe.db.set_value("User", self.contact, "portal_linked_customer", self.cust_b)
+		self.assertNotIn(self.project_b, helper.get_allowed_project_names(self.contact))
+
+	def test_removing_the_role_in_desk_drops_every_customer(self):
+		user = frappe.get_doc("User", self.contact)
+		for row in list(user.roles):
+			if row.role == "Portal Customer":
+				user.remove(row)
+		user.save(ignore_permissions=True)
+		self.assertEqual(frappe.get_all(helper.PORTAL_USER_CUSTOMER, filters={"user": self.contact}), [])
+
+	def test_deleting_the_primary_row_repoints_the_primary(self):
+		projects._attach_portal_customer_user(self.contact, self.cust_b)
+		name = frappe.db.get_value(helper.PORTAL_USER_CUSTOMER, {"user": self.contact, "customer": self.cust_a})
+		frappe.delete_doc(helper.PORTAL_USER_CUSTOMER, name, ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("User", self.contact, "portal_linked_customer"), self.cust_b)
+		self.assertNotIn(self.project_a, helper.get_allowed_project_names(self.contact))
+
+	def test_team_member_cannot_attach_contacts(self):
+		staff = _make_user("portal.test.teammember@example.com", ["Projects User"])
+		project = frappe.get_doc("Project", self.project_b)
+		project.append("users", {"user": staff})
+		project.save(ignore_permissions=True)
+		# The old gate: always True through the self-share.
+		frappe.set_user(staff)
+		self.assertFalse(projects._can_link_customer_logins())
+		with self.assertRaises(frappe.PermissionError):
+			projects.sync_customer_portal_users(self.project_b, [self.contact])
+
+	def test_share_recipient_check_is_role_based(self):
+		from portal_app.api import files
+
+		files._assert_valid_share_recipient(self.contact, self.project_a)
+		with self.assertRaises(frappe.PermissionError):
+			files._assert_valid_share_recipient(self.contact, self.project_b)
+		# A Portal Customer with no customers passes for nothing.
+		frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": self.contact})
+		with self.assertRaises(frappe.PermissionError):
+			files._assert_valid_share_recipient(self.contact, self.project_a)
+
+	def test_customer_cannot_share_or_upload_outside_client_submittal(self):
+		from portal_app.api import files
+
+		frappe.set_user(self.contact)
+		with self.assertRaises(frappe.PermissionError):
+			files._assert_not_customer_sharer()
+		root = files.get_project_folders(self.project_a)["project_root"]
+		with self.assertRaises(frappe.PermissionError):
+			files._assert_upload_allowed(self.project_a, root)
+		files._assert_upload_allowed(self.project_a, files._customer_folder_roots(self.project_a)[0])
 
 	def test_one_login_can_hold_several_customers(self):
 		projects._attach_portal_customer_user(self.contact, self.cust_b)

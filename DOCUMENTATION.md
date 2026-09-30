@@ -46,7 +46,7 @@ Use this order so each feature has data to work with.
 | 2 | **Dashboard** | Portfolio metrics, recent projects, quick actions (if shown) |
 | 3 | **Projects** | List, search, filters; open a project row |
 | 4 | **Project detail** | Summary cards, **Customer** link (if permitted), **Team**, **Tasks**, **Files** |
-| 5 | **Files** (hub) | Pick a project, list files; upload (internal users only—**Portal Customer** is view-only) |
+| 5 | **Files** (hub) | Pick a project, list files; upload (internal users; **Portal Customer** only into 06-CLIENT SUBMITTAL, shown as **Client upload**) |
 | 6 | **Kanban** | Projects grouped by portal Kanban stage (or status fallback) |
 | 7 | **Calendar** | Project and task dates appear |
 | 8 | **Profile** | Name/contact fields save; header name updates after refresh if applicable |
@@ -114,7 +114,7 @@ Use this order so each feature has data to work with.
 - **Summary:** Status, Kanban stage, client, timeline, cost, progress (from ERPNext **Project**).
 - **Customer (ERPNext):** Search customers, create without duplicate name, link or clear (project managers / others allowed by the portal; **Portal Customer** users cannot change this).
 - **Team:** Search users, add/remove, **Save team** (only if you are allowed to manage the project). **Portal Customer** users do not manage team.
-- **Files:** Internal users: drag-and-drop or click to upload; optional **Private**. **Portal Customer** users: list and open only (no upload). Same storage as the **Files** hub (see **Files and Frappe Drive**).
+- **Files:** Internal users: drag-and-drop or click to upload; optional **Private**. **Portal Customer** users: list and open 06-CLIENT SUBMITTAL, and upload into it from the Files hub (tagged **Client Upload** in Desk, **Client upload** badge in the portal). Same storage as the **Files** hub (see **Files and Frappe Drive**).
 - **Tasks:** Read-only list of **Task** documents linked to this project.
 
 ### Kanban

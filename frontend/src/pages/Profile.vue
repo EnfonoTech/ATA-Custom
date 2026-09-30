@@ -292,7 +292,7 @@ function extractErr(e) {
 
 				<!-- Linked customer -->
 				<div
-					v-if="profile?.portal_linked_customer"
+					v-if="(profile?.portal_linked_customers || []).length || profile?.portal_linked_customer"
 					class="portal-card-strong p-4"
 				>
 					<div class="flex items-start gap-3">

@@ -417,10 +417,10 @@ def _assert_valid_share_recipient(uid: str, project: str) -> None:
 	"""
 	if helper.has_portal_staff_project_access(uid):
 		return
-	linked_customers = helper.get_portal_linked_customers(uid)
-	if linked_customers:
-		# Customer contact: only for their own customers' projects.
-		if frappe.db.get_value("Project", project, "customer") not in linked_customers:
+	# Decide by ROLE, not by whether the customer list is empty: a Portal Customer
+	# with no customers left used to fall through and pass for any project.
+	if helper.is_customer_only(uid):
+		if frappe.db.get_value("Project", project, "customer") not in helper.get_portal_linked_customers(uid):
 			frappe.throw(
 				_("That user belongs to a different customer and cannot be given access."),
 				frappe.PermissionError,
@@ -521,6 +521,153 @@ def _customer_folder_roots(project: str) -> list:
 	return [base + "/" + f for f in _CUSTOMER_VISIBLE_FOLDERS]
 
 
+def _in_customer_roots(project: str, folder: str) -> bool:
+	f = cstr(folder).replace("\\", "/")
+	return any(f == r or f.startswith(r + "/") for r in _customer_folder_roots(project))
+
+
+def _customer_share_covers(user: str, project: str, file_name: str, folder: str) -> bool:
+	"""True when staff explicitly shared this file (or a folder above it) with the user."""
+	if frappe.db.exists("DocShare", {"share_doctype": "File", "share_name": file_name, "user": user, "read": 1}):
+		return True
+	if not _share_doctype_available():
+		return False
+	from frappe.utils import get_datetime, now_datetime
+
+	f = cstr(folder).replace("\\", "/")
+	for r in frappe.get_all(
+		"Portal Folder Share",
+		filters={"project": project, "user": user, "share_kind": "User", "revoked": 0},
+		fields=["folder_path", "expires_at"],
+		ignore_permissions=True,
+	):
+		if r.expires_at and get_datetime(r.expires_at) < now_datetime():
+			continue
+		p = cstr(r.folder_path)
+		if p == file_name or f == p or f.startswith(p + "/"):
+			return True
+	return False
+
+
+def _customer_may_read_file(project: str, file_name: str, folder: str) -> bool:
+	"""A client contact reads 06-CLIENT SUBMITTAL, plus whatever staff shared with them.
+	Staff are never restricted here."""
+	if not helper.is_customer_only():
+		return True
+	return _in_customer_roots(project, folder) or _customer_share_covers(
+		frappe.session.user, project, file_name, folder
+	)
+
+
+def _assert_not_customer_sharer() -> None:
+	"""Client contacts never create shares: a share of the project root hands out the
+	whole internal tree, and a guest link leaves the portal entirely."""
+	if helper.is_customer_only():
+		frappe.throw(_("Customer portal users cannot share files."), frappe.PermissionError)
+
+
+CLIENT_UPLOAD_TAG = "Client Upload"
+
+
+def _assert_upload_allowed(project: str, target_folder: str) -> None:
+	"""Staff: the existing rule. A client contact: only into 06-CLIENT SUBMITTAL (or a
+	folder inside it) of a project of their own customers."""
+	if not helper.is_customer_only():
+		helper.assert_customer_portal_can_upload(project)
+		return
+	helper.assert_project_access(project)
+	if not _in_customer_roots(project, target_folder):
+		frappe.throw(
+			_("You can upload only into the {0} folder.").format(_CUSTOMER_VISIBLE_FOLDERS[0]),
+			frappe.PermissionError,
+		)
+
+
+def _mark_client_upload(file_name: str) -> None:
+	"""Tag a file a client contact uploaded, so Desk (list view tags / sidebar filter)
+	shows it too; the portal badge is derived from the owner (see _client_owners)."""
+	if not file_name or not helper.is_customer_only():
+		return
+	try:
+		from frappe.desk.doctype.tag.tag import DocTags
+
+		DocTags("File").add(file_name, CLIENT_UPLOAD_TAG)
+	except Exception:
+		frappe.log_error(frappe.get_traceback(), "Portal: tag client upload")
+
+
+def _client_owners(owners) -> set:
+	"""Which of these file owners are client contacts (Portal Customer, not staff)."""
+	owners = {o for o in owners if o and o not in ("Administrator", "Guest")}
+	if not owners:
+		return set()
+	holders = frappe.get_all(
+		"Has Role",
+		filters={"parenttype": "User", "role": helper.PORTAL_CUSTOMER_ROLE, "parent": ["in", list(owners)]},
+		pluck="parent",
+	)
+	# Client contacts are always Website Users; a staff login that also carries the
+	# role (demo/admin accounts do) must not have its uploads labelled as the client's.
+	external = set(
+		frappe.get_all("User", filters={"name": ["in", list(set(holders)) or [""]], "user_type": "Website User"}, pluck="name")
+	)
+	return {u for u in external if not helper.has_portal_staff_project_access(u)}
+
+
+def _flag_client_uploads(files: list) -> list:
+	"""Add uploaded_by_client (and the uploader's name) to File rows that carry `owner`."""
+	clients = _client_owners(f.get("owner") for f in files if f)
+	for f in files:
+		if f and f.get("owner") in clients:
+			f["uploaded_by_client"] = 1
+			f["uploaded_by_name"] = frappe.utils.get_fullname(f.get("owner"))
+	return files
+
+
+def revoke_user_shares_on_projects(user: str, projects: list) -> None:
+	"""Revoke every share (portal-tracked and native DocShare) the user holds on these
+	projects. Used when a login loses a customer."""
+	from frappe.utils import now_datetime
+
+	if _share_doctype_available():
+		for row in frappe.get_all(
+			"Portal Folder Share",
+			filters={"project": ["in", projects], "user": user, "share_kind": "User", "revoked": 0},
+			fields=["name", "project", "folder_path"],
+			ignore_permissions=True,
+		):
+			frappe.db.set_value(
+				"Portal Folder Share",
+				row.name,
+				{"revoked": 1, "revoked_by": frappe.session.user, "revoked_at": now_datetime()},
+			)
+			if row.folder_path:
+				_revoke_folder_docshares(row.project, row.folder_path, user)
+
+	# Shares made from Desk have no tracking row; drop those too.
+	file_names = set(
+		frappe.get_all(
+			"File",
+			filters={"attached_to_doctype": "Project", "attached_to_name": ["in", projects]},
+			pluck="name",
+		)
+	)
+	roots = [f"Home/Attachments/{p}" for p in projects]
+	for ds in frappe.get_all(
+		"DocShare",
+		filters={"user": user, "share_doctype": ["in", ["File", "Project"]]},
+		fields=["name", "share_doctype", "share_name"],
+		ignore_permissions=True,
+	):
+		name = cstr(ds.share_name)
+		if ds.share_doctype == "Project":
+			hit = name in projects
+		else:
+			hit = name in file_names or any(name == r or name.startswith(r + "/") for r in roots)
+		if hit:
+			frappe.delete_doc("DocShare", ds.name, ignore_permissions=True, flags={"ignore_share_permission": True})
+
+
 def _restrict_files_for_customer(project: str, filters: list) -> list:
 	"""Append a folder restriction to a File query when the caller is a customer.
 
@@ -577,6 +724,7 @@ def list_project_files(project):
 		],
 		order_by="creation desc",
 	)
+	_flag_client_uploads(files)
 	return {"files": files, "settings": helper.get_portal_settings_dict(), "folders": folders}
 
 
@@ -737,16 +885,25 @@ def download_files_zip(project, file_names=None, folder_path=None):
 			row = frappe.db.get_value(
 				"File",
 				n,
-				["attached_to_doctype", "attached_to_name", "is_folder"],
+				["attached_to_doctype", "attached_to_name", "is_folder", "folder"],
 				as_dict=True,
 			)
 			if not row or row.get("is_folder"):
 				continue
 			if row.get("attached_to_doctype") != "Project" or row.get("attached_to_name") != project:
 				continue
+			if not _customer_may_read_file(project, n, row.get("folder")):
+				continue
 			names.append(n)
 	elif folder_path:
 		canonical, _folder_label = _resolve_share_folder(project, cstr(folder_path).strip())
+		# A client contact may zip only inside 06-CLIENT SUBMITTAL, or a folder staff
+		# shared with them; "__project_root__" would otherwise bundle the internal tree.
+		if helper.is_customer_only() and not (
+			_in_customer_roots(project, canonical)
+			or _customer_share_covers(frappe.session.user, project, canonical, canonical)
+		):
+			frappe.throw(_("Not permitted"), frappe.PermissionError)
 		rows = frappe.get_all(
 			"File",
 			filters={
@@ -828,7 +985,7 @@ def upload_project_files_zip(project, target_folder):
 	if not target_folder:
 		frappe.throw(_("target_folder is required"))
 
-	helper.assert_customer_portal_can_upload(project)
+	_assert_upload_allowed(project, target_folder)
 
 	uploaded = frappe.request.files.get("file")
 	if not uploaded:
@@ -920,6 +1077,7 @@ def upload_project_files_zip(project, target_folder):
 				# session check. Link-share recipients read them via download_shared_file.
 				fdoc = save_file(file_name, data, "Project", project, folder=dest_folder, is_private=1)
 				if fdoc:
+					_mark_client_upload(fdoc.name)
 					uploaded_files.append({"name": fdoc.name, "file_name": file_name})
 			except Exception as e:
 				failed.append({"file": file_name, "error": str(e)})
@@ -1007,6 +1165,7 @@ def create_folder_share_link(project, folder_path=None, folder=None, expires_day
 	# Any user allocated to the project can create share links / share with people on
 	# their team. This matches Drive-style collaboration where every member can share.
 	helper.assert_project_access(project)
+	_assert_not_customer_sharer()
 	# Prefer folder_path — avoids confusion with generic "folder" and matches portal UI.
 	hint = cstr(folder_path or folder or "").strip()
 	canonical, label = _resolve_share_folder(project, hint)
@@ -1062,6 +1221,7 @@ def share_folder_with_user(project, folder_path, user_id, expires_days=30, notif
 	collaboration). Revoking is restricted to managers + the user who created the share.
 	"""
 	helper.assert_project_access(project)
+	_assert_not_customer_sharer()
 	tracking_available = _share_doctype_available()
 
 	canonical, label = _resolve_share_folder(project, cstr(folder_path or "").strip())
@@ -1227,6 +1387,7 @@ def share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)
 	template.
 	"""
 	helper.assert_project_access(project)
+	_assert_not_customer_sharer()
 	tracking_available = _share_doctype_available()
 
 	fname = cstr(file_name or "").strip()
@@ -1786,6 +1947,8 @@ def list_shared_with_me():
 			continue
 		for f in my_files:
 			f["owner_self"] = True
+			f["owner"] = user
+		_flag_client_uploads(my_files)
 		folders_by_project[pj].append(
 			{
 				"share_name": f"owner::{pj}",
@@ -1801,6 +1964,12 @@ def list_shared_with_me():
 				"files": my_files,
 			}
 		)
+
+	# A client contact only ever sees projects of customers they still belong to; a
+	# share left over from a removed customer must not keep listing its files.
+	if helper.is_customer_only(user):
+		allowed = set(helper.get_allowed_project_names(user))
+		folders_by_project = {p: f for p, f in folders_by_project.items() if p in allowed}
 
 	# Hydrate projects with metadata + the actual files visible per folder.
 	projects_out = []
@@ -1874,6 +2043,7 @@ def list_shared_with_me():
 			for f in files:
 				if f.get("owner") == user:
 					f["owner_self"] = True
+			_flag_client_uploads(files)
 			folder["file_count"] = len(files)
 			folder["files"] = files
 			# Default entry_type for legacy entries so the UI doesn't choke.
@@ -2251,6 +2421,7 @@ def extend_folder_share(share_name, expires_days=30):
 		frappe.throw(_("Per-share expiry tracking is unavailable on this site. Re-share to refresh access."))
 	doc = frappe.get_doc("Portal Folder Share", share_name)
 	helper.assert_project_access(doc.project)
+	_assert_not_customer_sharer()
 	if not helper.can_manage_project(doc.project) and doc.created_by_user != frappe.session.user:
 		frappe.throw(
 			_("You can only extend shares you created yourself."),
@@ -2393,7 +2564,7 @@ def upload_project_file():
 				"No project selected for this upload. Pick a project on the Files page (or open the project's detail page) and try again."
 			)
 		)
-	helper.assert_customer_portal_can_upload(project)
+	_assert_upload_allowed(project, target_folder_hint)
 
 	upload = frappe.request.files.get("file")
 	if not upload:
@@ -2410,6 +2581,11 @@ def upload_project_file():
 	destination = cstr(frappe.form_dict.get("destination") or "erpnext").strip().lower()
 	external_provider = cstr(frappe.form_dict.get("external_provider") or "").strip().lower()
 	target_folder = cstr(frappe.form_dict.get("target_folder") or "").strip()
+	if helper.is_customer_only():
+		# A client upload stays a private ERPNext file: never public, never forwarded to
+		# an external provider webhook.
+		is_private = 1
+		destination = "erpnext"
 
 	if destination not in {"erpnext", "external", "both"}:
 		frappe.throw(_("Invalid destination. Use erpnext, external, or both."))
@@ -2554,6 +2730,8 @@ def upload_project_file():
 		if doc and doc.folder != resolved_target:
 			frappe.db.set_value("File", doc.name, "folder", resolved_target, update_modified=False)
 			doc.folder = resolved_target
+		if doc:
+			_mark_client_upload(doc.name)
 		# Stamp the file-type tag without re-saving the doc (avoids hooks).
 		if doc and portal_file_type:
 			# Gate on the field actually existing rather than catching everything, so a
@@ -2633,6 +2811,7 @@ def upload_project_file():
 		"folder": doc.folder if doc else None,
 		"folder_label": folder_label_resolved,
 		"file_type": portal_file_type or None,
+		"uploaded_by_client": 1 if (doc and helper.is_customer_only()) else 0,
 		"destination": destination,
 		"external_provider": external_provider or None,
 		"external_result": external_result,
@@ -2660,7 +2839,7 @@ def prepare_folder_upload():
 		frappe.throw(_("folder_name is required"))
 	if "/" in folder_name or "\\" in folder_name or ".." in folder_name:
 		frappe.throw(_("Invalid folder name. Use a single name without slashes."))
-	helper.assert_customer_portal_can_upload(project)
+	_assert_upload_allowed(project, target_folder)
 
 	folder_ctx = ensure_project_folders(project)
 	valid_folders = {x["name"]: x.get("label") for x in folder_ctx["subfolders"]}
@@ -2752,6 +2931,10 @@ def download_project_file(file_name):
 		helper.assert_manage_project(f.attached_to_name)
 	else:
 		helper.assert_project_access(f.attached_to_name)
+		# list_project_files shows a client contact only 06-CLIENT SUBMITTAL; a direct
+		# call by docname must not reach the internal folders either.
+		if not _customer_may_read_file(f.attached_to_name, f.name, f.folder):
+			frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	content = f.get_content()
 	frappe.local.response.filename = f.file_name

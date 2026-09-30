@@ -219,7 +219,7 @@ can_edit_portal_folder_template()       # Auditor (or System Manager fallback)
 can_manage_customers_in_portal()
 assert_project_access(name)             # → throws PermissionError
 assert_manage_project(name)             # → throws PermissionError
-assert_customer_portal_can_upload(name) # blocks Portal Customer uploads
+assert_customer_portal_can_upload(name) # staff rule; client contacts go through files._assert_upload_allowed (06-CLIENT SUBMITTAL only, tagged "Client Upload")
 ```
 
 ### 3.3 Capability matrix (server-enforced)
@@ -637,7 +637,8 @@ There are no automated tests yet. Manual verification checklist after any
 change to files/sharing:
 
 ```
-☐ Customer Portal User cannot upload, cannot share, cannot rename
+☐ Customer Portal User uploads only into 06-CLIENT SUBMITTAL (file shows "Client upload"), cannot share, cannot rename, cannot download/zip outside 06 unless staff shared it
+☐ Customer access comes only from Portal User Customer rows; editing User.portal_linked_customer grants nothing
 ☐ Project Member can upload, share, see "Shared with me", revoke own shares
 ☐ Project Member CANNOT revoke a share another member created
 ☐ Portal Project Manager can rename folders, delete any file, revoke any share

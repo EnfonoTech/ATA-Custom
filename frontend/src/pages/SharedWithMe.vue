@@ -364,6 +364,7 @@ function openFolderInFiles(project, folderPath) {
 										<p class="flex items-center gap-2 truncate font-medium text-[color:var(--portal-text)]">
 											<span class="truncate">{{ file.file_name }}</span>
 											<span v-if="file.owner_self" class="portal-pill portal-pill-accent text-[10px]">You</span>
+											<span v-if="file.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${file.uploaded_by_name || file.owner || ''}`">Client upload</span>
 											<span v-if="file.is_private" class="text-[10px] text-[color:var(--portal-subtle)]">
 												(private)
 											</span>
