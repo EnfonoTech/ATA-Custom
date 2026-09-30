@@ -1,6 +1,6 @@
 # ATA Project Portal — User Guide
 
-**Last updated: 30 September 2026**
+**Last updated: 1 October 2026**
 
 This is the complete guide to the ATA Project Portal. It is for everyone who uses it:
 
@@ -168,7 +168,7 @@ This is the most important rule.
 - Every staff member (System Manager, Projects Manager or Projects User) can **open every project** in the practice. They can also upload to it and share from it.
 - Only some people can **change** a project. For a Projects User, that means projects whose team they are on.
 - Being on a **team** in the Teams page does **not** give access to any project. Only the project's own **Team** card does.
-- Being on **any** project team counts as portal access. A login on a project team can sign in and read **every** project, even without a portal role. This includes someone added with **Assign To** on a Project in the Desk. Only put ATA staff on project teams. Never assign a project to a client login or an outside person.
+- Being on **any** project team counts as portal access. A login on a project team can sign in and read **every** project, even without a portal role. This includes someone added with **Assign To** on a Project in the Desk. Only put ATA staff on project teams. Client logins cannot join a project team: the portal refuses them, and a Desk **Assign To** does not add them to the team. Still, never assign a project to a client login (also not through **Assign To User Group**) or to an outside person.
 
 > **Note.** The "only your team's projects" rule applies in the portal only. In the ERPNext Desk, the standard **Projects User** role can edit and delete **any** Project. Keep staff working in the portal, and give Desk access with care.
 
@@ -188,7 +188,7 @@ This is the most important rule.
 | Set the Portal Team (Gantt grouping) | Yes | Only if Lead Architect | Only if Lead Architect **and** lead of that team on the Teams page | No | No |
 | Change the Lead Architect once it names someone else | Yes | No | No | No | No |
 | Upload files | Yes | Yes | Yes | Yes | Only into 06-CLIENT SUBMITTAL |
-| Submit a file to the client (File Browser) | Yes | Yes | Yes | Yes | No |
+| Submit a file to the client (File Browser) | Yes | Yes | Yes | No | No |
 | Share a folder or file, create a guest link | Yes | Yes | Yes | Yes | No |
 | Rename folders, delete anyone's file, revoke anyone's share | Yes | Yes | Yes | No (only your own uploads and your own shares) | No |
 | Add an existing client login to a customer | Yes | Yes | No | No | No |
@@ -370,16 +370,16 @@ If a page crashes you see a box "Something went wrong". Click another menu item 
 | | Contracts | Yes | No | No |
 | **AI** | ATA AI CHAT | Yes | Yes | No |
 | **Team Structure** | ATA Teams (head count per team) | Yes | No | No |
-| **Files** | Files | Yes | Yes | Hidden (known issue, see note) |
-| | File Browser | Yes | Yes | Hidden (known issue) |
-| | Shared | Yes | Yes | Hidden (known issue); open `/portal-app/shared-with-me` |
+| **Files** | Files | Yes | Yes | Yes (06-CLIENT SUBMITTAL only) |
+| | File Browser | Yes | Yes | Yes (06-CLIENT SUBMITTAL only) |
+| | Shared | Yes | Yes | Yes |
 | | Shares | Yes | If on at least one project team | No |
 | | Routing rules | Yes | If on at least one project team | No |
 | | File tools | With Auditor role, or System Manager | With Auditor role | No |
 | **Account** | Profile | Yes | Yes | Yes |
 | | Admin | System Manager (see note in 2.3) | No | No |
 
-> **Known issue (clients).** Client contacts see a **FILES** heading with no links under it. To reach files, a client opens a project and clicks **Files**. See [section 22](#22-for-clients-how-to-use-the-portal).
+> **Note (clients).** Tasks, Kanban, Calendar, Gantt Chart, Daily Task and ATA AI Chat are ATA's internal working tools. If a client contact opens one of them by its address, the portal takes them back to **Projects**. See [section 22](#22-for-clients-how-to-use-the-portal).
 
 The **ATA Teams** block under Team Structure shows the number of active employees per team. It is for information only. Click **ATA Teams** to open or close the list. Clicking a team does nothing.
 
@@ -418,7 +418,8 @@ What it searches:
 
 - **Projects**: by project name or portal code. It does not search the project ID (such as `PROJ-0001`) or the customer.
 - **Tasks**: by task subject.
-- **Teams**: by team name. Client contacts do not get team results.
+- **Teams**: by team name.
+- Client contacts get only **Projects** results, never tasks or teams.
 - It does **not** search files. To find a file, use the Files hub or the File Browser (section 15).
 
 You only get results from projects you are allowed to see.
@@ -578,12 +579,14 @@ The new project page opens.
    - **Remarks**
 3. Click **Save Changes**.
 
-> **Known issues with this form.**
-> - **Lead Architect.** If the project's Lead Architect is someone else, only a System Manager can save this form. Others get "Only a System Manager can reassign the portal project manager." Projects Users always see the **Lead Architect** box empty; if you are the Lead Architect and save, it is **cleared**. To change only the title, use **Rename project** on the project page. For anything else, ask a System Manager or Projects Manager.
-> - The **Remarks** box always opens empty. Saving the form clears any earlier remarks.
+Only the boxes you changed are saved. Everything else stays as it was.
+
+> **Good to know about this form.**
+> - **Lead Architect.** It changes only if you pick a different person. Once it names someone else, only a System Manager can change it (others get "Only a System Manager can reassign the portal project manager."). Everyone who can change the project can still save the rest of the form. Projects Users see the box empty, because the list is for managers; saving keeps the current Lead Architect.
+> - **Remarks** open with the text saved on the project, shown as plain text. If you change them, they are saved as plain paragraphs, so any formatting added in the Desk (bold, lists, links) is lost. If you do not touch **Remarks**, they are not changed.
 > - **Progress** is normally worked out by ERPNext from the project's tasks. The slider value is replaced, unless the project's **% Complete Method** in the Desk is set to **Manual**.
-> - ERPNext itself only knows the statuses Open, Completed and Cancelled. **In Progress** and **On Hold** are saved, but the next save of the project anywhere turns them back to Open or Completed. Use the **Kanban stage** for working stages instead.
-> - If the project's **% Complete Method** is **Manual**, choosing **In Progress** or **On Hold** makes the save fail with a "Status cannot be…" error.
+> - **Status.** ERPNext itself only knows the statuses Open, Completed and Cancelled. **In Progress** and **On Hold** stay when you save this form again, assign the Lead Architect or set the Portal Team. Other changes turn them back to Open or Completed: **Rename project** on the project page, Kanban stage, team, customer, milestones, a save in the Desk, and any task of the project being created, changed or deleted (ERPNext also re-checks overdue tasks every night). Use the **Kanban stage** for working stages instead.
+> - If the project's **% Complete Method** is **Manual**, task changes leave the status alone, but the other changes above fail with a "Status cannot be…" error while the status is **In Progress** or **On Hold**. Set the status back to **Open** in this form first.
 > - Estimated Cost is ignored for people who cannot see the value.
 
 ### 6.6 Assigning the Lead Architect
@@ -626,14 +629,14 @@ ERPNext refuses the delete if other records still point to the project: tasks, t
 
 **Where:** click a project on the Projects list. The address is `/portal-app/projects/<project ID>`.
 
-**Who:** anyone who can open the project. Buttons that change things appear only for people who can change the project.
+**Who:** anyone who can open the project. Buttons that change things appear only for people who can change the project. Client contacts do not see the **Tasks** button or the **Portal Team**, **Team** and **Tasks** cards.
 
 ### 7.1 Header
 
 - **Back to projects** returns to the list.
 - The header shows the status, the Kanban stage, the title and the project ID.
 - **Files** opens the Files hub for this project.
-- **Tasks** opens the Tasks page filtered to this project.
+- **Tasks** (staff only) opens the Tasks page filtered to this project.
 - **Rename project** (people who can change the project): type a new title and click **Save title**. The project ID never changes.
 
 > **Note.** Every project title must be unique. If another project already has the same title, ERPNext refuses the save with a duplicate error. Use a different title, for example add the portal code.
@@ -726,7 +729,7 @@ The team is the list of people who can **change** this project. (Everyone on sta
 
 > **Note.** If someone on the team has a disabled login, **Save team** fails with "User is disabled: <login>". Click **Remove** next to that person first, then **Save team**.
 
-> **Warning.** The **Add user** search also lists client logins. Never add a client login to a project team. Such a login keeps seeing only its customers' projects, but the portal's checks then count it as internal: it can no longer be linked to another customer, and its password cannot be reset from the project page. If it later loses the **Portal Customer** role (for example when its last customer is removed), it can read **every** project and change the projects whose team it is on.
+> **Note.** The **Add user** search also lists client logins, but a client login cannot join a project team. **Save team** refuses with "Client contacts cannot be added to the project team: <login>". Click **Remove** next to that person, then **Save team**. Client contacts get their access through the **Customer portal users** card instead (section 7.4).
 
 **In ERPNext:**
 
@@ -736,7 +739,7 @@ The team is the list of people who can **change** this project. (Everyone on sta
 
 > **Known issue.** Every **Save team** sends the "Project Collaboration Invitation" email again to every member.
 
-> **Note.** It also works the other way. If someone assigns the project to a person in the Desk (**Assigned To** in the sidebar), that person joins the team. If the assignment is closed or cancelled (for example ticked done in their To Do list), they leave the team.
+> **Note.** It also works the other way. If someone assigns the project to a person in the Desk (**Assigned To** in the sidebar), that person joins the team. If the assignment is closed or cancelled (for example ticked done in their To Do list), they leave the team. Client logins are the exception: a Desk assignment never adds them to the team. Even so, never assign a project to a client login in the Desk.
 
 ### 7.7 Files card
 
@@ -749,7 +752,7 @@ The team is the list of people who can **change** this project. (Everyone on sta
 
 ### 7.8 Tasks card
 
-A list of the project's latest 50 tasks with their status. **Open task workspace** opens the Tasks page filtered to this project.
+A list of the project's latest 50 tasks with their status. **Open task workspace** opens the Tasks page filtered to this project. Staff only: client contacts do not see this card.
 
 ---
 
@@ -844,7 +847,7 @@ Gantt milestones are not shown on the calendar.
 
 ## 11. Tasks
 
-**Who:** staff. (Client contacts can open this page read-only; see 11.3.) Creating a task needs the right to change at least one project. Saving a task row or commenting needs the right to change its project, or being assigned to the task.
+**Who:** staff. Client contacts cannot open this page. Creating a task needs the right to change at least one project. Saving a task row or commenting needs the right to change its project, or being assigned to the task.
 
 **Where:** side menu → **Tasks**. The page is called **Tasks workspace**.
 
@@ -882,17 +885,21 @@ ERPNext rules:
 
 Comments can be up to 5000 characters. **In ERPNext:** they appear on the task's timeline in the Desk.
 
-> **Clients can read task comments.** A project's client contacts can open the Tasks page from the project page (the **Tasks** and **Open task workspace** buttons). There they can read every task's title, who it is assigned to, and its **Comments**. They cannot change tasks or add comments. Write task titles and comments as if the client will read them.
+> **Note.** Tasks and their comments are internal to ATA. Client contacts cannot see them anywhere in the portal: not on the project page, not in search and not on the Tasks page.
 
 ### 11.4 Creating a task
 
 1. Click **New task**.
-2. Fill in **Subject \***, **Project \*** (search; only projects you can change), **Priority** and **Due date**.
-3. Click **Create Task**.
+2. Fill in **Subject \*** and **Project \*** (search; only projects you can change).
+3. Optional: in **Assign to**, search by name or email and click a person. Only ATA staff logins are listed.
+4. Fill in **Priority** and **Due date**.
+5. Click **Create Task**.
 
 The **Due date** must not be after the project's end date, or ERPNext refuses the task.
 
-> **Known issue.** The **Assign to** box in this form is not saved. Tasks are created with nobody assigned. To assign a task, open it in the Desk and use **Assign To**.
+If you picked someone in **Assign to**, the task is assigned to them at once. It shows under their **Assigned to you (open)** and **Only my tasks**, they can update it and comment on it, and ERPNext sends them its usual assignment notification (not when you assign yourself). If the person is not an active staff login, the form shows "Assign the task to an active ATA staff login." and no task is created.
+
+**In ERPNext:** the assignment is a normal **Assign To** (a ToDo) on the Task.
 
 ---
 
@@ -915,7 +922,7 @@ This is a private four-week reminder board. It is not linked to projects.
 3. (Managers only) In **Assign to (optional — defaults to you)**, search for a colleague.
 4. Click **Add Task**.
 
-A reminder you put on a colleague's board is **not** on your own board. To change or remove it later, use the Desk calendar (**Event**). The **Assign to** search also lists client logins. Never pick a client login.
+A reminder you put on a colleague's board is **not** on your own board. To change or remove it later, use the Desk calendar (**Event**). The **Assign to** search lists only ATA staff logins.
 
 Other actions:
 
@@ -927,7 +934,9 @@ Other actions:
 
 **In ERPNext:** each reminder is a private **Event**. The person who creates it stays its owner. So a reminder a manager creates for you shows on **your** board, but in the Desk it belongs to the manager. ERPNext may also send the owner a daily "Upcoming Events for Today" email.
 
-> **Known issue.** In Saudi time the dates are one day off. The **TODAY** badge appears on tomorrow's tile, and in the Desk calendar each reminder shows one day earlier. Inside the portal, a reminder stays on the tile where you added it. Go by the date labels, not by the TODAY badge.
+The board uses the date on your own computer. Today's tile is highlighted and opens selected, with a **TODAY** badge in its heading. A reminder is saved on the day of the tile where you added it.
+
+> **Note.** An older version of the portal saved reminders one day early (in Saudi time, always). Reminders added with that version may now show one day before the tile where you added them. If the day matters, delete the reminder and add it again.
 
 ---
 
@@ -1064,7 +1073,7 @@ The whole folder, with all its sub-folders, is recreated inside the destination.
 1. Choose the destination folder first. The upload folder starts as the first folder (normally 01-DOCUMENTS), so pick the right one and check **Goes into <folder>** before you click. **Upload ZIP** is grey only when the project has no folders yet ([section 28](#28-faq-and-troubleshooting)).
 2. Click **Upload ZIP** and pick the `.zip` file.
 3. Confirm the destination in the browser box.
-4. Wait while it shows **Extracting…**. Then you see "ZIP extracted: N file(s) uploaded, M failed."
+4. Wait while it shows **Extracting…**. Then you see "ZIP extracted: N file(s) uploaded, M failed." The file list and the folders refresh by themselves.
 
 Good to know:
 
@@ -1073,9 +1082,7 @@ Good to know:
 - Blocked file types inside the ZIP are skipped and counted as failed. Hidden files and Mac `__MACOSX` folders are skipped silently.
 - A `.zip` dragged onto the drop area or chosen with **Upload files** is stored as one ZIP file. Only the **Upload ZIP** button unpacks.
 - The `.zip` itself must fit the site's upload limit. By default that is about **25 MB** for the whole ZIP, and a bigger ZIP is refused before anything is unpacked. Each file inside must be within the per-file limit (about **10 MB**), or it counts as failed. If the developer sets `max_file_size` in the site configuration, that one number becomes the limit for both. Split big ZIPs, or use **Upload folder**.
-- The message shows only **how many** files failed, not which. Reload, compare the folder with your ZIP, and upload any missing files with **Upload files** to see the reason.
-
-> **Known issue.** After a successful ZIP upload you may also see a red message "loadFilesAndFolders is not defined". The files were uploaded. Reload the page to see them.
+- The message shows only **how many** files failed, not which. Compare the folder with your ZIP, and upload any missing files with **Upload files** to see the reason.
 
 ### 14.7 Private and public
 
@@ -1217,7 +1224,9 @@ Folders cannot be deleted from the portal. Rows you may not delete show a dash.
 - Category chips (for example Presentation, Drawing, 3D Model, Feasibility, Design Source, Renders, Other) filter by file extension. PDFs always count as Presentation. **Clear** resets them.
 - Sort by **File**, **Date** or **Size** by clicking the column header.
 - Click a file name to open it.
-- Each row has **Submit** and a share icon.
+- Each row has a share icon (staff), and **Submit** on projects you can change.
+
+Client contacts see only the 06-CLIENT SUBMITTAL files of their own projects, with no **Submit** or share buttons.
 
 The File Browser remembers each project's files until you reload the page. Reload to see new uploads.
 
@@ -1231,7 +1240,7 @@ You see "Submitted as "…" (SL n) to Client Submittal." The original file stays
 
 If you submitted the wrong file, open the Files hub, open **06-CLIENT SUBMITTAL** and **Delete** the copy (you uploaded it, so you may delete it). The serial number `NN` is the number of files already at the top of that folder plus one. So after a deletion, the next copy can get a number that is already used.
 
-**Who:** staff only. The project must have a folder named exactly 06-CLIENT SUBMITTAL, or you get "This project has no 06-CLIENT SUBMITTAL folder."
+**Who:** anyone who can change the project: its team members, Projects Managers and System Managers. Others do not see **Submit**. The project must have a folder named exactly 06-CLIENT SUBMITTAL, or you get "This project has no 06-CLIENT SUBMITTAL folder." Contract files can never be submitted to the client.
 
 The share icon opens **Share File** (see 16.2).
 
@@ -1244,7 +1253,7 @@ There are two kinds of sharing:
 - **With a named person** who has a login. They see it on their **Shared** page.
 - **With a guest link** for someone without a login.
 
-**Who can share:** all staff, on any project they can open. Client contacts can never share.
+**Who can share:** all staff, on any project they can open. Client contacts can never share. Contract files can never be shared (section 17.3).
 
 ### 16.1 Sharing a folder with a person
 
@@ -1263,13 +1272,13 @@ What the person gets:
 - The folder on their **Shared** page.
 - If ticked, an email "You were granted access to a folder on <project title>" with a link to the Shared page.
 
-> **Warning (client contacts).** Any share with a client contact, of a folder or of a single file, also opens the **project record** to them. While the share is active, ERPNext may then let them open other files of that project too, not only the shared ones. Files you add to a shared folder later also become visible to them. So share with a client contact only if they may see everything in that project. If they may not, copy the files into 06-CLIENT SUBMITTAL instead (**File Browser → Submit**, section 15.5).
+> **Warning (client contacts).** A folder share lets a client contact open every file in that folder and its sub-folders, including files you add there later while the share is active. So share a folder with a client contact only if they may see everything in it. If they may not, copy the files into 06-CLIENT SUBMITTAL instead (**File Browser → Submit**, section 15.5), or share single files.
 
 > **Note.** Files you add to a shared folder later show on the person's **Shared** page by themselves while the share is active. You do not need to share again.
 
 Sharing the same folder with the same person again **extends** the existing share. It does not make a second one. The share is then recorded as made by you. The colleague who shared it first can then no longer revoke it, unless they can change the project.
 
-**In ERPNext:** a **Portal Folder Share** record is saved (the audit record). ERPNext **DocShare** entries give read access to the folder, to each file in it at that moment, and to the project.
+**In ERPNext:** a **Portal Folder Share** record is saved (the audit record). ERPNext **DocShare** entries give read access to the folder and to each file in it at that moment. A staff member also gets a read share on the project. A client contact never gets a share on the project record.
 
 > **Note.** All staff can already read every project. So sharing with a colleague mainly puts the folder on their Shared page and sends the email. Sharing matters most for **client contacts**.
 
@@ -1280,7 +1289,7 @@ If the box says "Sharing is running in basic mode. Expiry dates and public share
 - In the Files hub, click **Share** in the file's row. The **Share file** box works like 16.1, without a guest link.
 - In the File Browser, click the share icon. The **Share File** box lets you search "by name or email" and click a person. It always shares for 30 days and sends no email. **Shared with** lists people with a revoke button. Click **Done** to close.
 
-Sharing one file with a client contact also opens the project record to them. Read the warning in 16.1 first.
+A single-file share gives a client contact that one file only. (As in 16.1, a staff member also gets a read share on the project.)
 
 ### 16.3 Who may receive a share
 
@@ -1470,9 +1479,9 @@ This is a locked-down place for signed contracts, apart from the normal project 
 3. Click a file name to open it.
 4. Click the bin to delete it, and confirm "Delete "<name>"? This cannot be undone."
 
-Contract files never appear in the Files hub or the File Browser. Their **file names** (not their contents) can still appear to staff in the Dashboard's **Recent Activity**, in ATA AI Chat answers about recent files, and on the **Shares** page under "Project folder (all files)". Give contract files neutral names.
+Contract files never appear in the Files hub or the File Browser. They cannot be shared with anyone, and they cannot be submitted to the client. Their **file names** (not their contents) can still appear to System Managers and Projects Managers in the Dashboard's **Recent Activity** and in ATA AI Chat answers about recent files, and to staff on the **Shares** page under "Project folder (all files)". Give contract files neutral names.
 
-**In ERPNext:** contracts are private Files attached to the project, in the folder `Home / Contracts / <project ID>`. Because they are attached to the project, Desk users with access to the project can see them in the Project's attachments.
+**In ERPNext:** contracts are private Files attached to the project, in the folder `Home / Contracts / <project ID>`. Give Desk access with care (see the note in 2.2).
 
 ---
 
@@ -1650,7 +1659,7 @@ Records that already existed before a run are never deleted.
 
 ## 21. ATA AI Chat
 
-**Who:** staff.
+**Who:** staff. Client contacts cannot open it.
 
 **Where:** side menu → **ATA AI CHAT**.
 
@@ -1677,6 +1686,8 @@ What it can answer:
 
 Anything else returns a summary of projects, tasks and files. Words like "summary" or "value" anywhere in the question change the answer, so keep questions short.
 
+File answers leave out contract files, except for System Managers and Projects Managers.
+
 ---
 
 # Part E — Clients
@@ -1692,13 +1703,15 @@ ATA gives you a login so you can see your own projects, get the documents ATA se
 | You can | You cannot |
 |---|---|
 | See the projects of your company (or companies) | See any other client's projects |
-| Open each project's page: status, stage, dates, progress, the ATA team and the latest tasks | See project values or costs |
+| Open each project's page: status, stage, client, dates and progress | See project values or costs |
 | Open and download files in the **06-CLIENT SUBMITTAL** folder | See ATA's internal folders (unless ATA shares a folder with you by name) |
 | Download several files as one ZIP | Delete files, rename folders or share files |
 | Upload files into **06-CLIENT SUBMITTAL** | Create projects or change project details |
-| See files ATA shared with you personally | Use ATA's internal office system |
-| See your project's tasks and their comments (the **Tasks** button on the project page) | Change tasks or add comments |
+| See files ATA shared with you personally (side menu → **Shared**) | Use ATA's internal office system |
+| See the 06-CLIENT SUBMITTAL files of all your projects in one list (side menu → **File Browser**) | See ATA's internal tasks, team lists, calendars or planning boards |
 | Open the project's server links (T / A / erp) on the Projects list, if ATA has given you access to those drives | — |
+
+Your side menu has **Projects**, **Files**, **File Browser**, **Shared** and **Profile**. If you open the address of one of ATA's internal pages (for example Tasks or Calendar), the portal takes you back to **Projects**.
 
 ### 22.2 Signing in for the first time
 
@@ -1717,16 +1730,16 @@ Next time, open the portal address ATA gave you (it ends in `/portal-app`). Type
 
 1. Click **Projects** in the side menu. You see only your company's projects.
 2. Click a project to open its page.
-3. Click **Files** at the top of the page (or **Open in Files hub** on the Files card). Both open the **Project files** page.
+3. Click **Files** at the top of the page (or **Open in Files hub** on the Files card). Both open the **Project files** page. You can also click **Files** in the side menu.
 4. On the **Project files** page you see the **06-CLIENT SUBMITTAL** folder and any folders inside it.
 5. Click a folder to show its files.
 6. Click **Open** to open a file.
 
-> **Note.** The side menu shows a **FILES** heading with nothing under it. This is a known issue. Use the **Files** button on the project page, as above.
-
 To switch to another project, use **Active project** at the top of the Project files page.
 
-**To download several files at once:** tick them, then click **Download as ZIP**.
+**To download several files at once:** on the Project files page, tick them, then click **Download as ZIP**.
+
+**File Browser** (side menu) shows the 06-CLIENT SUBMITTAL files of all your projects in one place. Click a project on the left, then click a file name to open it.
 
 ### 22.4 Sending files to ATA
 
@@ -1747,7 +1760,7 @@ Good to know:
 
 ### 22.5 Files shared with you
 
-ATA may share a folder or file with you by name. It then appears on the **Shared** page, which you can open at `/portal-app/shared-with-me`. Click **Open** next to a file. Shares can have an end date ("Expires <date>").
+ATA may share a folder or file with you by name. It then appears on the **Shared** page (side menu → **Shared**). Click **Open** next to a file. Shares can have an end date ("Expires <date>").
 
 If a shared file will not open, ask your ATA contact to share it again.
 
@@ -1837,10 +1850,11 @@ Emails are **queued**. They normally leave within a few minutes.
 ### 23.6 Step 4: what the client sees
 
 - Projects: all projects of their customer(s).
-- On each project page: status, stage, client, dates, progress, the task list, and the **Team** card (with the ATA team's login emails). Keep task titles professional.
-- Files: only **06-CLIENT SUBMITTAL** and its sub-folders, plus anything you shared with them by name.
+- On each project page: status, stage, client, dates, progress, the **Customer** card (view only) and the **Files** card. They do not see the tasks, the **Team** card or the **Portal Team** card.
+- Files: only **06-CLIENT SUBMITTAL** and its sub-folders, plus anything you shared with them by name. Their side menu has **Files**, **File Browser** and **Shared**.
 - They can upload into 06-CLIENT SUBMITTAL. They cannot delete, share or change anything.
-- Tasks, Kanban, Gantt, Calendar, Daily Task and AI Chat are not in their menu, but the **Tasks** buttons on the project page open the Tasks page for them, read-only (task titles, assignees and comments). On the Projects list they also see the **Servers** badges (T, A, erp): only enter links the client may see.
+- Tasks, Kanban, Gantt, Calendar, Daily Task and AI Chat are not in their menu. If they open one by its address, the portal takes them back to **Projects**. Global search gives them no task results.
+- On the Projects list they see the **Servers** badges (T, A, erp): only enter links the client may see.
 
 Check the **People with access** list. It shows "Last signed in <when>" once they have signed in, or "Invited — hasn't signed in yet".
 
@@ -1860,7 +1874,7 @@ The folder must be named exactly **06-CLIENT SUBMITTAL**, directly inside the pr
 Choose one:
 
 - **Upload into 06-CLIENT SUBMITTAL** from the Files hub or the project page. (Your upload goes into a dated sub-folder inside it. The client sees sub-folders too.)
-- **File Browser → Submit**: copies an existing file into 06-CLIENT SUBMITTAL as `NN_<date>_<name>` (section 15.5).
+- **File Browser → Submit**: copies an existing file into 06-CLIENT SUBMITTAL as `NN_<date>_<name>` (section 15.5). This needs the right to change the project.
 - **Share a folder or file by name** with the client contact (section 16.1; read the warning there first). They find it on their Shared page.
 - **Guest link** for someone without a login (section 16.4). Use a short expiry. Never link the whole project.
 
@@ -1923,7 +1937,7 @@ Other ways access ends:
 | In the portal | In the Desk |
 |---|---|
 | A project | **Project** record. The portal adds fields such as Portal Project Code, Portal Project Manager, Portal Kanban Stage, Portal Office, Portal Phase, Portal Team, the server links and Portal Milestones. |
-| Project team | The Project's **Users** table, kept in step with **Assign To** on the Project. |
+| Project team | The Project's **Users** table, kept in step with **Assign To** on the Project. The portal never adds client logins to it, not even from a Desk Assign To. |
 | Files | **File** records under `Home / Attachments / <project>`. Contracts under `Home / Contracts / <project>`. |
 | Client uploads | Files with the tag **Client Upload**. |
 | Shares and guest links | **Portal Folder Share** list (audit: who, what, expiry, revoked, opens), plus ERPNext **DocShare** entries. Always revoke from the portal. Never tick **Revoked** or delete rows here by hand: a share with a person then keeps working with no end date, because its DocShares are never removed. |
@@ -1946,7 +1960,7 @@ Other ways access ends:
 | Cloud integrations | Google Drive and BIM 360 / ACC switches, notes and upload webhook URLs. Although labelled "(planned)", they work once switched on with an address. |
 | Client portal | **Welcome text for client document access** (shown on the Files hub as "Client portal guidance"). |
 
-> **Warning.** Every signed-in user, clients included, can read these settings through the portal. Never put passwords or secret keys in the webhook addresses or the notes.
+> **Warning.** The three upload webhook URLs stay on the server; the portal never sends them to a browser. Every other setting here (branding, the Drive base URL, the notes and the welcome text) can be read by every signed-in user, clients included. Never put passwords or secret keys in those.
 
 Other Desk settings the portal depends on:
 
@@ -1972,7 +1986,7 @@ All portal emails are queued and sent a few minutes later. The **Forgot Password
 | "Password Reset" | **Forgot Password?**; or a System Manager uses **Email them a reset link** | The user |
 | "You were granted access to a folder on <project>" / "…a file on <project>" | A share with **Email the user when I add them** ticked | The person shared with |
 | "Project Collaboration Invitation" (from ERPNext) | Someone is added to a project team; also on every **Save team** | Team members |
-| "<name> assigned a new task Project <title> to you" and "Your assignment on … has been removed by <name>" (from ERPNext) | Someone is added to or removed from a project team (**Save team** or Desk **Assign To**), or added to or removed from a team on the Teams page | The person (not when you add or remove yourself), unless they turned off assignment emails in their Notification Settings |
+| "<name> assigned a new task Project <title> to you" (or "…Task <subject>…") and "Your assignment on … has been removed by <name>" (from ERPNext) | Someone is added to or removed from a project team (**Save team** or Desk **Assign To**), or added to or removed from a team on the Teams page; or someone is picked in **Assign to** when a task is created (section 11.4) | The person (not when you add or remove yourself), unless they turned off assignment emails in their Notification Settings |
 | "Upcoming Events for Today" (from ERPNext) | Daily, for Daily Task reminders | The reminder's owner |
 
 To change the wording of the welcome and password-reset emails, a System Manager creates an **Email Template** in the Desk and chooses it in **System Settings → Welcome Email Template** or **Reset Password Template**. The "You now have access…" and share emails have fixed wording.
@@ -1990,32 +2004,26 @@ To change the wording of the welcome and password-reset emails, a System Manager
 7. **Always give a team an office.** Otherwise it disappears from the lists.
 8. **Never run a demo seed on the live site.**
 9. **Name files as if the client will read the name.** Keep file names professional and neutral.
-10. **Write task titles and comments for the client too** ([section 11.3](#113-comments)).
+10. **Share a folder with a client contact only if they may see everything in it.** Otherwise use **File Browser → Submit** ([section 16.1](#161-sharing-a-folder-with-a-person)).
 
 ---
 
 ## 27. Known issues and workarounds
 
-These were found while writing this guide (30 September 2026). They may be fixed later.
+These are known as of 1 October 2026. They may be fixed later.
 
 | Where | Problem | Workaround |
 |---|---|---|
-| Side menu (clients) | The **FILES** heading shows no links. | Open a project and click **Files**. |
 | Sign-in | A login without a portal role sees "Server error. Please try again." | Give the user a portal role. |
-| Edit Project form | Non-System Managers cannot save when the Lead Architect is someone else. | Ask a System Manager, or rename from the project page. |
-| Edit Project form (Projects Users) | The Lead Architect box is empty. Saving clears the Lead Architect if it named you. | Ask a manager to edit, or rename on the project page. |
-| Edit Project form | Remarks are cleared on every save; Progress is replaced by ERPNext; On Hold / In Progress do not stick (and fail to save on Manual projects). | Keep notes elsewhere; use the Kanban stage for working stages. |
+| Edit Project form | Progress is replaced by ERPNext. In Progress / On Hold are reset by task changes and other project changes; on Manual projects the non-task changes fail. | Use the Kanban stage for working stages. On a Manual project, set the status back to Open first. |
 | Project team | **Save team** re-sends the "Project Collaboration Invitation" email to every member. | Save the team only when needed. |
-| Tasks → New task | **Assign to** is not saved. | Assign the task in the Desk. |
 | Tasks table | The **Assigned** column shows login emails, not names. | — |
 | Kanban | Empty stages have no column. | Set the stage in the Desk. |
 | Gantt | Picking an office moves other offices' projects into "Unassigned to a team". | Use the **All Teams** filter too, or ignore that group. |
-| Daily Task | Dates are one day off in Saudi time; TODAY badge on tomorrow's tile. | Go by the date labels. |
+| Daily Task | Reminders added with an older version may show one day early. | Delete and add them again if the day matters. |
 | Dashboard | **Projects Delayed** counts finished projects; period drop-downs do nothing; Team Performance is empty. | Read the cards as described in section 5. |
-| Files hub → Upload ZIP | A red "loadFilesAndFolders is not defined" message after success. | Reload the page. |
 | Folder rename | Shares and guest links on the old name may stop working. | Share again after renaming. |
 | Shares page | **Created by me** shows everyone's shares; **Revoke** fails on "ERPNext share" rows; the opens counter stops at 1. | Remove Desk shares in the Desk. |
-| File Browser | If a client opens the File Browser address directly, they see **Submit** and share buttons that always fail. | — |
 | Top bar | **New Project** only opens the Projects page for people who cannot create; **Switch to Desk** errors for clients. | Ignore. |
 | Teams | Team leads see **Create team** but cannot use it. | Ask a manager. |
 | Routing rules | Team members can open the page but cannot save. | Ask a System Manager or Projects Manager. |
@@ -2047,6 +2055,12 @@ Check that your browser allows cookies for the site, and that you are using the 
 **I can see a project but cannot change it.**
 You are not on its **Team**. Ask a Projects Manager or the Lead Architect to add you (section 7.6).
 
+**"Client contacts cannot be added to the project team: <login>"**
+A client login was picked in the **Team** card, is in a User Group you added, or was already on the team from before this rule. Client contacts get their access through the **Customer portal users** card instead (section 23). Click **Remove** next to that person, then **Save team**.
+
+**"Assign the task to an active ATA staff login."** (New task)
+The person in **Assign to** is disabled or is not an ATA staff login. Pick someone else, or leave the box empty (section 11.4). If the person is an active staff member, the email of their login may have been changed after the login was created; ask a System Manager.
+
 **Why can I see the project but not its value?**
 See section 2.5. Only System Managers see all values. A Projects Manager sees only projects where they are the Lead Architect.
 
@@ -2062,6 +2076,9 @@ Links last 72 hours on the ATA site. Use **Forgot Password?**, or ask a System M
 
 **The client cannot see the 06-CLIENT SUBMITTAL folder.**
 The folder name must be exactly `06-CLIENT SUBMITTAL`. See section 23.7.
+
+**A client says a link to Tasks, Calendar or another page takes them to Projects.**
+Those pages are ATA's internal working tools, and client logins cannot open them. Clients find their files under **Files**, **File Browser** and **Shared** in the side menu (section 22).
 
 **My upload was refused.**
 - The file type may be blocked (Appendix C).

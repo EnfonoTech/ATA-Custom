@@ -340,6 +340,8 @@ def can_manage_project_team(project_name: str, user=None) -> bool:
 	user = user or frappe.session.user
 	if has_portal_staff_project_access(user):
 		return True
+	if is_customer_only(user):
+		return False
 	return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
 
 

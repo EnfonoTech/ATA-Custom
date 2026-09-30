@@ -2,7 +2,7 @@
 
 **Knowledge-transfer document for the next maintainer of `portal_app`.**
 
-Last updated: 30 September 2026
+Last updated: 1 October 2026
 
 This guide is for the person who will look after the ATA Project Portal next: someone in ATA IT, or a new Enfono developer. It assumes you know basic ERPNext (Desk, DocTypes, `bench`). It does not assume you know this app.
 
@@ -80,7 +80,7 @@ How to read code references: `files.py:514` means "file `portal_app/api/files.py
 | **Team user** | An internal user who is **not** staff (usually a Projects User or a project-team member). The section 5 tables use this meaning. |
 | **Portal user** | Any login that passes `user_can_use_portal()`: staff, team users and client contacts. Other logins are logged out of the portal. "Portal users" in the section 6 tables includes client contacts. |
 | **Client contact / client login** | The person / their User record: a login with the **Portal Customer** role and no staff role. They belong to one or more ERPNext Customers. The screens call them "customer portal users" (the "Customer portal users" card, the "Invite customer user" button). This guide says **client contact** for the person and **client login** for the User record. In short text this guide also says **client** for a client contact. |
-| **Project team** | The `Project User` rows (the "Users" table) on an ERPNext Project. Being on the team gives the right to *change* the project. |
+| **Project team** | The `Project User` rows (the "Users" table) on an ERPNext Project. Being on the team gives the right to *change* the project. The portal never puts a client contact on a project team: Save team refuses them, and the ToDo hook ignores a Desk Assign To for them. The Users table on the Desk Project form is not checked, so never add client logins there (10.9). |
 | **Team (Department)** | An ERPNext `Department` shown on the Teams page and used to group the Gantt chart. It is not the same as a project team, and it gives no project access. |
 | **Gantt team** | The Project field `portal_team`: the one Team (Department) a project is grouped under on the Gantt chart. The Project page card is "Portal Team (Gantt grouping)". It gives no access. |
 | **Lead Architect** | The Project field `portal_project_manager`. The portal shows it as "Lead Architect" and Desk shows it as "Portal Project Manager". It names one person per project. It is **not** the Projects Manager role. This guide always says "Lead Architect". |
@@ -112,7 +112,7 @@ It does not replace ERPNext. It adds a modern web interface on top of ERPNext's 
 
 - A **project** is a normal ERPNext `Project`.
 - A **document** is a normal ERPNext `File`, attached to that Project, stored in the File Manager folder `Home/Attachments/<project id>/...`. This folder tree exists only in the database (5.7).
-- A **team member** of a project is a `Project User` row on the Project. It is kept in step with Desk's "Assign To".
+- A **team member** of a project is a `Project User` row on the Project. It is kept in step with Desk's "Assign To" (except for client contacts, whom the ToDo hook ignores, 3.3).
 - A **team** (for the Teams page and Gantt grouping) is an ERPNext `Department`.
 - A **client company** is an ERPNext `Customer`.
 - A **client login** is a Website User with the custom role **Portal Customer**. The app's own DocType **Portal User Customer** says which customers that login may see.
@@ -185,8 +185,8 @@ flowchart LR
 5. The layout calls `portal_app.api.projects.get_capabilities`. The answer ("capabilities") says what this person may do. The menu and buttons use it.
 6. Each screen calls endpoints such as `portal_app.api.projects.list_projects`.
 7. Every endpoint checks access itself, in one of two ways:
-   - Most endpoints first call a `helper.assert_*` gate.
-   - List and search endpoints (for example `list_projects`, `get_gantt_data`, `global_search`) have no gate, or refuse only Guest. They return only projects and tasks from `get_allowed_project_names()`, which is empty for anyone without portal access. `global_search` also returns up to 5 teams (Departments), which are not tied to projects ([6.14](#614-portal_appapisearch)).
+   - Most endpoints first call a `helper.assert_*` gate. The internal working tools (Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat) call `helper.assert_not_customer_only()`, which refuses client contacts.
+   - List and search endpoints (for example `list_projects`, `global_search`) have no gate, or refuse only Guest. They return only projects and tasks from `get_allowed_project_names()`, which is empty for anyone without portal access. `global_search` returns no tasks to client contacts. It also returns up to 5 teams (Departments), which are not tied to projects ([6.14](#614-portal_appapisearch)).
 
    After the check, most endpoints read or write ERPNext records with `ignore_permissions=True`.
 
@@ -212,7 +212,7 @@ ATA-Custom/                         (repo root = the Frappe app folder "portal_a
     ├── __init__.py                 version string
     ├── hooks.py                    every integration point with Frappe (section 3.3)
     ├── install.py                  custom fields, role, property setter, seed data (3.2)
-    ├── patches.txt + patches/      four one-time data migrations (3.4)
+    ├── patches.txt + patches/      five one-time data migrations (3.4)
     ├── modules.txt                 one module: "Project Portal"
     ├── utils.py                    after_request hook: no-cache header for /portal-app HTML
     ├── demo_seed.py                older command-line demo seed (bench execute only)
@@ -267,8 +267,8 @@ ATA-Custom/                         (repo root = the Frappe app folder "portal_a
 | `Project User` (child "users") | The project team. Being a row here grants the right to change the project. | Read + write |
 | `Task` | Tasks page, Calendar, Dashboard, project task list. | Read + create + update |
 | `Comment` | Task comments (`comment_type = Comment`, reference Task). Also Info comments on User when client access changes. | Read + create |
-| `ToDo` (Assign To) | Kept in step with project teams. Also stores team membership on Departments. | Read + create + cancel |
-| `DocShare` | Read grants for shares, and pre-shares for new team members. | Create + delete |
+| `ToDo` (Assign To) | Kept in step with project teams. Also stores team membership on Departments, and the assignee of a task made with Tasks → New task. | Read + create + cancel |
+| `DocShare` | Read grants for shares, and pre-shares for new team members and new task assignees. The portal never gives a client contact a Project DocShare (5.10). | Create + delete |
 | `Customer` | The client company linked to a project. Can be created from the portal. | Read + create |
 | `Selling Settings`, `Customer Group`, `Territory` | Defaults for customers created in the portal. | Read |
 | `User`, `Has Role`, `Role` | Staff and client logins. Client logins are Website Users. | Read + create + update |
@@ -344,7 +344,7 @@ Custom fields are created with `create_custom_fields(..., update=True)`.
 | `get_website_user_home_page` | `helper.get_website_user_home_page` | After Frappe's own `/login` or set-password page, a client contact goes to `/portal-app` instead of `/me` (the hook returns the route without the leading slash, `portal-app`, as Frappe expects). Returns `None` for everyone else. |
 | `after_install`, `after_migrate` | `install.after_install`, `install.after_migrate` | The seven setup steps in 3.2. |
 | `has_permission` | `{"Project": "helper.project_has_permission"}` | Extra deny-only check on Project read (see [5.6](#56-the-project-has_permission-hook)). |
-| `doc_events` → `ToDo` `after_insert` / `on_update` / `on_trash` | `projects.sync_project_access_from_todo` | Desk "Assign To" on a Project adds or removes that person in the project team. Only acts when `reference_type == "Project"`. |
+| `doc_events` → `ToDo` `after_insert` / `on_update` / `on_trash` | `projects.sync_project_access_from_todo` | Desk "Assign To" on a Project adds or removes that person in the project team. Only acts when `reference_type == "Project"`. It ignores client contacts, so they never join a project team this way. |
 | `doc_events` → `User` `on_trash` | `helper.delete_portal_user_customer_rows` | Deleting a User removes its Portal User Customer rows first, so the delete is not blocked by links. This is a direct database delete, so the Portal User Customer `on_trash` logic (share revocation, Info comment) does not run. Frappe then deletes the user's DocShares itself. Frappe still refuses the delete while the user is named in a Portal Folder Share row, a project team, a Lead Architect or a team-lead field. Disable users instead (10.13). |
 | `doc_events` → `User` `on_update` | `helper.drop_customer_rows_without_role` | If the saved User no longer has the Portal Customer role, delete all its Portal User Customer rows (one by one, so their `on_trash` revokes shares). |
 | `doc_events` → `Customer` `on_trash` | `helper.delete_portal_user_customer_rows` | Deleting a Customer removes its rows first (the same direct delete). A Customer that is still set on any Project cannot be deleted (Frappe link check). |
@@ -363,6 +363,7 @@ Custom fields are created with `create_custom_fields(..., update=True)`.
 | `add_portal_customer_access` | Calls `ensure_portal_customer_access`, commits. | Historic. |
 | `make_project_files_private` | Finds `File` rows attached to a Project that are public and not folders. Sets `is_private = 1` and saves each one, so Frappe moves the bytes to `private/files` and rewrites `file_url`. Failures go to the Error Log. | Ran once. Files made public later are **not** fixed by it. |
 | `backfill_portal_user_customer` | For every User with `portal_linked_customer` set, creates a Portal User Customer row if the Customer exists and no row exists yet. | Needed when the multi-customer model arrived (PR #17). |
+| `remove_client_project_docshares` | For every User that holds the Portal Customer role and is a client contact (`helper.is_customer_only`, so staff are skipped), deletes every DocShare on a **Project** held by that user, Desk shares included. File DocShares are kept. | Added in the October 2026 bug-fix release. Older folder/file shares and team saves gave recipients a read share on the Project, which opened the whole Project record to a client. Shared files do not need it. Safe to run twice. |
 
 Frappe records each patch in **Patch Log**, so it runs at most once per site. On a fresh `install-app`, every existing patch is marked as done without running; only patches added later run on that site. (So on a new site `backfill_portal_user_customer` never runs; `after_install` and `after_migrate` do the setup work.) To add a patch: create `portal_app/patches/<name>.py` with an `execute()` function, add its dotted path to the end of `patches.txt`, and make it safe to run on any site (check before you change).
 
@@ -372,7 +373,7 @@ In Frappe v15 order:
 
 1. Pre-model-sync patches (none for this app).
 2. DocType JSON sync — the nine app DocTypes are created or updated.
-3. Post-model-sync patches — the four patches above, each once.
+3. Post-model-sync patches — the five patches above, each once.
 4. Scheduled jobs sync — registers the hourly `cron_revoke_expired_shares`.
 5. Fixtures sync — re-imports the "Project Portal" Workspace with force. **Desk edits to that workspace are lost.**
 6. `after_migrate` — the seven setup steps (custom fields put back, role, property setter, file types).
@@ -390,18 +391,19 @@ These come from ERPNext itself, not portal code, and often surprise people:
   - **Emails** — sends a **"Project Collaboration Invitation"** to each `Project User` row whose `welcome_email_sent` is 0.
 
   When the method is **Manual**, Progress and Status are skipped. The only exception: a Completed project is set to 100 %. Status is also skipped when the status is Cancelled. ERPNext switches a project to Manual by itself when a project with **no tasks** is marked Completed.
-- **ERPNext `Project.status` allows only Open, Completed and Cancelled.** The portal's Edit modal also offers "In Progress" and "On Hold". Saving one of them works like this:
-  - **a.** The Status step changes the value to Open or Completed, so Frappe's check of allowed Select values passes.
+- **ERPNext `Project.status` allows only Open, Completed and Cancelled.** The portal's Edit modal also offers "In Progress" and "On Hold" (portal-only statuses). `update_project` handles them like this:
+  - **a.** Just before the save, a portal-only status on the document is set to Open, so Frappe's check of allowed Select values passes. On any method other than Manual (portal projects default to Task Completion), the Status step then sets Open or Completed.
   - **b.** After the save, the portal writes the chosen value with `frappe.db.set_value`.
-  - **c.** The next normal save anywhere, or any change to one of the project's tasks (see "Task changes rewrite the Project too" below), resets it again.
+  - **c.** An `update_project` call that sends **no** status keeps a stored portal-only status the same way. This covers an Edit Project save that does not change Status (the modal sends only changed fields), the Portal Team (Gantt grouping) card and Assign Architect.
+  - **d.** Every other save resets it: Rename, a Kanban move, milestones, Save team, the Customer card, a save in Desk, a Desk Assign To or unassign on the project that changes the team (the ToDo hook then saves the Project, 3.3), and any change to one of the project's tasks (see "Task changes rewrite the Project too" below).
 
-  The portal does this for **any** requested status except Cancelled, whenever `Project.validate` changed it. So "Completed" chosen on a project whose tasks are not all done also sticks, and so does "Open" on a project at 100 %, until the next normal save.
+  The requested status is re-applied with `db.set_value` whenever the status after the save differs from it (changed by `Project.validate`, or set to Open by step a), unless it is Cancelled. So "Completed" chosen on a project whose tasks are not all done also sticks, and so does "Open" on a project at 100 %, until a save from step d. When no status is sent and the stored status is Open or Completed, ERPNext decides as usual (100 % still completes the project).
 
-  **On a Manual-method project the Status step is skipped, so the invalid value reaches Frappe's check and the save fails** with an error like 'Status cannot be "On Hold"'.
+  **On a Manual-method project** the Status step is skipped. Edit Project still works: step a lets the save pass, and step b writes the chosen status back. The other portal saves in step d, and saves in Desk, do not have step a, so while the stored status is "On Hold" or "In Progress" they fail with an error like 'Status cannot be "On Hold"'. There the ToDo hook's save also fails; it is only logged as "sync_project_access_from_todo failed" and the team is not changed. Task changes do not fail there: they leave a Manual project's status alone.
 - **`Task.validate`** refuses task dates after the project's Expected End Date. Setting a task to Completed forces progress to 100 and closes its assignments.
 - **Task changes rewrite the Project too.** `Task.on_update` and `Task.after_delete` call `Project.update_project()`. That runs `update_percent_complete()` and `update_costing()` and writes the result with `db_update()`. It does not run `Project.validate`, so no invitation emails are sent. What this means:
   - Creating, editing or deleting any task recalculates the project's progress. This covers the portal New task, the Tasks page Save, and task changes in Desk.
-  - The project's status becomes Completed at 100 % and Open otherwise. A forced "On Hold" or "In Progress" status (see the status point above) is lost at that moment.
+  - The project's status becomes Completed at 100 % and Open otherwise. A portal-only "On Hold" or "In Progress" status (see the status point above) is lost at that moment.
   - A Completed project goes back to Open when a new open task is added.
   - The exceptions are the same as for `Project.validate`: on a Manual-method project nothing changes (a Completed one stays at 100 %), and a Cancelled project keeps its status.
 - **The project title must be unique.** ERPNext's `Project.project_name` is a unique field. "New project" and "Rename project" with a title that another project already uses fail with Frappe's duplicate error. The portal does not check first. Use a different title (for example, add the project code). The project ID (`PROJ-####`) is separate and never changes.
@@ -461,7 +463,7 @@ All nine DocTypes are in module **Project Portal**, under `portal_app/project_po
 - Controller: none. All logic is in `files.py`.
 - The code checks whether this DocType exists. If it does not (site not migrated), sharing falls back to plain DocShare ("basic mode") and guest links do not work.
 
-> **Always revoke from the portal.** Ticking "Revoked" or deleting a row in Desk does not remove the DocShares the share created.
+> **Always revoke from the portal.** Ticking "Revoked" or deleting a row in Desk does not remove the DocShares the share created. A guest link (kind Link) needs its row: when the row is revoked, expired or deleted, both the guest listing and the guest download refuse the link. Revoking keeps the audit record; deleting loses it.
 
 ### 4.3 Portal Project Settings (Single)
 
@@ -570,7 +572,7 @@ This is the most important section. Read it before you change any endpoint.
 | **Team user** | Not staff and not a client contact, **and** either has the Projects User role or is on at least one project team (`user_can_use_portal()` and not `is_customer_only()`). | Every project (read-wide). | Only projects whose team they are on (write-narrow). |
 | **Team lead** | Named in `Department.portal_team_lead`. | Their own team(s) on the Teams page. | That team's name, office and members. |
 | **Folder-template editor** | System Manager, or a portal user who has the ERPNext role **Auditor** and does **not** hold the Portal Customer role. This uses the raw role check, so a Projects Manager who also holds Portal Customer is refused. | File tools page. | The company folder template. |
-| **Client contact** | Role Portal Customer **and** not staff (`is_customer_only`). | Projects whose Customer is in their Portal User Customer rows. In the file lists and downloads, only `06-CLIENT SUBMITTAL` of each (plus anything staff shared with them by name). | In the UI: only uploading into `06-CLIENT SUBMITTAL`, plus their own profile and password. |
+| **Client contact** | Role Portal Customer **and** not staff (`is_customer_only`). | Projects whose Customer is in their Portal User Customer rows. In the file lists and downloads, only `06-CLIENT SUBMITTAL` of each (plus anything staff shared with them by name). No Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat or portfolio figures, and no project team list (5.11). | In the UI: only uploading into `06-CLIENT SUBMITTAL`, plus their own profile and password. |
 | **Guest** | Not logged in. | Only a folder behind a valid guest link. | Nothing. |
 
 > **Portal Customer beats Projects User.** A login with both roles (and no staff role) is treated exactly like a client. Staff roles always win over Portal Customer.
@@ -592,6 +594,7 @@ This is the most important section. Read it before you change any endpoint.
 | `has_portal_staff_project_access(user)` | The user has System Manager or Projects Manager. |
 | `user_is_customer_portal_user(user)` | The user has the Portal Customer role (Administrator does too). |
 | `is_customer_only(user)` | Portal Customer **and not** staff. Use this, not the one above, to decide "client". |
+| `assert_not_customer_only(user)` | Throws a PermissionError "This part of the portal is for ATA staff." when `is_customer_only` is true. The gate for internal working tools: Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat, the portfolio dashboard and `ensure_project_subfolder`. Staff and team users pass. |
 | `user_can_use_portal(user)` | Not Guest, and (Portal Customer, or one of System Manager / Projects Manager / Projects User, or at least one `Project User` row). |
 | `get_allowed_project_names(user)` | *(returns a list)* No portal access → `[]`. Staff → every Project. Portal Customer role → Projects whose `customer` is in `get_portal_linked_customers()` (empty list → none). Everyone else → every Project. |
 | `assert_portal_user()` | Throws "You do not have access to the project portal." if `user_can_use_portal` is false. Baseline gate for data endpoints. |
@@ -613,7 +616,8 @@ This is the most important section. Read it before you change any endpoint.
 | `get_customer_contact_users(customer)` | *(list)* Logins that have a Portal User Customer row for this customer. |
 | `get_portal_linked_customer(user)` (singular) | The **display-only** User field. Used only to put the primary customer first. **Never use it for access.** |
 | `kanban_fieldname()` | `portal_kanban_stage` if that field exists, else `status`. |
-| `get_portal_settings_dict()` | *(dict)* Every Portal Project Settings field except the folder template table. It does not treat webhook URLs as secrets (see [9.1](#91-portal-project-settings)). |
+| `get_portal_settings_dict()` | *(dict)* Every Portal Project Settings field except the folder template table, **including the three upload webhook URLs**. Server-side use only (for example `files.upload_project_file`). Never return it to the browser. |
+| `get_public_portal_settings()` | *(dict)* `get_portal_settings_dict()` minus `frappe_drive_upload_webhook`, `google_drive_upload_webhook` and `bim_360_upload_webhook` (`_SERVER_ONLY_SETTINGS`). Every endpoint that sends settings to the browser uses this one: `get_portal_workspace_settings`, `files.list_project_files` and `dashboard.get_dashboard_data` (see [9.1](#91-portal-project-settings)). |
 | `ensure_portal_customer_role()`, `ensure_user_portal_linked_customer_field()` | Create the role or the User field on demand. The client-login endpoints call them, so a site that was not migrated still works. |
 
 > **Staff first, always.** Administrator holds every role, including Portal Customer. If you test "is this a customer?" before "is this staff?", you lock the superuser out. `can_manage_project` checks staff first on purpose (fixed in commit `2f8f80b`). Follow the same order in new code, and prefer `is_customer_only()`.
@@ -628,20 +632,22 @@ This is the most important section. Read it before you change any endpoint.
 | See project value (money) | All | Only where they are the Lead Architect | ❌ | ❌ |
 | Create project | ✅ | ✅ | Only if "Allow any portal user to create projects" is ticked (**ships ticked**) | ❌ |
 | Edit / rename / delete project, move on Kanban, link customer, add milestones, create tasks | ✅ | ✅ | team | ❌ |
-| Save the project team | ✅ | ✅ | Only as that project's Lead Architect. The Team card shows its controls only if they are also on the team (it follows `manageable_project_names`). | ❌ |
+| Open Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat | ✅ | ✅ | ✅ (changes still need "team" or assignee rights) | ❌ (router sends them to `/projects`; the endpoints refuse them) |
+| Save the project team | ✅ | ✅ | Only as that project's Lead Architect. The Team card shows its controls only if they are also on the team (it follows `manageable_project_names`). | ❌ (the portal refuses to add them to a team) |
 | Set the Gantt team (`portal_team`) | ✅ | Only as that project's Lead Architect | Only if on the team **and** that project's Lead Architect. But the team list is empty unless they lead a team (`get_teams` returns `[]` to other non-staff), so they can only clear it. In practice staff set it. | ❌ |
 | Reassign the Lead Architect when it names someone else | ✅ | ❌ (may set it while blank or themselves) | ❌ (same) | ❌ |
 | Upload files | ✅ | ✅ | ✅ | Only into `06-CLIENT SUBMITTAL` |
 | Rename folders, delete anyone's file, revoke anyone's share | ✅ | ✅ | team | ❌ |
 | Delete own uploaded file | ✅ | ✅ | ✅ | Not offered |
-| Share with a person / create guest link | ✅ | ✅ | ✅ | ❌ |
+| Share with a person / create guest link (never a contract file) | ✅ | ✅ | ✅ | ❌ |
+| Submit a file to the client (File Browser "Submit"; never a contract file) | ✅ | ✅ | team | ❌ |
 | Invite a new client login | ✅ (User-create permission) | Only with User-create permission | ❌ | ❌ |
 | Add an existing client login to a customer | ✅ | ✅ | ❌ | ❌ |
 | Remove a client login from a customer | ✅ | ✅ | team | ❌ |
 | Reset a client's password | ✅ | ❌ | ❌ | ❌ |
 | Routing rules: save / delete | ✅ | ✅ | ❌ (page is visible if they manage a project) | ❌ |
 | Company folder template | ✅ | Only with Auditor | Only with Auditor | ❌ |
-| Contracts (page and endpoints) | ✅ | ✅ | The menu and page are staff-only. The contract endpoints use manage rights, so the server also accepts "team" ([6.12](#612-portal_appapicontracts)). | ❌ |
+| Contracts (page and endpoints) | ✅ | ✅ | The menu and page are staff-only. The contract endpoints use manage rights, so the server also accepts "team" ([6.12](#612-portal_appapicontracts)). Contracts cannot be shared or submitted to the client by anyone. | ❌ |
 | Dashboard, Org Chart | ✅ | ✅ | ❌ | ❌ |
 | Teams page | ✅ all teams | ✅ all teams | Only as a team lead, own team | ❌ |
 
@@ -651,8 +657,7 @@ This is the most important section. Read it before you change any endpoint.
 
 - Only `Project.estimated_costing` counts as "value".
 - `list_projects` and `kanban_board` remove `estimated_costing` unless the project is value-visible, and remove `portal_project_manager` for non-staff.
-- `project_dashboard` (used by the Project page) removes **every Currency field** and `per_gross_margin` when the caller cannot see value.
-- `get_project` (whitelisted, not used by the SPA) removes only `estimated_costing` and `portal_project_manager`. Do not start using it from a screen before it strips money fields like `project_dashboard` does.
+- `project_dashboard` (used by the Project page) and `get_project` (used by the Edit Project modal to load Remarks) both remove **every Currency field** and `per_gross_margin` when the caller cannot see value. Both remove `portal_project_manager` for non-staff.
 - Dashboard totals, "Top Projects by Revenue" and AI Chat budget answers use `get_value_visible_project_names()`.
 - `update_project` writes `estimated_costing` only if the caller can see value, judged against the manager value being saved in the same call.
 - A Projects Manager who is not the Lead Architect of any project sees no money at all.
@@ -671,11 +676,11 @@ This is the most important section. Read it before you change any endpoint.
 
 | Path | Used by | Who checks access | Rules |
 |---|---|---|---|
-| `files.list_project_files` | Files hub, Project page, File Browser | Portal code | Excludes `Home/Contracts/...`. Clients get only the `06-CLIENT SUBMITTAL` subtree. |
+| `files.list_project_files` | Files hub, Project page, File Browser | Portal code | Excludes `Home/Contracts/...`. Clients get only the `06-CLIENT SUBMITTAL` subtree (an exact list of folder names, 5.8). |
 | `/api/method/portal_app.api.files.download_project_file?file_name=...` | "Open" links in the Files hub, File Browser, Project page | Portal code | File must be attached to a Project. Contracts folder needs manage rights. Clients: only files in `06-CLIENT SUBMITTAL`, or covered by a DocShare or an active user share. Streams the file inline. No Frappe Access Log entry. |
-| `files.download_files_zip` | "Download as ZIP" | Portal code | Same client rule; up to 500 files / 500 MB. |
+| `files.download_files_zip` | "Download as ZIP" | Portal code | Same client rule. Contract files named in the request are left out unless the caller has manage rights. Up to 500 files / 500 MB. |
 | Raw `/private/files/...` (the File's `file_url`) | "Open" on the Shared with me page, Contracts links, Desk | Frappe core | `File.has_permission` checks read permission on the attached Project. Projects Users have Project read in standard ERPNext, so they can open any project's private file. The portal adds no rules of its own on this path. |
-| Guest: `get_shared_folder_files` + `download_shared_file` | `/portal-app/shared-folder?token=...` | Portal code + signed token | Token signature and expiry. Both the listing and the download refuse a link whose Portal Folder Share row is revoked or expired. Always end a link with **Revoke** in the portal; never delete its row in Desk (10.9). Serves private files too. |
+| Guest: `get_shared_folder_files` + `download_shared_file` | `/portal-app/shared-folder?token=...` | Portal code + signed token | Token signature and expiry. Both the listing and the download fail closed: they refuse a link whose Portal Folder Share row is revoked, expired or missing. Always end a link with **Revoke** in the portal, so the audit record stays (10.9). Serves private files too. |
 
 > **Why the portal has its own download endpoint:** Portal Customers have no DocPerm on Project, so Frappe's `/private/files` check would give them 403 for files they are allowed to see. `download_project_file` applies the portal's own rules instead.
 
@@ -686,13 +691,14 @@ This is the most important section. Read it before you change any endpoint.
 ### 5.8 The client-folder rule
 
 - The constant is `files._CUSTOMER_VISIBLE_FOLDERS = ("06-CLIENT SUBMITTAL",)` (`files.py:514`). The Files hub uses the matching regex `/(^|\/)06-CLIENT SUBMITTAL$/`.
-- The client root is `Home/Attachments/<project>/06-CLIENT SUBMITTAL`. Downloads and uploads accept that exact path or anything under `<root>/`.
+- The client root is `Home/Attachments/<project>/06-CLIENT SUBMITTAL` (`_customer_folder_roots`). Downloads, uploads and folder lists accept that exact path or anything under `<root>/` (`_in_customer_roots`).
+- File list queries (`list_project_files`, `list_all_files`) filter clients with `folder in (...)` over `_customer_folder_names(projects)`: each client root plus every folder row below `<root>/`, as an exact list. No client rule matches on a bare name prefix, so a sibling such as `06-CLIENT SUBMITTAL - DRAFTS` never counts as the client folder.
 - **The name must match exactly.** Older projects may use `06 - CLIENT SUBMITTAL` (spaces around the dash).
   - Clients do not see that folder. They see "This project has no 06-CLIENT SUBMITTAL folder yet." File Browser "Submit" also fails.
   - The template will not add a correct folder, because `_ensure_folder` treats the two spellings as the same folder.
   - **Fix:** rename the old folder to `06-CLIENT SUBMITTAL` with the portal Rename button. Then re-create any shares on it (renames do not update shares).
 - `01-DOCUMENTS/01-CLIENT DATA` (title deeds, ID scans) is deliberately **not** client-visible.
-- **Do not create a folder next to `06-CLIENT SUBMITTAL` whose name starts with `06-CLIENT SUBMITTAL`** (for example `06-CLIENT SUBMITTAL OLD`). Keep old client material inside `06-CLIENT SUBMITTAL`, or give the folder a name that starts differently.
+- A folder next to `06-CLIENT SUBMITTAL` whose name only starts the same way (for example `06-CLIENT SUBMITTAL OLD`) is **not** client-visible, because every rule above matches the exact folder. Keep material meant for the client inside `06-CLIENT SUBMITTAL`.
 
 ### 5.9 Client access comes only from Portal User Customer
 
@@ -701,18 +707,21 @@ This is the most important section. Read it before you change any endpoint.
 - **Why permlevel 1?** Frappe's `User.share_with_self()` gives every user a **write DocShare on their own User record**. A normal (permlevel 0) field on User can therefore be edited by the user themselves. If access came from that field, a client could point it at another customer and see that customer's projects. Permlevel 1 fields are not covered by that self-share. Test: `test_editing_own_user_field_grants_nothing`.
 - **The `has_permission("User", "write")` trap.** `frappe.has_permission("User", "write")` without a document asks "is any User shared with me for write?". Because of the self-share, it is **true for everyone**. An older check used it and let any team member attach client logins. The code now uses staff roles or `frappe.has_permission("User", "create")` (`projects._can_link_customer_logins`). **Never use `has_permission("User", "write")` as a gate.**
 - Eligibility to be linked as a client: not Administrator/Guest, not staff, and **not listed in any project team**. A login that was once added to a project team cannot be linked until removed from every team.
+- The reverse also holds in the portal: it never puts a client contact on a project team. `sync_project_team` refuses them ("Client contacts cannot be added to the project team: <id>"), and Desk refuses them too: `projects.refuse_client_project_todo` (ToDo `validate`) blocks an "Assign To" on a Project for a client contact before Frappe can share the Project with them, and `projects.refuse_client_project_users` (Project `validate`) blocks a client login in the Users table. A client contact also cannot be set as Lead Architect. A project-team row is what gives internal users the "Team access" entry (the whole internal file tree) and a Project DocShare. `list_shared_with_me` never builds "Team access" for a client contact, even if an old row exists.
 - Removing the Portal Customer role in Desk (and saving) deletes every Portal User Customer row of that login and revokes its shares. Giving the role back restores nothing.
 
 ### 5.10 Sharing model
 
 **Share with a person** (`share_folder_with_user`, `share_file_with_user`):
 
-1. Caller must have project access and must not be a client.
+1. Caller must have project access and must not be a client. `share_file_with_user` also refuses any file in `Home/Contracts/...` ("Contract files cannot be shared."). Folder shares can only point at folders of the project tree, which never contains contracts.
 2. Recipient check (`_assert_valid_share_recipient`): a client contact is accepted only if the project's customer is one of theirs. Staff, members of this project's team and every other portal user are accepted. Anyone without portal access is refused.
 3. Expiry is clamped to 1–365 days (default 30).
 4. A Portal Folder Share row (kind User) is created, or an existing active one for the same person and folder is extended (the re-sharer becomes `created_by_user`).
-5. Read DocShares are added on the folder File, on every file attached to the project inside that folder (up to 2000, **only files that exist now**), and on the Project.
+5. Read DocShares are added on the folder File, on every file attached to the project inside that folder (up to 2000, **only files that exist now**), and on the Project. **The Project DocShare is skipped when the recipient is a client contact** (see the next box).
 6. Optional email (queued) with a link to `/portal-app/shared-with-me`.
+
+> **No Project DocShare for client contacts.** A DocShare on a Project lets the holder read the whole Project record through Frappe's own API (`/api/resource/Project/...`), every Currency field included. The portal's `has_permission` hook (5.6) cannot stop that: Frappe checks DocShares after the role and hook checks, and a share grants the access even when the hook said no. So portal code never gives a client contact a Project DocShare: shares skip it (step 5), and the portal never puts them on a project team, which is where team members get theirs (5.9). Shared files do not need it; the File DocShares and the portal download endpoints cover them. The patch `remove_client_project_docshares` (3.4) deleted the Project DocShares client contacts already held when it ran.
 
 > **Developer note: which Frappe sharing API to use.** Portal code writes shares with `frappe.share.add_docshare(doctype, name, user, read=1, flags={"ignore_share_permission": True}, notify=0)`. It removes them with `frappe.delete_doc("DocShare", name, ignore_permissions=True, flags={"ignore_share_permission": True})`. **Do not use `frappe.share.add()`.** It takes no flags and checks that the **caller** has "share" permission on the document. In stock Frappe only System Manager has that on File, and only HR User, HR Manager and Academics User have it on Department, so the call fails for Projects Managers and Projects Users. Always run the portal's own check before you bypass Frappe's.
 
@@ -720,7 +729,7 @@ This is the most important section. Read it before you change any endpoint.
 
 - Payload `{p: project, f: folder, iat, exp}` is signed (HMAC-SHA256, a keyed checksum that shows if the link was changed) using the site's `encryption_key` (or `secret`). No key → refused ("fails closed").
 - Expiry 1–365 days (default 7). URL: `/portal-app/shared-folder?token=...`. A Portal Folder Share row (kind Link) stores the token and URL.
-- Guests list every file in the folder subtree (private ones too) and download through `download_shared_file`, which re-checks the token and the file location.
+- Guests list every file in the folder subtree (private ones too) and download through `download_shared_file`, which re-checks the token, that the link's Portal Folder Share row exists and is active, and the file location. It fails closed: a missing row refuses the download, the same as the listing.
 - **A link can target the whole project** (`folder_path = "__project_root__"` or `"__root__"`, shown as "Project folder (all files)"). That link shows **every** file of the project to anyone who holds the URL, including private files and `01-DOCUMENTS/01-CLIENT DATA`. Tell staff to share a sub-folder instead.
 - `_resolve_share_folder` also accepts a hint that is only the end of a path (for example `INCOMING`) and returns the first folder whose path ends with it. API callers should pass the full File path.
 - Changing the site's `encryption_key` breaks every existing link.
@@ -736,18 +745,23 @@ This is the most important section. Read it before you change any endpoint.
 
 "Tenant isolation" here means: one client company must never see another client company's data. The code currently guarantees:
 
-- A client's project list, project page, file list, downloads, ZIPs, search, calendar, Kanban, tasks and every other list or count screen are all built from `get_allowed_project_names()`, which for a client is limited to their Portal User Customer rows.
+- A client's project list, project page, file lists, downloads, ZIPs, search and every other list or count they can reach are built from `get_allowed_project_names()`, which for a client is limited to their Portal User Customer rows.
 - Access comes only from Portal User Customer rows, which only System Manager can edit in Desk; the self-editable User field grants nothing.
-- Adding a login to a customer needs System Manager / Projects Manager or User-create permission. Staff and project-team members can never be linked as clients.
+- Adding a login to a customer needs System Manager / Projects Manager or User-create permission. Staff and project-team members can never be linked as clients, and the portal never adds a client contact to a project team (Save team refuses them; the ToDo hook ignores a Desk Assign To for them).
+- Portal code never gives a client contact a Project DocShare (5.10). The patch `remove_client_project_docshares` removed the ones held before.
+- Internal working tools refuse client contacts on the server with `helper.assert_not_customer_only()`: `list_tasks`, `update_task`, `list_task_comments`, `add_task_comment`, `kanban_board`, `calendar_events`, `gantt.get_gantt_data`, every `daily_task` endpoint, `ai_chat.ask` and `portfolio_dashboard`. The router also sends them away from those pages (8.4).
+- For a client, `get_project` and `project_dashboard` drop `users` (the project team) and every `owner` / `modified_by`, on the Project and on its child rows such as milestones (`projects._strip_internal_people`), and `project_dashboard` returns no tasks to them. `global_search` returns no tasks to them.
 - A share recipient who is a client must belong to the project's customer.
-- Clients cannot create shares or guest links.
-- Through `list_project_files`, `list_all_files`, `download_project_file` and `download_files_zip`, clients read only `06-CLIENT SUBMITTAL`, plus items staff shared with them by name.
-- Clients can upload only into `06-CLIENT SUBMITTAL`; their files are always private and never sent to external webhooks.
+- Clients cannot create, list or manage shares or guest links (`list_folder_shares` refuses them too).
+- Through `list_project_files`, `list_project_folders`, `list_all_files`, `download_project_file` and `download_files_zip`, clients read only `06-CLIENT SUBMITTAL` (an exact folder match, 5.8), plus items staff shared with them by name.
+- Clients can upload only into `06-CLIENT SUBMITTAL`; their files are always private and never sent to external webhooks. Outside `06-CLIENT SUBMITTAL` they cannot create folders: `ensure_project_subfolder` refuses them, and folder uploads (`prepare_folder_upload`, `relative_path`) are held to `06-CLIENT SUBMITTAL` by `_assert_upload_allowed`.
 - Removing a customer from a login (portal, Desk row delete, or role removal) revokes that login's shares on that customer's projects.
-- `list_shared_with_me` drops projects the client no longer has.
+- `list_shared_with_me` drops projects the client no longer has, and never gives a client "Team access" entries.
 - Raw `/private/files` URLs for other customers' projects are denied by the Project hook.
+- A guest link works only while its Portal Folder Share row exists and is active (5.7).
+- Portal endpoints never send the external-upload webhook URLs to the browser (`get_public_portal_settings`); only System Managers can read them, in Desk (9.1).
 
-Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. Further hardening items are tracked privately (see [13.2](#132-security-hardening-backlog)).
+Most of the customer-access rules are covered by `portal_app/tests/test_customer_portal_access.py`. The October 2026 bug-fix release added no automated tests for its new rules; re-test them by hand (11.3) until tests exist. Further hardening items are tracked privately (see [13.2](#132-security-hardening-backlog)).
 
 ---
 
@@ -765,7 +779,7 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 - **Always call changes with POST.** Frappe checks the CSRF token only on POST, PUT, DELETE and PATCH. Give every new endpoint that changes data `@frappe.whitelist(methods=["POST"])`.
 - **Errors.** User errors use `frappe.throw(_(...))`. Best-effort steps log to the **Error Log**. Most titles start with "Portal:", but not all (see [10.12](#1012-error-log-titles-written-by-the-app)).
 - **Do not call `can_manage_project()` in a loop.** For staff it re-reads the whole Project list each time. For others it runs one team query per call. Build the set once, as `projects._manageable_project_names()` does: staff → all, client → none, others → `set(helper.project_member_names())`.
-- **Undeclared arguments are dropped silently.** Frappe passes only the request fields the function declares (or all of them if it takes `**kwargs`). A new field sent by the SPA needs a new parameter, or it is ignored with no error (this is why Task quick-create loses `assigned_to`, 13.1). The exceptions: `upload_project_file` and `prepare_folder_upload` declare no arguments and read every field from `frappe.form_dict`; the ZIP uploads (`upload_project_files_zip`, `import_portal_folder_template_zip`) read the file itself from `frappe.request.files`.
+- **Undeclared arguments are dropped silently.** Frappe passes only the request fields the function declares (or all of them if it takes `**kwargs`). A new field sent by the SPA needs a new parameter, or it is ignored with no error (this is how Task quick-create lost `assigned_to` until the October 2026 fix added the parameter). The exceptions: `upload_project_file` and `prepare_folder_upload` declare no arguments and read every field from `frappe.form_dict`; the ZIP uploads (`upload_project_files_zip`, `import_portal_folder_template_zip`) read the file itself from `frappe.request.files`.
 - In the tables, "Who" means the server-side rule. The UI may hide a button more strictly.
 
 **Who column words:**
@@ -773,6 +787,7 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 | Word | Means the caller passes… |
 |---|---|
 | *Portal users* | `helper.assert_portal_user()` (or the same `user_can_use_portal()` check). **Client contacts included.** |
+| *Internal users* | `helper.assert_not_customer_only()`, plus portal access (checked, or implied because the data comes from `get_allowed_project_names()`). **Client contacts refused** with "This part of the portal is for ATA staff." |
 | *Project access* | `assert_project_access(project)`. **Client contacts included**, for their own customers' projects. |
 | *Manage rights* | `assert_manage_project(project)`: staff, or on the project team. Never a client. |
 | *Upload rights* | `files._assert_upload_allowed(project, target_folder)`: staff and team users with project access; client contacts only into `06-CLIENT SUBMITTAL`. |
@@ -794,7 +809,7 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 | `get_branding` | any, guest allowed | Anyone | `company_logo`, `company_name`, `company_tagline` from Portal Project Settings, plus `logo_width` / `logo_height` (these fields do not exist, so always 0). Used by the login page. |
 | `get_frontend_bundle` | any | Logged-in users | Returns `www.portal_app.get_bundle()` = `{js: [...], css: [...]}`. Used by the Desk page. |
 
-`portal_app.api.helper.get_portal_workspace_settings` (any logged-in user) returns `get_portal_settings_dict()` (5.3) for the sidebar logo/name/tagline. See [9.1](#91-portal-project-settings) for what must never go into these settings.
+`portal_app.api.helper.get_portal_workspace_settings` (any logged-in user, client contacts included) returns `get_public_portal_settings()` (5.3) for the sidebar logo/name/tagline: every setting except the three upload webhook URLs. See [9.1](#91-portal-project-settings).
 
 ### 6.3 `portal_app.api.projects` — projects, tasks, teams, customers, client logins
 
@@ -804,33 +819,35 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 |---|---|---|---|
 | `get_capabilities` | Any logged-in user (not Guest) | Capability flags (list in [8.6](#86-the-capabilities-payload)). | Clients get empty lists and false flags. |
 | `list_projects(sort_by, sort_order, status, customer, search)` | Portal users | Projects in the allowed list; search is LIKE on name, ID and `portal_project_code`; fields from an allow-list; sort via an allow-list; limit 500. | Money and Lead Architect stripped as in 5.5. The UI has no customer filter or sort control. |
-| `project_dashboard(name)` | Project access (clients too) | Project `as_dict()` minus Currency fields / `per_gross_margin` when not value-visible, minus `portal_project_manager` for non-staff; the 50 most recent Tasks; `kanban_stage`; `customer_display_name`. | Used by the Project page. |
-| `get_project(name)` | Project access | Project `as_dict()` minus `estimated_costing` / `portal_project_manager`. | Not used by the SPA. |
-| `portfolio_dashboard` | Any logged-in user | Counts by status and Kanban stage, open task count, value total over value-visible projects. | Used by the Dashboard. |
-| `kanban_board` | Portal users | Projects grouped by `portal_kanban_stage` (or status). Column order Planning, Active, On Hold, Review, Done, Open, Completed, Cancelled, Unknown, then others. Limit 500. | Only stages that hold a project get a column. |
-| `calendar_events(search, type_filter, project)` | Portal users | Project and task date ranges as calendar events, plus a project list. Tasks limited to 500. | Milestones are not on the calendar. |
+| `project_dashboard(name)` | Project access (clients too) | Project `as_dict()` minus Currency fields / `per_gross_margin` when not value-visible, minus `portal_project_manager` for non-staff; the 50 most recent Tasks; `kanban_stage`; `customer_display_name`. For a client contact it also drops `users` (the team), `owner` and `modified_by`, and returns no tasks. | Used by the Project page. |
+| `get_project(name)` | Project access (clients too) | Project `as_dict()` with the same stripping as `project_dashboard`: every Currency field and `per_gross_margin` when not value-visible, `portal_project_manager` for non-staff, and `users` / `owner` / `modified_by` for a client contact. | Used by the Edit Project modal to load Remarks (`notes`) and, for staff, the Lead Architect. |
+| `portfolio_dashboard` | Any logged-in user except client contacts (`assert_not_customer_only`) | Counts by status and Kanban stage, open task count, value total over value-visible projects. | Used by the Dashboard. |
+| `kanban_board` | Internal users | Projects grouped by `portal_kanban_stage` (or status). Column order Planning, Active, On Hold, Review, Done, Open, Completed, Cancelled, Unknown, then others. Limit 500. | Only stages that hold a project get a column. |
+| `calendar_events(search, type_filter, project)` | Internal users | Project and task date ranges as calendar events, plus a project list. Tasks limited to 500. | Milestones are not on the calendar. |
 
 **Create, edit, delete**
 
 | Endpoint | Who | Writes | Side effects |
 |---|---|---|---|
 | `create_project(**kwargs)` | `assert_can_create_project` | New Project (`naming_series PROJ-.####`, default company, stage default Planning, dates, customer, cost, status, portal fields); creator added to the team. | Builds the folder tree (`files.ensure_project_folders`). ERPNext emails the creator a Project Collaboration Invitation. Does **not** apply the Lead Architect or value checks. The title must be unique (3.6). |
-| `update_project(project, **kwargs)` | Manage rights + `_assert_may_set_project_manager` + `_assert_may_set_team` | Title, status, dates, progress, notes, Lead Architect, team, stage, office, phase, server links, milestone summary; cost only if value-visible. | After the save, re-applies the requested status with `db.set_value` whenever `Project.validate` changed it and it is not Cancelled. This includes "Completed" on a project whose tasks are not all done, and "Open" at 100 %. The next normal save resets it again (3.6). A milestone label without a date is refused. |
+| `update_project(project, **kwargs)` | Manage rights (any member of the project team, or staff) + `_assert_may_set_project_manager` + `_assert_may_set_team` | Only the fields sent: title, status, dates, progress, notes, Lead Architect, Gantt team, stage, office, phase, server links, milestone summary; cost only if value-visible. | **Lead Architect:** `_drop_unchanged_project_manager` first removes `portal_project_manager` from the call when it equals the current value, or when it is blank and the caller is not staff (non-staff are never shown the field). So `_assert_may_set_project_manager` only runs on a real change. **Status:** a portal-only status is set to Open just for the save; afterwards the requested status is re-applied with `db.set_value` whenever the status after the save differs from it (changed by `Project.validate`, or the Open set just for the save, 3.6 step a), unless it is Cancelled. With no status in the call, a stored portal-only status (On Hold, In Progress) is re-applied the same way. This includes "Completed" on a project whose tasks are not all done, and "Open" at 100 %. Other saves reset it (3.6). A milestone label without a date is refused. |
 | `rename_project(project, project_name)` | Manage rights | `project_name` (≥ 2 characters). The ID never changes. | Save runs `Project.validate`. The title must be unique (3.6). |
 | `set_project_stage(project, stage)` | Manage rights | `portal_kanban_stage` (validated against Select options). | |
 | `delete_project(project)` | Manage rights | `frappe.delete_doc("Project", ignore_permissions=True)`. | Blocked if anything links to the project (Tasks, Timesheets, Portal Folder Share rows — revoked ones too). On success Frappe deletes every File attached to the Project (documents **and** contracts) and removes their contents from disk, unless another File row uses the same content. Frappe's Deleted Document list keeps a copy of each File record but not the file contents, so the files cannot be restored from there. Take a backup first. Folder rows `Home/Attachments/<project>/…` are not attached, so they remain as empty folders. Remove them in the File Manager if wanted. |
 | `add_project_milestone(project, title, milestone_date)` | Manage rights | Appends a Portal Project Milestone; both values required. | Re-syncs `portal_upcoming_milestone` / `portal_milestone_date` (soonest on/after today, else the latest past one). Commits. |
 | `delete_project_milestone(project, row_name)` | Manage rights | Removes the row ("Milestone not found." if absent). | Re-syncs the summary. Commits. |
 
+> **The Edit Project modal (`Projects.vue` `openEdit` / `submitEdit`).** The Projects list carries no Remarks, so opening the modal calls `get_project` to load `notes` (and, for staff, the Lead Architect). The modal keeps a copy of the form as opened and sends `update_project` **only the fields the user changed**. `Project.notes` is a Text Editor field that Desk stores as HTML: the modal shows it as plain text and sends it back as one `<p>` paragraph per line (`htmlToText` / `textToHtml`). Formatting made in Desk (bold, lists) is lost when someone edits Remarks in the portal. A save that does not touch Remarks leaves them as they are.
+
 **Project team**
 
 | Endpoint | Who | What it does |
 |---|---|---|
-| `sync_project_team(project, users)` | `assert_manage_project_team` (staff or the project's Lead Architect) | Every user must exist and be enabled. Deletes **all** `Project User` rows and re-adds the list. Then mirrors the list into Desk Assign To: a read DocShare on the Project for each new member, `assign_to.add` for additions, `assign_to.remove` (ToDo → Cancelled) for removals. ERPNext then re-sends the Project Collaboration Invitation to every member (the rows are new). |
-| `sync_project_access_from_todo` (doc_event, not an endpoint) | Anyone assigning in Desk | Only for `reference_type == "Project"`. Open ToDo → add the user to the team. Cancelled/Closed or deleted ToDo → remove them, if they have no other open ToDo on that project. Errors are logged ("sync_project_access_from_todo failed"), never raised. |
+| `sync_project_team(project, users)` | `assert_manage_project_team` (staff or the project's Lead Architect) | Every user must exist and be enabled, and must not be a client contact ("Client contacts cannot be added to the project team: <id>", 5.9). Deletes **all** `Project User` rows and re-adds the list. Then mirrors the list into Desk Assign To: a read DocShare on the Project for each new member, `assign_to.add` for additions, `assign_to.remove` (ToDo → Cancelled) for removals. ERPNext then re-sends the Project Collaboration Invitation to every member (the rows are new). |
+| `sync_project_access_from_todo` (doc_event, not an endpoint) | Anyone assigning in Desk | Only for `reference_type == "Project"`. Does nothing when the assignee is a client contact. Open ToDo → add the user to the team. Cancelled/Closed or deleted ToDo → remove them, if they have no other open ToDo on that project. Errors are logged ("sync_project_access_from_todo failed"), never raised. |
 | `get_portal_users` | Staff only (others get `[]`) | Up to 200 enabled users (not Guest/Administrator) for the Lead Architect dropdown. **Client Website Users are included.** |
-| `search_portal_users(txt, customer_portal)` | Portal users who are not clients | Up to 25 enabled users, matched on name, email or full name. `customer_portal=1` limits the list to Website Users. Never pick a client login into a project team: it then gets ERPNext invitation emails and can no longer be linked to a customer (5.9). |
-| `search_assignable_users(query)` | Same | Calls `search_portal_users`. Used by Tasks and Daily Task. |
+| `search_portal_users(txt, customer_portal, staff_only)` | Portal users who are not clients | Up to 25 enabled users, matched on name, email or full name. `customer_portal=1` limits the list to Website Users; `staff_only=1` limits it to System Users. "Save team" refuses client contacts, but a Website User who is not yet linked to a customer can still be added. Do not do that: they then get ERPNext invitation emails and can no longer be linked to a customer (5.9). |
+| `search_assignable_users(query)` | Same | Calls `search_portal_users(query, staff_only=1)`, so it lists **System Users only** (internal ATA logins; client logins are Website Users). Despite the parameter name, this is not the guide's "staff" (System Manager / Projects Manager). Used by the assignee pickers of Tasks → New task and Daily Task. |
 | `search_projects(query)` | Portal users | Up to 25 projects the caller can **manage**. Used by Task quick-create. |
 
 **Customer link**
@@ -863,11 +880,13 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 
 | Endpoint | Who | What it does |
 |---|---|---|
-| `list_tasks(status, priority, project, search, only_mine)` | Portal users (clients read-only) | Tasks in allowed projects, up to 500, plus summary (total / open / overdue) and up to 8 of "my open tasks". |
-| `update_task(task, status, priority, progress, exp_start_date, exp_end_date)` | Not a client; manage rights on the project **or** assigned to the task | Saves the Task (progress 0–100). ERPNext date rules apply. |
-| `list_task_comments(task)` | Project access | Up to 200 Comment rows, oldest first, with author name and image. |
-| `add_task_comment(task, content)` | Not a client; manage rights or assignee | Inserts a Comment (up to 5000 characters). Commits. Visible on the Desk Task timeline. |
-| `create_task(project, subject, status, priority, exp_end_date)` | Manage rights | Subject ≤ 140 characters, status/priority allow-listed (default Open / Medium). Commits. **The UI also sends `assigned_to`, which this function does not accept, so tasks are created unassigned.** |
+| `list_tasks(status, priority, project, search, only_mine)` | Internal users | Tasks in allowed projects, up to 500, plus summary (total / open / overdue) and up to 8 of "my open tasks". |
+| `update_task(task, status, priority, progress, exp_start_date, exp_end_date)` | Internal users with manage rights on the project **or** assigned to the task | Saves the Task (progress 0–100). ERPNext date rules apply. |
+| `list_task_comments(task)` | Internal users with project access | Up to 200 Comment rows, oldest first, with author name and image. |
+| `add_task_comment(task, content)` | Internal users with manage rights or assignee | Inserts a Comment (up to 5000 characters). Commits. Visible on the Desk Task timeline. |
+| `create_task(project, subject, status, priority, exp_end_date, assigned_to)` | Manage rights | Subject ≤ 140 characters, status/priority allow-listed (default Open / Medium). `assigned_to` is optional. When given it must be an enabled System User ("Assign the task to an active ATA staff login.") and not a client contact ("Tasks cannot be assigned to customer portal users."). After the insert, if the assignee cannot read the Task, it adds a read DocShare for them with `add_docshare(..., flags={"ignore_share_permission": True})`, then calls `assign_to.add` (ToDo + Frappe's assignment notification). Commits. Returns `assigned_to`. |
+
+> **Why the pre-share in `create_task`.** `assign_to.add` shares the document with an assignee who cannot read it, and that share step checks the **caller's** own share permission on Task. In stock ERPNext only Projects User has share on Task, so a Projects Manager or System Manager without Projects User has none, and the whole create would roll back. The pre-share with the supported bypass flag avoids this, the same way `_sync_project_assignment` does for Projects (5.10 developer note). The Tasks page shows the server's refusal text (from `_server_messages`) in its error toast.
 
 > **Completed tasks lose their assignees.** When a task is set to Completed, ERPNext closes its assignments, so `Task._assign` is emptied. An assignee who is not on the project team then loses the right to edit, reopen or comment on it, and the task leaves "Only my tasks" and "Assigned to you (open)". A project team member or staff must reopen it.
 
@@ -879,11 +898,11 @@ Most of these are covered by `portal_app/tests/test_customer_portal_access.py`. 
 |---|---|---|
 | `ensure_project_folders(project)` (internal) | Called by other code | Finds the Attachments folder, creates `Home/Attachments/<project>`. **Only if the project has no sub-folders yet**, walks the template and creates every folder. Otherwise just reports the existing tree. |
 | `get_project_folders` / `get_project_folders_bulk` (internal) | — | Read-only folder tree (never creates). |
-| `list_project_folders(project)` | Project access | Read-only tree. Not used by the SPA. |
-| `list_project_files(project)` | Project access | All Files attached to the Project (no limit), excluding `Home/Contracts/%`, plus folders and the Portal Project Settings dict. Clients: only the `06-CLIENT SUBMITTAL` subtree. Adds the `uploaded_by_client` flag. |
+| `list_project_folders(project)` | Project access | Read-only tree. Clients get only the `06-CLIENT SUBMITTAL` sub-folders. Not used by the SPA. |
+| `list_project_files(project)` | Project access | All Files attached to the Project (no limit), excluding `Home/Contracts/%`, plus folders and the public settings dict (`get_public_portal_settings`, no webhook URLs). Clients: only files whose folder is in `_customer_folder_names` (the `06-CLIENT SUBMITTAL` subtree, 5.8), and only those sub-folders. Adds the `uploaded_by_client` flag. |
 | `rename_project_subfolder(project, folder_path, new_folder_name)` | Manage rights | Renames one folder at any depth (not the root). New name: single segment, no `/`, `\` or `..`, must not exist. Uses `frappe.rename_doc`. Does **not** update Portal Folder Share paths or guest tokens. |
 | `delete_project_file(file_name)` | Manage rights, **or** the file's owner | Deletes a non-folder File attached to a Project. Folders cannot be deleted here. |
-| `ensure_project_subfolder(project, relative_path)` | Project access | Builds folders if needed and creates the given path. Commits. Used by Mirror routing. |
+| `ensure_project_subfolder(project, relative_path)` | Project access, not a client (`assert_not_customer_only`) | Builds folders if needed and creates the given path. Commits. Used by Mirror routing. |
 
 **Uploads**
 
@@ -908,23 +927,23 @@ Blocked extensions (`_BLOCKED_UPLOAD_EXTENSIONS`): `.html .htm .xhtml .shtml .xh
 | Endpoint | Who | What it does |
 |---|---|---|
 | `download_project_file(file_name)` — SPA sends GET | Project access + client folder rule; Contracts needs manage rights | Streams one file inline (5.7). |
-| `download_files_zip(project, file_names \| folder_path)` — SPA sends POST form data | Project access; clients only readable files | In-memory ZIP `<project>-files.zip`, max 500 files / 500 MB. Files the caller may not read, or that belong to another project, are skipped silently. A file whose content cannot be read is skipped and logged ("Portal: zip include ..."). With `folder_path`, at most 1000 file rows are read before the 500-file cap. If the real bytes pass 500 MB (because `file_size` in the database was too low), the remaining files are left out with no message, and each is logged as "Portal: zip include …". Check the Error Log when a user reports a short ZIP. |
-| `submit_to_client_submittal(file_name, project)` | Project access, not a client | Copies a file into the top of `06-CLIENT SUBMITTAL` as `NN_<today>_<original name>` (private). Makes it visible to the project's client contacts. NN = the number of files directly in `06-CLIENT SUBMITTAL` (client uploads included) + 1. So NN is not a submission counter: it can skip numbers, and it can repeat after a file there is deleted. |
+| `download_files_zip(project, file_names \| folder_path)` — SPA sends POST form data | Project access; clients only readable files; contract files only with manage rights | In-memory ZIP `<project>-files.zip`, max 500 files / 500 MB. Files the caller may not read, contract files named by a caller without manage rights, and files that belong to another project are skipped silently. A file whose content cannot be read is skipped and logged ("Portal: zip include ..."). With `folder_path`, at most 1000 file rows are read before the 500-file cap. If the real bytes pass 500 MB (because `file_size` in the database was too low), the remaining files are left out with no message, and each is logged as "Portal: zip include …". Check the Error Log when a user reports a short ZIP. |
+| `submit_to_client_submittal(file_name, project)` | Manage rights (project team or staff), not a client; never a contract file ("Contract files cannot be submitted to the client.") | Copies a file into the top of `06-CLIENT SUBMITTAL` as `NN_<today>_<original name>` (private). The File Browser shows **Submit** only on projects in `manageable_project_names`, and never to client contacts. Makes it visible to the project's client contacts. NN = the number of files directly in `06-CLIENT SUBMITTAL` (client uploads included) + 1. So NN is not a submission counter: it can skip numbers, and it can repeat after a file there is deleted. |
 
 **Sharing**
 
 | Endpoint | Who | What it does |
 |---|---|---|
-| `share_folder_with_user(project, folder_path, user_id, expires_days=30, notify=0)` | Project access, not a client | See 5.10. Returns share details and DocShare count. |
-| `share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)` | Same | Same for one file (DocShares on the File and the Project). |
+| `share_folder_with_user(project, folder_path, user_id, expires_days=30, notify=0)` | Project access, not a client | See 5.10. Returns share details and DocShare count. No Project DocShare when the recipient is a client contact. |
+| `share_file_with_user(project, file_name, user_id, expires_days=30, notify=0)` | Same | Same for one file (DocShares on the File and, unless the recipient is a client contact, the Project). Refuses contract files ("Contract files cannot be shared."). |
 | `create_folder_share_link(project, folder_path, expires_days=7)` | Same | Guest link (5.10). Each call makes a new Link row. Creating a link does **not** replace the earlier one. The Share dialog shows only the newest active link (after you revoke it, the next older one appears). Older links keep working until they expire or are revoked. To kill a leaked link, Revoke it, and check the Manage shares page for other links on the same folder. |
-| `list_folder_shares(project, folder_path?)` — SPA sends GET | Project access | Active shares on a folder/file (up to 200). Basic mode: plain DocShares on the folder. |
+| `list_folder_shares(project, folder_path?)` — SPA sends GET | Project access, not a client ("Customer portal users cannot share files.") | Active shares on a folder/file (up to 200). Basic mode: plain DocShares on the folder. The answer holds recipients' emails and guest-link URLs, which is why clients are refused. |
 | `revoke_folder_share(share_name)` — SPA sends POST | Creator or manage rights | 5.10. |
 | `extend_folder_share(share_name, expires_days=30)` | Creator or manage rights, not a client | Sets a new expiry from now. **No screen calls it.** Cannot extend a guest link past the token's own expiry. |
-| `list_shared_with_me` — SPA sends GET | Any logged-in user except Guest/Administrator | Per project: shares to me, Desk shares, "Team access" entries, "Files I uploaded". Clients re-filtered to current customers. Limits: 500 portal share rows, 2000 DocShares, 400 files per entry. Expired rows are hidden before the hourly job runs. "Files I uploaded" is added only for projects already in the list (shared or team access), so a client who uploaded but has no shares sees nothing here. |
+| `list_shared_with_me` — SPA sends GET | Any logged-in user except Guest/Administrator | Per project: shares to me, Desk shares, "Team access" entries, "Files I uploaded". Clients re-filtered to current customers, and never given "Team access" entries (even if an old Project User row exists). Limits: 500 portal share rows, 2000 DocShares, 400 files per entry. Expired rows are hidden before the hourly job runs. "Files I uploaded" is added only for projects already in the list (shared or team access), so a client who uploaded but has no shares sees nothing here. |
 | `list_managed_shares` — SPA sends GET | Users who manage at least one project, except Administrator, who always gets an empty list (test with a named System Manager login) | Every folder and file of those projects with user grants and links (up to 50 000 files). Returns `not_admin` for other users who manage nothing. |
 | `get_shared_folder_files(token)` | **Guest** | Checks the token and that its share row is still active, records the open (the counter stays at 1, 13.1), and lists the files. Each file's link goes through `download_shared_file`, never the raw file URL. |
-| `download_shared_file(token, file)` | **Guest** | Re-verifies and streams one file from inside the shared folder. |
+| `download_shared_file(token, file)` | **Guest** | Re-verifies the token, requires the link's share row to exist and be active (fails closed, like `get_shared_folder_files`), and streams one file from inside the shared folder. |
 | `cron_revoke_expired_shares` (scheduler) | — | Hourly expiry (5.10). |
 | `revoke_user_shares_on_projects(user, projects)` (internal) | — | Used when a login loses a customer. |
 
@@ -936,7 +955,7 @@ Blocked extensions (`_BLOCKED_UPLOAD_EXTENSIONS`): `.html .htm .xhtml .shtml .xh
 | `save_folder_route_rule(...)` | Staff only | Create/update; Cross-route needs a classification. The portal page sends no `notes`, so saving from the portal wipes them. Commits. |
 | `delete_folder_route_rule(rule_name)` | Staff only | Deletes. |
 | `list_folder_template_paths` | Portal users | Template paths and their parents (suggestions). |
-| `list_all_files(...)` | Logged-in users (scoped) | Paged cross-project file search. **Not used by any screen.** `sub_category`, `document_type` and `tags` are accepted but ignored. |
+| `list_all_files(...)` | Logged-in users (scoped) | Paged cross-project file search. **Not used by any screen.** `sub_category`, `document_type` and `tags` are accepted but ignored. Clients: only files in `_customer_folder_names` of their projects (5.8). Other non-staff: contract files (`Home/Contracts/%`) left out. |
 
 ### 6.5 Customer portal flows, in plain steps
 
@@ -1015,7 +1034,7 @@ Blocked extensions (`_BLOCKED_UPLOAD_EXTENSIONS`): `.html .htm .xhtml .shtml .xh
 
 ### 6.9 `portal_app.api.dashboard`
 
-`get_dashboard_data` — staff only. Returns portfolio counts, my open tasks (≤ 8), projects ending in 14 days, budget health (value-visible projects only), a 10-project preview with planned %, team member count (enabled System Users), 30-day trends, "sales this month" (sum of `estimated_costing` of value-visible projects **created** this month — not invoices), top 5 by value, recent activity (latest 8 of file uploads and tasks changed in 14 days), and the settings dict.
+`get_dashboard_data` — staff only. Returns portfolio counts, my open tasks (≤ 8), projects ending in 14 days, budget health (value-visible projects only), a 10-project preview with planned %, team member count (enabled System Users), 30-day trends, "sales this month" (sum of `estimated_costing` of value-visible projects **created** this month — not invoices), top 5 by value, recent activity (latest 8 of file uploads and tasks changed in 14 days), and the public settings dict (`get_public_portal_settings`, no webhook URLs).
 
 **Card definitions.** The status buckets are worked out in `Dashboard.vue` from `by_kanban` (the Kanban stage):
 
@@ -1033,7 +1052,7 @@ The Recent Projects status pill uses a different map: Planning and Review = On T
 
 ### 6.10 `portal_app.api.gantt`
 
-`get_gantt_data(office, team)` — portal users. It returns the allowed projects, grouped by their Gantt team (`Project.portal_team`), with their milestones (Portal Project Milestone rows, read in one batch query).
+`get_gantt_data(office, team)` — internal users (client contacts are refused by `assert_not_customer_only`). It returns the allowed projects, grouped by their Gantt team (`Project.portal_team`), with their milestones (Portal Project Milestone rows, read in one batch query).
 
 - **Teams** = Departments directly under "All Departments" that have a `portal_office`. Teams with no visible projects are left out.
 - **"Unassigned"** holds every project whose Gantt team is empty, is a sub-department, or is a Department with no office. With an office filter, projects of other offices' teams also land here ([13.1](#131-behaviour-bugs-found-by-reading-the-code)). With a team filter, "Unassigned" is not shown.
@@ -1044,11 +1063,15 @@ The Recent Projects status pill uses a different map: Planning and Review = On T
 
 Reminders are Private `Event` records with `is_portal_daily_task = 1` and `portal_assigned_to`.
 
+Every endpoint below first runs `_require_portal_user()`: portal access **and** not a client contact (`assert_not_customer_only`).
+
 | Endpoint | Who | What it does |
 |---|---|---|
-| `get_tasks(start_date, end_date)` | Portal users | Own reminders in the range. Throws "Daily Task is not set up on this site yet. Run `bench migrate`…" if the Event fields are missing. |
-| `create_task(title, date, time, assigned_to, color)` | Portal users; assigning to someone else needs staff | Inserts the Event (owner = creator). |
-| `update_task`, `toggle_task`, `delete_task` | Assignee or owner | Edit title/time, toggle Open/Completed, delete. |
+| `get_tasks(start_date, end_date)` | Internal users | Own reminders in the range. Throws "Daily Task is not set up on this site yet. Run `bench migrate`…" if the Event fields are missing. |
+| `create_task(title, date, time, assigned_to, color)` | Internal users; assigning to someone else needs staff | Inserts the Event (owner = creator). The page's assignee picker (`search_assignable_users`) lists System Users only. |
+| `update_task`, `toggle_task`, `delete_task` | Internal users who are the assignee or owner | Edit title/time, toggle Open/Completed, delete. |
+
+**Dates.** `DailyTask.vue` builds its date keys (`YYYY-MM-DD`) from the browser's **local** calendar date (`fmt()` uses `getFullYear` / `getMonth` / `getDate`). It used `toISOString()` (UTC) before the October 2026 fix, which in Saudi time put "TODAY" on the next day's tile. Do not use `toISOString()` for local dates.
 
 **Ownership.** `create_task` inserts `event_type = Private` with `owner` = the creator and `portal_assigned_to` = the target. Frappe shows a Private Event only to its owner. So a reminder a manager assigns to someone else:
 
@@ -1075,11 +1098,17 @@ Contracts are private Files attached to the Project, stored under `Home/Contract
 - Contracts are normal Project attachments. The Desk Project form's attachment sidebar lists them for every Desk user who can read the Project (all Projects Users in stock ERPNext), and their raw `/private/files` URLs open for them (5.7).
 - The Desk Project timeline also names every contract file ("Attachment" comments, 3.6).
 - **Rule for new code:** any query that lists Files attached to a Project must add `folder not like 'Home/Contracts/%'`, unless it is meant to be manager-only.
-- These existing portal screens also list contract file names, because they read every File attached to the Project: the Manage shares page (under "Project folder (all files)"; `list_managed_shares`), the Dashboard "Recent Activity" (`dashboard.get_dashboard_data`) and ATA AI Chat's recent-files answers (`ai_chat._scoped_file_rows`). Fix them to the rule above when you next touch them.
+- In the portal, contracts are kept out of these paths:
+  - `list_project_files` (Files hub, Project page, File Browser): always excluded.
+  - `share_file_with_user`: refused for everyone ("Contract files cannot be shared."). Folder shares and guest links cannot reach them (the Contracts tree is not a project folder).
+  - `submit_to_client_submittal`: refused for everyone ("Contract files cannot be submitted to the client.").
+  - `download_files_zip` by file name: skipped unless the caller has manage rights (the same rule as `download_project_file`).
+  - `list_all_files` and ATA AI Chat's recent-files and file-count answers (`ai_chat._scoped_file_rows`, `_scoped_file_count`): excluded unless the caller is staff.
+- These existing portal screens still list contract file names, because they read every File attached to the Project: the Manage shares page (under "Project folder (all files)"; `list_managed_shares`) and the Dashboard "Recent Activity" (`dashboard.get_dashboard_data`, staff only). Fix them to the rule above when you next touch them.
 
 ### 6.13 `portal_app.api.ai_chat`
 
-`ask(question)` (SPA sends GET) — portal users. **This is not AI.** There is no model, provider or API key. It matches keywords (counts, active/completed lists, recent files, file count, task counts, budget, name search) and runs fixed queries on the caller's allowed projects. Budget answers use value-visible projects only.
+`ask(question)` (SPA sends GET) — internal users; client contacts are refused (`assert_not_customer_only`), because its file answers cover every folder of a project, not only `06-CLIENT SUBMITTAL`. **This is not AI.** There is no model, provider or API key. It matches keywords (counts, active/completed lists, recent files, file count, task counts, budget, name search) and runs fixed queries on the caller's allowed projects. Budget answers use value-visible projects only. Recent-files and file-count answers leave out contract files unless the caller is staff.
 
 **How a question is matched.** The words are checked in this order. The first match wins. All checks are plain text matches on the lower-cased question, so a word inside another word also counts.
 
@@ -1097,7 +1126,7 @@ Contracts are private Files attached to the Project, stored under `Home/Contract
 
 `global_search(query)` — logged-in users; queries of 2 or more characters (shorter ones return nothing).
 
-- Up to 5 projects and 5 tasks, within allowed projects. Projects are matched on the title `project_name`, then on `portal_project_code` (the project ID is not searched). Tasks are matched on the subject.
+- Up to 5 projects and 5 tasks, within allowed projects. Projects are matched on the title `project_name`, then on `portal_project_code` (the project ID is not searched). Tasks are matched on the subject. Client contacts get no tasks.
 - Plus up to 5 teams: Departments with an office, at any level, not limited by project. Teams are hidden from any holder of the Portal Customer role (which includes Administrator).
 - Where a result leads in the header: a project opens `/projects/<ID>`. A task opens `/tasks` (the unfiltered list, not the task itself). A team opens `/teams`, and the guard sends anyone who is neither staff nor a team lead back to `/projects`. Users may report the last two as bugs.
 
@@ -1127,7 +1156,7 @@ Contracts are private Files attached to the Project, stored under `Home/Contract
 | **Password reset** | System Manager → "Email them a reset link" | `User.reset_password(send_email=False)` then `send_login_mail("Password Reset", "password_reset" or System Settings reset template, now=False)` | Frappe reset link; `redirect_url` set to `/portal-app` first |
 | **Folder/file shared with you** | Share dialog "Email the user when I add them" | `frappe.sendmail(now=False)`; subject `"You were granted access to a folder (file) on <project title>"` | `/portal-app/shared-with-me` |
 | **Project Collaboration Invitation** | ERPNext, on every Project save with new team rows (including every "Save team") | ERPNext `Project.send_welcome_email` | ERPNext's own |
-| **Assignment notifications** | Assign To on Projects or Departments | Frappe core | — |
+| **Assignment notifications** | Assign To on Projects or Departments, and a task made with Tasks → New task that names an assignee | Frappe core | — |
 | **"Upcoming Events for Today" digest** | Daily, for Daily Task owners (Frappe core `send_event_digest`, if the user's Event Reminders setting is on) | Frappe core | — |
 
 ### 7.2 Why emails are queued, not sent in the request
@@ -1198,7 +1227,7 @@ frontend/
 
 Unused files still in the source (safe to remove after checking): `BudgetMeter.vue`, `DataTable.vue`, `DescriptionModal.vue`, `ItemPerPage.vue`, `Shimmer.vue`, `useDescriptionModal`, `useDocCurrencyFormat`, `useTabIcon`, `useTooltip`, `utils/text.js`, `config/helper.js`.
 
-Dead code inside files the app does use: `portal_app/api/files.py` `_restrict_files_for_customer` (never called; client filtering is done inline in `list_project_files`), and `frontend/src/pages/Files.vue` `createShareLinkForFolder` / `createShareLink` (no button calls them).
+Dead code inside files the app does use: `frontend/src/pages/Files.vue` `createShareLinkForFolder` / `createShareLink` (no button calls them).
 
 ### 8.3 Routes
 
@@ -1212,24 +1241,24 @@ The router uses `createWebHistory("/portal-app/")`, so `/projects` in the code m
 | `/dashboard` | `Dashboard.vue` | `requiresManager` | Staff |
 | `/org-chart` | `OrgChartPage.vue` | `requiresManager` | Staff |
 | `/teams` | `TeamsPage.vue` | `requiresManager` (also allowed with `can_manage_teams`) | Staff, team leads |
-| `/gantt` | `GanttChart.vue` | none | Internal users |
-| `/daily-task` | `DailyTask.vue` | none | Internal users |
+| `/gantt` | `GanttChart.vue` | `staffOnly` | Internal users |
+| `/daily-task` | `DailyTask.vue` | `staffOnly` | Internal users |
 | `/contracts` | `Contracts.vue` | `requiresManager` | Staff |
 | `/projects` | `Projects.vue` | none | Everyone |
 | `/projects/:name` | `ProjectDetail.vue` | none | Everyone (via links) |
-| `/kanban` | `Kanban.vue` | none | Internal users |
-| `/tasks` | `Tasks.vue` | none | Internal users |
-| `/calendar` | `Calendar.vue` | none | Internal users |
-| `/files` | `Files.vue` | none | Everyone (clients: see 13.1) |
-| `/file-browser` | `AllFiles.vue` | none | Everyone (clients: see 13.1) |
-| `/shared-with-me` | `SharedWithMe.vue` | none | Everyone (clients: see 13.1) |
+| `/kanban` | `Kanban.vue` | `staffOnly` | Internal users |
+| `/tasks` | `Tasks.vue` | `staffOnly` | Internal users |
+| `/calendar` | `Calendar.vue` | `staffOnly` | Internal users |
+| `/files` | `Files.vue` | none | Everyone |
+| `/file-browser` | `AllFiles.vue` | none | Everyone |
+| `/shared-with-me` | `SharedWithMe.vue` | none | Everyone |
 | `/manage-shares` | `ManageShares.vue` | `requiresProjectAdmin` | Non-clients who manage ≥ 1 project |
 | `/file-tools` | `FileTools.vue` | `requiresAuditor` | Template editors |
 | `/folder-rules` | `FolderRules.vue` | `requiresProjectAdmin` | Non-clients who manage ≥ 1 project |
 | `/profile` | `Profile.vue` | none | Everyone |
 | `/admin` | `Admin.vue` | `requiresPortalAdmin` | User creators, demo-seed admins |
 | `/coming-soon` | `ComingSoon.vue` | none | (linked from the Dashboard) |
-| `/ai-chat` | `AIChat.vue` | none | Internal users |
+| `/ai-chat` | `AIChat.vue` | `staffOnly` | Internal users |
 | anything else | redirect → `/dashboard` | | |
 
 **Query parameters the pages read.** Other pages link with these, so keep them working:
@@ -1248,13 +1277,14 @@ The router uses `createWebHistory("/portal-app/")`, so `/projects` in the code m
 ### 8.4 Guards (in `router/index.js` `beforeEach`)
 
 1. Every navigation calls `auth.get_logged_user`. Not logged in and not a public path → `/login`. Logged in and on `/login` → `/dashboard`.
-2. `requiresManager` → `get_capabilities.is_manager`; `/teams` also accepts `can_manage_teams`. Otherwise → `/projects`.
-3. `requiresPortalAdmin` → `can_create_users` or `can_run_demo_seed` or `can_edit_folder_template`. Otherwise → `/dashboard`.
-4. `requiresAuditor` → `can_edit_portal_folder_template`. Otherwise → `/dashboard`.
-5. `requiresProjectAdmin` → at least one entry in `manageable_project_names`. Otherwise → `/dashboard`.
-6. Any error inside a guard also redirects.
+2. `staffOnly` (Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat) → calls `get_capabilities`; if `is_customer_portal_user` is true, or the call fails → `/projects`. There is no message: a client contact who types one of these addresses simply lands on the Projects page. Despite the name, `staffOnly` lets in every internal user, not only the guide's "staff" (System Manager / Projects Manager).
+3. `requiresManager` → `get_capabilities.is_manager`; `/teams` also accepts `can_manage_teams`. Otherwise → `/projects`.
+4. `requiresPortalAdmin` → `can_create_users` or `can_run_demo_seed` or `can_edit_folder_template`. Otherwise → `/dashboard`.
+5. `requiresAuditor` → `can_edit_portal_folder_template`. Otherwise → `/dashboard`.
+6. `requiresProjectAdmin` → at least one entry in `manageable_project_names`. Otherwise → `/dashboard`.
+7. Any error inside a guard also redirects.
 
-> Guards are a convenience. **The server re-checks every action.** Pages without a guard (Tasks, Kanban, Gantt, Calendar, Daily Task, AI Chat) are hidden from clients only in the menu; their data is still limited by the server to the client's own customers' projects.
+> Guards are a convenience. **The server re-checks every action.** The `staffOnly` pages match a server rule: their endpoints call `helper.assert_not_customer_only()` and refuse client contacts with "This part of the portal is for ATA staff." (6.0 "Internal users"). When you add an internal tool, add both: `meta: { staffOnly: true }` on the route and the gate on every endpoint it calls.
 
 ### 8.5 `src/api/index.js`
 
@@ -1305,13 +1335,16 @@ Guards call `get_capabilities` again on guarded routes. A browser refresh is eno
     - Clients do not see Kanban, Tasks, Daily Task, Gantt Chart or Calendar.
   - **AI:** ATA AI CHAT. Not shown to clients.
   - **Team Structure:** staff only.
-  - **Files:** Files, File Browser and Shared for everyone (clients currently see only an empty FILES heading because of a rendering bug, see [13.1](#131-behaviour-bugs-found-by-reading-the-code)). Shares and Routing rules for non-clients who manage a project. File tools for template editors.
+  - **Files:** Files, File Browser and Shared for everyone, client contacts included. Shares and Routing rules for non-clients who manage a project. File tools for template editors.
+  - The template addresses the groups by position (0 = Project Management, 1 = AI, 2 and later = the rest), so `groups` always keeps all four groups in order, and each block hides itself when it has no items. Do not filter empty groups out of the array: for a client the AI group is empty, and dropping it once moved Files into the AI slot, which renders only AI items (an empty "FILES" heading).
   - **Account:** Profile for everyone. Admin for user creators and demo-seed admins.
   - `Ctrl/Cmd+B` collapses the sidebar.
 - **Buttons** use the capabilities. For example:
   - "New project" on the Projects page needs `can_create_project`.
   - Rename, Delete and Edit need the project in `manageable_project_names`.
   - Share needs the project in `allowed_project_names` and not a client.
+  - File Browser: **Share** is hidden from client contacts; **Submit** shows only on projects in `manageable_project_names` and never to client contacts (`AllFiles.vue` `canSubmitFor`).
+  - Project page for client contacts: the **Tasks** button and the **Portal Team (Gantt grouping)**, **Team** and **Tasks** cards are hidden.
   - The client upload card shows only when `is_customer_portal_user`.
 - **Header**: global search (`Ctrl/Cmd+K`), notification bell (refreshes every 60 s), light/dark switch, six colour themes (browser-only), "New Project", avatar menu (Profile, Switch to Desk, Logout). The Header "New Project" button has **no gate**: it shows for everyone, clients too. It opens `/projects?create=1`, and the Projects page opens the form only when `can_create_project` is true. The avatar menu's "Switch to Desk" (`/app`) also shows for client contacts. As Website Users they get Frappe's "You are not permitted to access this page." Hide it when `is_customer_portal_user`.
   - Logout (avatar menu → Logout → "Confirm Logout") calls `/api/method/logout` with **GET** (GET needs no CSRF token), removes the localStorage keys `full_name`, `profile_image` and `user_email`, and does a full page load of `/portal-app/login`, even if the server call fails.
@@ -1322,7 +1355,7 @@ Guards call `get_capabilities` again on guarded routes. A browser refresh is eno
 |---|---|---|
 | Sign in | `Login.vue` | `public.get_branding`, `/api/method/login`, `auth.check_portal_access`, `profile.get_my_profile` |
 | Dashboard | `Dashboard.vue` | `dashboard.get_dashboard_data`, `teams.get_teams` |
-| Projects | `Projects.vue` | `list_projects`, `create_project`, `update_project`, `delete_project`, `get_portal_users`, `search_customers`, `teams.get_offices` |
+| Projects | `Projects.vue` | `list_projects`, `get_project` (Edit modal), `create_project`, `update_project`, `delete_project`, `get_portal_users`, `search_customers`, `teams.get_offices` |
 | Project page | `ProjectDetail.vue` + `FileUploadPanel.vue` | `project_dashboard`, `rename_project`, customer and client-login endpoints, `sync_project_team`, team endpoints, file list/upload/delete |
 | Kanban | `Kanban.vue` | `kanban_board`, `set_project_stage` |
 | Gantt | `GanttChart.vue` | `gantt.get_gantt_data`, milestone endpoints |
@@ -1330,7 +1363,7 @@ Guards call `get_capabilities` again on guarded routes. A browser refresh is eno
 | Tasks | `Tasks.vue` | `list_tasks`, `update_task`, comments, `create_task`, `search_projects`, `search_assignable_users` |
 | Daily Task | `DailyTask.vue` | `daily_task.*` |
 | Files hub | `Files.vue` | `files.*` (list, upload, ZIP, rename, delete, share, link) |
-| File Browser | `AllFiles.vue` | `list_project_files`, `submit_to_client_submittal`, `share_file_with_user` |
+| File Browser | `AllFiles.vue` | `list_projects`, `list_project_files`, `submit_to_client_submittal`, `share_file_with_user`, `list_folder_shares`, `search_portal_users`, `revoke_folder_share` |
 | Shared with me page (sidebar "Shared") | `SharedWithMe.vue` | `list_shared_with_me` |
 | Manage shares page (sidebar "Shares") | `ManageShares.vue` | `list_managed_shares`, `revoke_folder_share` |
 | Guest share | `SharedFolder.vue` | `get_shared_folder_files`, `download_shared_file` |
@@ -1380,7 +1413,7 @@ There are **two separate upload implementations**. Most upload changes must be m
 | | Files hub (`pages/Files.vue`, its own upload card) | Project page (`component/FileUploadPanel.vue`) |
 |---|---|---|
 | Used for | Staff uploads on `/files`, and the client card "Upload to 06-CLIENT SUBMITTAL" | Staff uploads on `/projects/<id>` only (hidden for clients) |
-| Upload ZIP | Yes (`upload_project_files_zip`) | No |
+| Upload ZIP | Yes (`upload_project_files_zip`; afterwards `loadFiles()` refreshes the files and folders) | No |
 | Routing rules and concept-study copies | No | Yes |
 | Sends `document_type` (the chosen PDF type) | Yes for file uploads; not for folder uploads or external-only uploads | Only on the extra routed copies, not on the main upload |
 
@@ -1430,7 +1463,7 @@ Desk: `/app/portal-project-settings` (System Manager only).
 | BIM 360 / ACC integration (planned) / setup notes / upload webhook URL | `bim_360_enabled`, `bim_360_notes`, `bim_360_upload_webhook` | off | Same. |
 | Welcome text for client document access | `client_portal_intro` | empty | Shown as "Client portal guidance" in the Files hub. |
 
-> The portal does not treat webhook URLs as secrets. **Never put a key or token inside a webhook URL.**
+> **Webhook URLs stay on the server.** Only `files.upload_project_file` reads them (through `get_portal_settings_dict()`). Every endpoint that sends settings to the browser uses `get_public_portal_settings()`, which drops the three `*_upload_webhook` fields (5.3). They are still plain Data fields, not Password fields: System Managers can read them in Desk, and they are in every database backup. So still **never put a key or token inside a webhook URL.** When you add a new setting that must not reach the browser, add its field name to `helper._SERVER_ONLY_SETTINGS`.
 
 ### 9.2 Folder template
 
@@ -1487,7 +1520,7 @@ Desk `/app/portal-file-type`. `type_name` + comma-separated `extensions`. The up
 When an upload's "Store in" is "External platform only" or "Store in the portal and send to the external drive", `upload_project_file`:
 
 - requires the chosen provider to be **enabled** and to have a webhook;
-- takes the webhook from Portal Project Settings, else the site_config fallbacks `PORTAL_FRAPPE_DRIVE_UPLOAD_WEBHOOK`, `PORTAL_GOOGLE_DRIVE_UPLOAD_WEBHOOK`, `PORTAL_BIM360_UPLOAD_WEBHOOK`;
+- takes the webhook from Portal Project Settings, else the site_config fallbacks `PORTAL_FRAPPE_DRIVE_UPLOAD_WEBHOOK`, `PORTAL_GOOGLE_DRIVE_UPLOAD_WEBHOOK`, `PORTAL_BIM360_UPLOAD_WEBHOOK` (the URL is used on the server only and never sent to the browser, 9.1);
 - in "both" mode, saves the ERPNext copy first and only logs an external failure (`"External upload failed for <project>"`).
 
 The contract for whoever builds the receiving service:
@@ -1691,11 +1724,16 @@ Use `tail -f` while you reproduce the problem.
 | Guest link opens but shows no files | The folder was renamed (the token keeps the old path) | Create a new link. |
 | Error Log fills with "Portal: …" entries | Best-effort steps failing | Read the traceback; most are non-fatal. |
 | Project suddenly shows no folders, clients see no files, shares and links show nothing | The Project ID was renamed in Desk | Rename it back to the old ID (10.9). |
-| "Only a System Manager can reassign the portal project manager." when saving Edit Project | The Edit modal always sends the Lead Architect field (13.1) | A System Manager makes the edit, or use Rename / Kanban / milestones, which do not send it. |
+| "Only a System Manager can reassign the portal project manager." when saving Edit Project. (Assign Architect shows nothing on screen; the refusal is only in the browser console, 13.1.) | The Lead Architect was changed, the project already names someone else, and the caller is not a System Manager. The Edit modal sends the field only when the user changed it. | A System Manager makes that change. Other edits in the same modal save fine when the Lead Architect is left as it is. |
+| "Status cannot be "On Hold"" (or "In Progress") on Rename, a Kanban move, a milestone, Save team or the Customer card | The project uses the Manual "% Complete Method" and holds a portal-only status (3.6). A Desk Assign To (or its removal) on such a project fails the same way but shows no error: it is only logged as "sync_project_access_from_todo failed", and the team is not changed. | Change the status in the Edit Project modal first (to Open, Completed or Cancelled), then repeat the action (for Assign To, remove it and assign again). |
+| A client contact opens a Tasks, Kanban, Calendar, Gantt, Daily Task or AI Chat address and lands on Projects | By design: `staffOnly` pages (8.4). A direct API call gets "This part of the portal is for ATA staff." | Nothing to fix. Those tools are for ATA staff. |
+| "Client contacts cannot be added to the project team: <id>" on Save team | The list holds a client login (5.9) | Remove it from the Team card. Give client access through Customer portal users. |
+| "Assign the task to an active ATA staff login." / "Tasks cannot be assigned to customer portal users." on New task | The chosen assignee is disabled, is a Website User, or is a client contact | Pick an enabled internal login. The picker lists System Users only. |
+| "Contract files cannot be shared." / "Contract files cannot be submitted to the client." | Contracts are manager-only (6.12) | By design. Contracts stay on the Contracts page. |
 | "Only a Projects Manager, System Manager, or this project's own lead can manage its team." | A team member who is not staff or Lead Architect pressed "Save team" (5.4) | Staff or the Lead Architect saves it, or use Assign To in Desk. |
 | "User is disabled: <id>" on "Save team" | A disabled user is still in the team list | Remove them in the Team card, then save (10.13). |
 | "Only a System Manager, or the project's own Portal Project Manager, can set its team." | Portal Team (Gantt grouping) card, used by someone who is neither a System Manager nor that project's Lead Architect | Ask a System Manager, or that project's Lead Architect. |
-| "You can only change projects you are on the team of." (Kanban move, milestone, rename, new task) | A Projects User not on that project's team | Add them to the project team. |
+| "You can only change projects you are on the team of." (Edit Project, Kanban move, milestone, rename, new task, Submit to Client) | A Projects User not on that project's team | Add them to the project team. |
 | "Only project managers can manage routing rules." | A team user on the Routing rules page | Staff only (5.4). |
 | No "Invite customer user" button, or "You are not allowed to create user accounts." | The caller has no User-create permission (stock Frappe: System Manager only) | A System Manager invites, or see 10.13. |
 | "Only a System Manager or Projects Manager can add customer portal users." | A team member tried "Add existing user" | Ask staff. |
@@ -1743,7 +1781,8 @@ Do not call any endpoint that writes data while impersonating on a live site.
   - the next upload builds a second, empty template tree under the new ID.
 
   To change what people see, use the portal's **Rename project** (title only, 6.3). If an ID was already renamed, rename it back, or restore from backup.
-- **Do not delete Portal Folder Share rows in Desk.** Revoke in the portal, so DocShares are removed too.
+- **Do not delete Portal Folder Share rows in Desk.** Revoke in the portal, so DocShares are removed too and the audit record stays.
+- **Give client access only through Customer portal users (5.9).** Desk refuses a client contact in a Project's Assign To or Users table; do not work around it with a manual Share on the Project.
 - **Do not edit the portal Custom Fields or the "Project Portal" Workspace in Desk.** Migrate puts them back. Change `install.py` / the fixture.
 - **Do not close "Assigned To" on a Project casually in Desk.** It removes the person from the project team.
 - **Do not close or cancel Department "Assigned To" ToDos.** They are team membership (6.6).
@@ -1777,15 +1816,15 @@ The default branch on GitHub is `main`, and it is the branch sites run (`README.
 
 | I want to… | Do this |
 |---|---|
-| Add an endpoint | Put it in the right `portal_app/api/<module>.py`. If it changes data, decorate it with `@frappe.whitelist(methods=["POST"])`. The first line must be the right gate: `helper.assert_portal_user()`, `assert_project_access()`, `assert_manage_project()`, or a staff check. Check staff before customer, and use `is_customer_only()`. Wrap user text in `_()`. Only then read or write, with `ignore_permissions=True`. Add a test in `portal_app/tests/` (11.4). Call it from the SPA with `call({method, args, type: "POST"})`. |
-| Add a field to a core DocType (Project, User, Department, Event, File) | Add it to the right `ensure_*` function in `install.py`. Do not add it in Desk or as a fixture. Then run `bench --site <site> migrate`. If the field has a `default`, migrate fills it into every existing row. For a **Project** field that screens should show or save, also update the hard-coded lists: (1) `projects._project_fields()` (~line 26), which `list_projects` and `kanban_board` return; (2) the `meta.has_field` loop in `update_project` (~375): a field not listed there is ignored with no error; (3) the loop in `create_project` (~826) if New project sets it; (4) the New project / Edit Project forms in `Projects.vue`. `project_dashboard` returns every Project field automatically, clients included (minus Currency fields and `per_gross_margin` for users who cannot see value, and `portal_project_manager` for non-staff), so do not store internal-only data in a Project field without popping it there too. If the field holds money, make it a Currency field, and also pop it in `list_projects` and `kanban_board` next to `estimated_costing`. Those two strip only `estimated_costing` and `portal_project_manager`. |
+| Add an endpoint | Put it in the right `portal_app/api/<module>.py`. If it changes data, decorate it with `@frappe.whitelist(methods=["POST"])`. The first line must be the right gate: `helper.assert_portal_user()`, `assert_project_access()`, `assert_manage_project()`, a staff check, or `helper.assert_not_customer_only()` for an internal tool. Never return `get_portal_settings_dict()` to the browser; use `get_public_portal_settings()`. Check staff before customer, and use `is_customer_only()`. Wrap user text in `_()`. Only then read or write, with `ignore_permissions=True`. Add a test in `portal_app/tests/` (11.4). Call it from the SPA with `call({method, args, type: "POST"})`. |
+| Add a field to a core DocType (Project, User, Department, Event, File) | Add it to the right `ensure_*` function in `install.py`. Do not add it in Desk or as a fixture. Then run `bench --site <site> migrate`. If the field has a `default`, migrate fills it into every existing row. For a **Project** field that screens should show or save, also update the hard-coded lists: (1) `projects._project_fields()` (~line 26), which `list_projects` and `kanban_board` return; (2) the `meta.has_field` loop in `update_project` (~411): a field not listed there is ignored with no error; (3) the loop in `create_project` (~869) if New project sets it; (4) the New project / Edit Project forms in `Projects.vue` (the Edit modal sends only changed fields, so add the field to `editForm` in `openEdit`). `project_dashboard` and `get_project` return every Project field automatically, clients included (minus Currency fields and `per_gross_margin` for users who cannot see value, `portal_project_manager` for non-staff, and the top-level `users` / `owner` / `modified_by` keys for client contacts), so do not store internal-only data in a Project field without popping it in both. If the field holds money, make it a Currency field, and also pop it in `list_projects` and `kanban_board` next to `estimated_costing`. Those two strip only `estimated_costing` and `portal_project_manager`. |
 | Add or change an app DocType | On the dev site (developer mode on), create or edit it in Desk with module **Project Portal**. Frappe writes `portal_app/project_portal/doctype/<name>/`. Commit the JSON and `.py` files, then migrate the other sites. |
 | Fix existing data once | Add a patch (3.4). It must be safe to run twice. |
 | Change the Desk workspace | Edit it in Desk on the dev site, run `bench --site <dev-site> export-fixtures --app portal_app`, and commit `portal_app/fixtures/workspace.json`. |
-| Add a screen | Add `frontend/src/pages/<Name>.vue` and a route in `router/index.js` (with a `meta` guard if needed). Add a menu entry in `component/Sidebar.vue`. Show errors with `apiErr(e)` (8.5) and messages with `useToast()`. The server must still check access. |
+| Add a screen | Add `frontend/src/pages/<Name>.vue` and a route in `router/index.js` (with a `meta` guard if needed; `staffOnly` for a tool client contacts must not open, together with `assert_not_customer_only()` on its endpoints). Add a menu entry in `component/Sidebar.vue`. Show errors with `apiErr(e)` (8.5) and messages with `useToast()`. The server must still check access. |
 | Add a scheduled job | Add it to `scheduler_events` in `hooks.py`, then migrate. Migrate registers the Scheduled Job Type. |
 | Add a permission / capability flag | See the steps below the table. |
-| Add or rename a Kanban stage or design phase | Change the options in `install.py` (`portal_kanban_stage` / `portal_phase`) and migrate. Then update the hard-coded copies: the column order in `projects.kanban_board` (`projects.py` ~330); the On Track / At Risk buckets and the status pill in `Dashboard.vue` (~62-66, ~155-156); the Phase and Status `<option>` lists in `Projects.vue` (New project ~859, Edit ~1015 / ~1032); the year → stage map in `portal_admin.py` (~455), and the demo seed maps. Projects that still hold a removed value fail Select validation on their next save, so update them first. |
+| Add or rename a Kanban stage or design phase | Change the options in `install.py` (`portal_kanban_stage` / `portal_phase`) and migrate. Then update the hard-coded copies: the column order in `projects.kanban_board` (`projects.py` ~361); the On Track / At Risk buckets and the status pill in `Dashboard.vue` (~62-66, ~155-156); the Phase and Status `<option>` lists in `Projects.vue` (New project ~897, Edit ~1053 / ~1070); the year → stage map in `portal_admin.py` (~455), and the demo seed maps. Projects that still hold a removed value fail Select validation on their next save, so update them first. |
 | Update a hosted guide (`/handbook`, `/tech-guide`, `/test-guide`) | Edit the `.html` in `portal_app/www/`. Figures are hand-drawn SVGs in `public/images/handbook/` (never screenshots, never real names or clients; `/handbook` is public). Deploy with 10.1. No migrate or frontend build is needed. |
 
 **Add a permission / capability flag**
@@ -1816,7 +1855,7 @@ Desk → **Error Log**. Filter on the title. Not every title starts with "Portal
 | `Portal: stamp portal_file_type` | The file type was not saved on an upload. |
 | `Project File classification failed` | The optional Project File record was not created (8.12). |
 | `External upload failed for <project>` | The webhook failed in "both" mode. The user was told the upload succeeded (9.5). |
-| `sync_project_access_from_todo failed` | A Desk Assign To did not update the project team. |
+| `sync_project_access_from_todo failed` | A Desk Assign To did not update the project team (for example on a Manual-method project that holds On Hold or In Progress, 3.6). |
 | `Portal: mark notifications read` / `Portal: docx parse` | Header bell / Admin page Word-file seed. |
 | `Portal Demo Seed Run: insert`, `Portal Demo Seed cleanup …`, `Portal Demo Seed cascade …`, `Demo seed: Project File insert …` | Demo seed creation or clean-up. |
 | `portal_app: make project file private <name>` | The one-time privacy patch could not convert a file. |
@@ -1914,7 +1953,7 @@ Test data uses neutral names ("Portal Test Customer A/B") and `@example.com` add
 
 ### 11.3 What to re-test after a change
 
-- Access changes (`helper.py`, `files.py`, `projects.py`): run both test files; then sign in as a client contact of Customer A and check you cannot see Customer B's project, files or search results.
+- Access changes (`helper.py`, `files.py`, `projects.py`): run both test files; then sign in as a client contact of Customer A and check you cannot see Customer B's project, files or search results. Also check, as that client: the sidebar shows Files, File Browser and Shared; typing `/portal-app/tasks` (or kanban, calendar, gantt, daily-task, ai-chat) lands on Projects; the Project page has no Team, Portal Team or Tasks card; the File Browser has no Submit or Share buttons.
 - Customer portal changes: invite (new and existing email), add existing, remove, reset (email and set), and check Email Queue.
 - Frontend changes: build, clear-website-cache, open in a private window, check Files upload (staff and client), Share dialog, Project page cards.
 - Always check the Error Log for new "Portal:" entries.
@@ -1956,7 +1995,8 @@ Newest first. PR numbers are GitHub pull requests on the app repository.
 
 | When | PR | What changed, in plain words |
 |---|---|---|
-| 30 Sep 2026 | (this change) | **Documentation.** This guide, `USER_GUIDE.md`, `DOCUMENTATION.md` and `README.md` rewritten in simple English. `/handbook` rewritten in simple English with new figures 15–23 (customer portal users, invite and reset, client files, shared with me, manage shares, admin create user, guest link, confirm upload, routing rules). New `/tech-guide` page (System Manager only). Workspace shortcuts: User Guide → `/handbook`, new Technical Guide → `/tech-guide`, and a Portal User Customer link under Portal Setup. |
+| 1 Oct 2026 | (this change) | **Bug fixes and tighter client access** (migrate and a frontend build needed: new patch `remove_client_project_docshares`). **Fixed for everyone:** the client sidebar shows Files, File Browser and Shared again (no empty FILES heading); Files hub Upload ZIP refreshes the list without an error; Edit Project loads Remarks, sends only what changed, and can be saved by any member of the project team (Lead Architect is checked only when it really changes); On Hold / In Progress survive Edit Project saves that do not change Status, and Edit Project no longer fails on Manual-method projects; Remarks show as plain text and save as paragraphs; Tasks → New task saves the assignee (internal logins only, with the server's message on refusal); Daily Task dates no longer shift by a day in Saudi time. **Client contacts:** Tasks, Kanban, Calendar, Gantt, Daily Task and AI Chat are now closed to them (page and server); the Project page hides Team, Portal Team and Tasks; search shows them no tasks; they no longer receive the project team list or a Project share from the portal, and the portal never puts them on a project team; share lists and creating folders in the internal tree are refused; client-folder matching is exact. **Files:** a guest link stops working as soon as its share record is gone; Submit to Client needs manage rights; contracts can no longer be shared or submitted, and are left out of file search and AI Chat answers for anyone who is not staff, and out of ZIPs for callers without manage rights on the project. **Settings:** upload webhook addresses are no longer sent to the browser. `get_project` now hides money fields the same way as the Project page. |
+| 30 Sep 2026 | #19 | **Documentation.** This guide, `USER_GUIDE.md`, `DOCUMENTATION.md` and `README.md` rewritten in simple English. `/handbook` rewritten in simple English with new figures 15–23 (customer portal users, invite and reset, client files, shared with me, manage shares, admin create user, guest link, confirm upload, routing rules). New `/tech-guide` page (System Manager only). Workspace shortcuts: User Guide → `/handbook`, new Technical Guide → `/tech-guide`, and a Portal User Customer link under Portal Setup. |
 | 30 Sep 2026 | #18 | **Tenant-isolation fixes and client uploads.** Access now comes only from Portal User Customer rows; `User.portal_linked_customer` became display-only (read-only, permlevel 1) because every user can write their own User record. Adding existing logins to a customer needs System/Projects Manager or User-create (the old `has_permission("User","write")` check was always true). Removing a customer anywhere revokes that login's shares on that customer's projects. Share-recipient check made role-based. Clients cannot share, create links, or download/zip outside `06-CLIENT SUBMITTAL` unless staff shared it. No second welcome email while a link is still valid. **New:** clients can upload into `06-CLIENT SUBMITTAL`; files are private, tagged "Client Upload" in Desk, badged "Client upload" in the portal. |
 | 30 Sep 2026 | #17 | **One client login, several customers.** New DocType Portal User Customer; a patch copies old single-customer links. "Remove from portal" drops only that customer; the role goes with the last one. Existing logins get an access notice (or the welcome email if they never set a password). The picker lists only Website Users. Rows are deleted with their User/Customer so they never block a delete. |
 | 29 Sep 2026 | #16 | **CSRF token for the SPA.** `/portal-app` now injects `window.csrf_token`; new GET-only `portal_app.api.auth.get_csrf_token` used for the retry. Fixed "Invalid Request" on every POST after a user had opened Desk. |
@@ -1980,9 +2020,7 @@ Newest first. PR numbers are GitHub pull requests on the app repository.
 
 | Area | Problem | Suggested fix |
 |---|---|---|
-| Projects → Edit modal | Always sends `portal_project_manager`. A non-System-Manager (Projects Manager or team member) cannot save it on any project whose Lead Architect is someone else ("Only a System Manager can reassign the portal project manager."). For a non-staff user the list has no Lead Architect value, so the modal sends an empty one. If the caller **is** the Lead Architect (or the field is blank), saving clears the field, and they lose "Save team" and Gantt-team rights. | Send `portal_project_manager` only when it changed, and never from a form that did not load it. |
-| Projects → Edit modal | Sends `notes = ''` (the list does not load notes), so the Remarks box (field `notes`, Desk label "Notes") is wiped on save. | Load notes, or skip unchanged fields. |
-| Projects → Edit modal | Progress slider is overwritten by ERPNext unless "% Complete Method" is Manual. "In Progress"/"On Hold" are not valid ERPNext statuses: they are reset on the next save, and on a Manual-method project the save fails (3.6). | Use the Kanban stage for these states. Do not switch projects to Manual while the Edit modal still offers invalid statuses. |
+| Projects → Edit modal | Progress slider is overwritten by ERPNext unless "% Complete Method" is Manual. "In Progress"/"On Hold" are not valid ERPNext statuses: Edit Project keeps them, but Rename, a Kanban move, milestones, Save team, the Customer card, Desk saves, a Desk Assign To on the project and task changes reset them, and on a Manual-method project those saves (not task changes) fail while such a status is stored (3.6). The Assign To failure is only logged ("sync_project_access_from_todo failed"), so the person is silently not added to or removed from the team. | Use the Kanban stage for these states, or give the other save paths the same status handling as `update_project`. |
 | Project team | Every "Save team" deletes and re-adds all rows, so ERPNext re-sends "Project Collaboration Invitation" to every member. Removal leaves the read DocShare. | Diff the list instead of recreating rows; remove the DocShare on removal. |
 | Project team UI | Controls show to any team member, but only staff or the Lead Architect can save. The reverse also holds: a non-staff Lead Architect who is not on the team sees no controls. The Portal Team (Gantt grouping) picker and "Add group" are empty for non-staff. | Gate the Team card on `can_manage_project_team` and the Portal Team card on `_assert_may_set_team`. Give that picker a list endpoint scoped to the caller. |
 | Projects → Assign Architect | `saveMembers()` writes every error only to the browser console. So a refused change ("Only a System Manager can reassign…") looks like nothing happened. The dialog also cannot clear the field. | Show `apiErr(e)` in the dialog; allow an empty choice. |
@@ -1990,13 +2028,9 @@ Newest first. PR numbers are GitHub pull requests on the app repository.
 | Admin → Create portal user → Team Manager | `create_portal_user` calls `assign_to.add` on the Department without sharing it first (`teams.add_team_member` does share it first). If the new user cannot read the Department, Frappe calls `frappe.share.add`, which requires the **caller** to have share permission on Department. Stock ERPNext grants that only to HR User, HR Manager and Academics User. A System Manager with no HR role may get "No permission to share Department", and the user is not created (not tested). | Call `frappe.share.add_docshare("Department", team, user, read=1, flags={"ignore_share_permission": True})` before `assign_to.add`, as `add_team_member` does. |
 | Upload → external drive | In "both" mode `upload_project_file` returns `external_error` when the webhook fails, but no screen reads it, so the user sees success. On the Project page, and for folder uploads in the Files hub, "External platform only" still creates an empty dated wrapper folder. | Show `external_error`. Skip the wrapper for every external-only upload, as the Files hub already does for file uploads. |
 | Project page upload | The chosen "PDF Type" (`document_type`) is sent only on the routed copies, not on the main upload, so the main Project File record has no document type. | Add `document_type` to the main `uploadFile` call in `FileUploadPanel.vue`. |
-| File Browser for clients | Submit and Share buttons show to client contacts. The server refuses both. The Share dialog then shows a generic "API Error", because it reads `responseBody.message`, which is empty. | Hide both buttons when `is_customer_portal_user`, and show the server's message from `_server_messages`. |
-| Tasks → New task | The chosen assignee is dropped (`create_task` has no `assigned_to`). | Add the parameter and call `assign_to.add`. |
+| File Browser → Share dialog | When the server refuses a share or revoke, the dialog shows a generic "API Error", because it reads `responseBody.message`, which is empty. (The Submit dialog already reads `_server_messages`.) | Show the server's message from `_server_messages` (`apiErr`, 8.5). |
 | Tasks → Assigned column | Shows login IDs, not names: `Tasks.vue` reads `user_map`, which `list_tasks` never returns. | Return `user_map` (`{user: full_name}`) from `list_tasks`. |
-| Daily Task | Dates are one day off east of UTC (Saudi Arabia): `toISOString()` is used for local dates, so "TODAY" lands on tomorrow's tile and reminders save a day early. | Build date keys from local year/month/day. |
 | Files hub → Download as ZIP | The running 500 MB byte check in `download_files_zip` sits inside the per-file `try`. When the stored `file_size` is too low, the error is caught and logged ("Portal: zip include …"), and every later file is skipped too. The user gets a short ZIP with no message. | Move the `written_bytes` check outside the `try` block. |
-| Files hub → Upload ZIP | Calls `loadFilesAndFolders()`, which does not exist; the list does not refresh and a red error appears next to the green message. | Call `loadFiles()`. |
-| Sidebar for clients | When the AI group is empty, the Files group lands in the slot that renders only AI items, so clients see a "FILES" heading with no links. They reach Files only from the Project page. | Render groups generically. |
 | Kanban | Columns exist only for stages that hold a project; you cannot move a card into an empty stage. | Always show the five stages. |
 | Gantt | Office filter moves other offices' projects into "Unassigned" instead of hiding them; only the current year is viewable, and a project whose dates are all outside it shows "No dates set". | Filter unassigned by office; add year navigation. |
 | Dashboard | "Projects Delayed" counts finished (Done) projects; period dropdowns do nothing; "Team Performance" is always empty; "Budget Utilization" repeats the portfolio average on every row. | Rework KPI definitions with ATA. |
@@ -2028,7 +2062,7 @@ Rules for this backlog:
 - Being on a team (Department) does not give project access.
 - Internal users can read, upload to and share every project.
 - Being Lead Architect alone does not give edit rights.
-- Desk "Assign To" on a Project changes the portal team (and closing it removes the person).
+- Desk "Assign To" on a Project changes the portal team (and closing it removes the person), except for client contacts, whom the ToDo hook ignores (3.3).
 - Emails are queued; "sent" means queued.
 - AI Chat is keyword matching, not an AI.
 - Folder share DocShares cover files that exist at share time only.
@@ -2038,15 +2072,15 @@ Rules for this backlog:
 
 ### 13.4 Documentation that is out of date
 
-Checked on 30 September 2026. `USER_GUIDE.md`, `DOCUMENTATION.md` and `README.md` were rewritten in the same change as this guide, so they are not listed. Re-check any file below when you next touch it, and remove it from this list once it is fixed.
+Checked on 30 September 2026, and updated on 1 October 2026 for the bug-fix release (12). `USER_GUIDE.md`, `DOCUMENTATION.md` and `README.md` were rewritten in the same change as this guide, so they are not listed. Re-check any file below when you next touch it, and remove it from this list once it is fixed.
 
 **Remove now (public):** a few files in this repository, and its git history, still hold names or email addresses that must not be public. The list is kept privately with the security backlog ([13.2](#132-security-hardening-backlog)). Never quote any of those values in docs, tests or examples.
 
 **Fix when you next touch the file:**
 
-- `TESTING.md`: expects clients to have no upload (Project page step), and its "Already-known issues" table lists issues that are fixed (for example AI Chat not opening, empty quick-create dropdowns).
+- `TESTING.md`: expects clients to have no upload (Project page step), expects clients to see the Team section read-only (it is hidden now), and its "Already-known issues" table lists issues that are fixed (for example AI Chat not opening, empty quick-create dropdowns).
 - `docs/UAT_TEST_GUIDE.md` (tested at an old build, `bf41e64`): expects Projects Users to see only their team's projects and to be read-only even on those, and expects clients to have no upload.
-- `/test-guide`: its warning text says the page is open to anyone (it is System Manager only); several tests expect old behaviour (clients cannot upload, one customer per login, Projects Users see only their projects, routing-rules menu only for Auditor, Submit broken).
+- `/test-guide`: its warning text says the page is open to anyone (it is System Manager only); several tests expect old behaviour (clients cannot upload, one customer per login, Projects Users see only their projects, routing-rules menu only for Auditor, Submit broken); test 8.22 and the AI Chat test (8.28) expect a client contact to open Tasks / task comments and AI Chat (they are now redirected and refused).
 - Code comments: `utils.py` mentions `?v=`; the `test_guide.py` docstring says the page is open; `demo_seed.py` points to a non-existent `docs/END_USER_GUIDE.md`; the `Header.vue` logout comment still says the CSRF refresh endpoint is not whitelisted and the retry always 403s (since PR #16 `portal_app.api.auth.get_csrf_token` exists).
 - UI text in `frontend/src/pages/Files.vue`: the "—" tooltip "Only project managers can share folders." (sharing needs only project access), the help line saying private files can be opened only by people on this project (every internal user can open them), and the Rename tooltips "top-level folders only" / "first level only" (rename works at any depth).
 - `portal_app/scripts/README.md`: its list of which scripts need clean-up is incomplete (the full list is private, see 13.2), and it says nothing has a dry-run mode. `import_ata_2026.py` is a dry run by default (`commit=False`).
@@ -2068,7 +2102,7 @@ Checked on 30 September 2026. `USER_GUIDE.md`, `DOCUMENTATION.md` and `README.md
 
 Check these first if the site gets slow as projects grow:
 
-1. `router/index.js` calls `auth.get_logged_user` on every navigation. Guarded routes also call `get_capabilities` / `get_portal_admin_capabilities`.
+1. `router/index.js` calls `auth.get_logged_user` on every navigation. Guarded routes also call `get_capabilities` / `get_portal_admin_capabilities`; since the October 2026 fix this includes every `staffOnly` page (Tasks, Kanban, Calendar, Gantt, Daily Task, AI Chat).
 2. `ManageShares.vue` and `SharedWithMe.vue` reload on every window `focus` and `visibilitychange`. `list_managed_shares` reads every file of every managed project (cap 50 000) each time.
 3. The Header polls `profile.list_notifications` every 60 seconds.
 4. `helper.project_has_permission` runs `get_allowed_project_names()` (the whole Project list) for each Project permission check (5.6).
