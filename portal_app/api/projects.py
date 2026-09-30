@@ -6,7 +6,7 @@ import zipfile
 
 import frappe
 from frappe import _
-from frappe.utils import cint, cstr, escape_html, flt, getdate, validate_email_address
+from frappe.utils import add_to_date, cint, cstr, escape_html, flt, getdate, now_datetime, validate_email_address
 
 from erpnext import get_default_company
 
@@ -1143,21 +1143,35 @@ def _attach_portal_customer_user(user, customer):
 
 
 def _detach_portal_customer_user(user, customer):
-	"""Remove ONE customer from a login; the Portal Customer role goes only with the last."""
-	customers = helper.get_portal_linked_customers(user)
-	if customer not in customers:
+	"""Remove ONE customer from a login; the Portal Customer role goes only with the last.
+
+	delete_doc, not a raw delete: PortalUserCustomer.on_trash re-points the primary,
+	revokes the login's shares on that customer's projects and leaves an audit trail."""
+	names = frappe.get_all(helper.PORTAL_USER_CUSTOMER, filters={"user": user, "customer": customer}, pluck="name")
+	if not names:
 		return
-	frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": user, "customer": customer})
-	remaining = [c for c in customers if c != customer]
+	for name in names:
+		frappe.delete_doc(helper.PORTAL_USER_CUSTOMER, name, ignore_permissions=True)
+	if helper.get_portal_linked_customers(user):
+		return
 	doc = frappe.get_doc("User", user)
 	doc.flags.ignore_permissions = True
-	if frappe.get_meta("User").has_field("portal_linked_customer") and doc.portal_linked_customer == customer:
-		doc.portal_linked_customer = remaining[0] if remaining else None
-	if not remaining:
-		for row in list(doc.roles):
-			if row.role == helper.PORTAL_CUSTOMER_ROLE:
-				doc.remove(row)
+	for row in list(doc.roles):
+		if row.role == helper.PORTAL_CUSTOMER_ROLE:
+			doc.remove(row)
 	doc.save()
+
+
+def _can_link_customer_logins() -> bool:
+	"""Attaching a login to a customer hands it that customer's whole portfolio, so it
+	takes a manager (or whoever may create logins), not just any project team member.
+
+	NOT frappe.has_permission("User", "write"): with no doc that falls back to "is any
+	User shared with me for write", and every user has a write share on their own User
+	record (share_with_self), so it was True for everyone."""
+	return helper.has_portal_staff_project_access() or bool(
+		frappe.has_permission("User", "create", user=frappe.session.user)
+	)
 
 
 @frappe.whitelist()
@@ -1180,6 +1194,7 @@ def get_customer_portal_users(project):
 	return {
 		"users": users,
 		"can_invite": bool(frappe.has_permission("User", "create", user=frappe.session.user)),
+		"can_link_existing": _can_link_customer_logins(),
 		"can_reset_password": _can_reset_customer_portal_passwords(),
 	}
 
@@ -1223,10 +1238,12 @@ def sync_customer_portal_users(project, users):
 	)
 
 	notified = {}
+	if (new_set - old_set) and not _can_link_customer_logins():
+		frappe.throw(
+			_("Only a System Manager or Projects Manager can add customer portal users."),
+			frappe.PermissionError,
+		)
 	for u in new_set - old_set:
-		# Mutating an existing account's roles is a User write, not a project action.
-		if not frappe.has_permission("User", "write", user=frappe.session.user):
-			frappe.throw(_("You are not allowed to modify user accounts."), frappe.PermissionError)
 		_assert_user_eligible_for_customer_link(u, cust)
 		_attach_portal_customer_user(u, cust)
 		# Tell them: an access notice, or the welcome (set-password) mail if they have
@@ -1255,7 +1272,22 @@ def _user_has_password(user) -> bool:
 	return bool(rows)
 
 
-def _send_portal_access_notice(user, customer):
+def _welcome_link_pending(user) -> bool:
+	"""A set-password link that has not been used and has not expired yet."""
+	row = frappe.db.get_value(
+		"User", user, ["reset_password_key", "last_reset_password_key_generated_on"], as_dict=True
+	)
+	if not row or not row.reset_password_key:
+		return False
+	expiry = cint(frappe.get_system_settings("reset_password_link_expiry_duration"))
+	if not expiry:
+		return True
+	if not row.last_reset_password_key_generated_on:
+		return False
+	return now_datetime() < add_to_date(row.last_reset_password_key_generated_on, seconds=expiry)
+
+
+def _send_portal_access_notice(user, customer, pending_welcome=False):
 	"""Tell an existing login that it can now see this customer's projects."""
 	doc = frappe.get_doc("User", user)
 	customer_name = frappe.db.get_value("Customer", customer, "customer_name") or customer
@@ -1271,7 +1303,11 @@ def _send_portal_access_notice(user, customer):
 			"<strong>" + escape_html(customer_name) + "</strong>",
 		)
 		+ "</p><p>"
-		+ _("Sign in at {0} with your existing password.").format(link)
+		+ (
+			_("Use the set-password link in your earlier welcome email, or Forgot Password at {0}.").format(link)
+			if pending_welcome
+			else _("Sign in at {0} with your existing password.").format(link)
+		)
 		+ "</p>"
 	)
 	# Queued, never sent inside the request: EmailQueue.send() commits mid-request and
@@ -1290,6 +1326,10 @@ def _send_portal_invite(user, customer) -> bool:
 	try:
 		if _user_has_password(user):
 			_send_portal_access_notice(user, customer)
+		elif _welcome_link_pending(user):
+			# A new welcome mail would overwrite reset_password_key and kill the link in
+			# the one they already have (e.g. added to three projects in a row).
+			_send_portal_access_notice(user, customer, pending_welcome=True)
 		else:
 			doc = frappe.get_doc("User", user)
 			doc.db_set("redirect_url", helper.PORTAL_HOME)
@@ -1367,9 +1407,10 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	# _send_portal_access_notice); email_sent then means "queued".
 	doc.flags.delay_emails = True
 	doc.insert()
-	frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": cust}).insert(
-		ignore_permissions=True
-	)
+	if not frappe.db.exists(helper.PORTAL_USER_CUSTOMER, {"user": doc.name, "customer": cust}):
+		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": cust}).insert(
+			ignore_permissions=True
+		)
 
 	return {
 		"name": doc.name,

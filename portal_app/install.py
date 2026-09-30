@@ -176,7 +176,12 @@ def ensure_portal_customer_access():
 					"fieldtype": "Link",
 					"options": "Customer",
 					"insert_after": "last_name",
-					"description": "If the user has role Portal Customer, they only see Projects with this Customer.",
+					# Display only. Access comes from Portal User Customer rows. permlevel 1
+					# because every user can write their OWN User record (share_with_self);
+					# at permlevel 0 a client contact could point this at another customer.
+					"read_only": 1,
+					"permlevel": 1,
+					"description": "Primary customer, for display. Which customers' projects a Portal Customer sees is set by Portal User Customer (add/remove from the portal project page).",
 				},
 			]
 		},

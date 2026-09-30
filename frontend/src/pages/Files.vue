@@ -429,6 +429,21 @@ const folderFilter = ref("");
 const fileSearch = ref("");
 const folderView = ref("grid");
 
+// Client contacts upload into 06-CLIENT SUBMITTAL only (the server enforces the same
+// rule); the target is the folder they are looking at when it sits inside it.
+const clientUploadRoot = computed(
+	() => (folders.value || []).find((f) => /(^|\/)06-CLIENT SUBMITTAL$/.test(String(f.name || "")))?.name || "",
+);
+const clientUploadTarget = computed(() => {
+	const root = clientUploadRoot.value;
+	const cur = folderFilter.value;
+	if (root && cur && (cur === root || cur.startsWith(root + "/"))) return cur;
+	return root;
+});
+const clientUploadBusy = ref(false);
+const clientUploadMsg = ref("");
+const clientUploadErr = ref("");
+
 /**
  * Any user allocated to the project can share its folders / individual files with
  * teammates (Drive-style collaboration). Customer-portal users are excluded.
@@ -867,6 +882,37 @@ watch(
 		if (p) project.value = p;
 	},
 );
+
+async function onClientFilesPicked(ev) {
+	const input = ev?.target;
+	const picked = Array.from(input?.files || []);
+	if (!picked.length || !clientUploadTarget.value || !project.value) return;
+	clientUploadBusy.value = true;
+	clientUploadMsg.value = "";
+	clientUploadErr.value = "";
+	let done = 0;
+	try {
+		for (const file of picked) {
+			clientUploadMsg.value = `Uploading ${done + 1} of ${picked.length}…`;
+			await uploadFile("portal_app.api.files.upload_project_file", file, {
+				project: project.value,
+				target_folder: clientUploadTarget.value,
+				destination: "erpnext",
+				is_private: "1",
+			});
+			done++;
+		}
+		clientUploadMsg.value = `Uploaded ${done} file${done === 1 ? "" : "s"}. The ATA team sees ${done === 1 ? "it" : "them"} marked as a client upload.`;
+		await loadFiles();
+	} catch (e) {
+		clientUploadMsg.value = done ? `Uploaded ${done} of ${picked.length}.` : "";
+		clientUploadErr.value = apiErr(e);
+		if (done) await loadFiles();
+	} finally {
+		clientUploadBusy.value = false;
+		if (input) input.value = "";
+	}
+}
 
 function apiErr(e) {
 	const body = e?.responseBody;
@@ -2165,9 +2211,26 @@ async function deleteProjectFile(f) {
 				<p v-if="!uploadBusy && uploadInfo" class="text-sm text-green-700">{{ uploadInfo }}</p>
 				<p v-if="zipMsg" class="text-sm text-green-700">{{ zipMsg }}</p>
 			</div>
-			<p v-if="project && isCustomerPortalUser" class="rounded-xl border border-[color:var(--portal-border)] p-3 text-sm text-[color:var(--portal-muted)]" style="background:var(--portal-surface-alt)">
-				Customer portal users can open files below; uploading is disabled.
-			</p>
+			<div v-if="project && isCustomerPortalUser" class="portal-card-strong space-y-2 p-5">
+				<p class="text-sm font-semibold text-[color:var(--portal-text)]">Upload to 06-CLIENT SUBMITTAL</p>
+				<template v-if="clientUploadTarget">
+					<p class="text-xs text-[color:var(--portal-muted)]">
+						Files go into <strong>{{ subfolderLabel(clientUploadTarget) || "06-CLIENT SUBMITTAL" }}</strong> and are marked as uploaded by you.
+					</p>
+					<label
+						class="inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white"
+						:class="clientUploadBusy ? 'pointer-events-none opacity-60' : ''"
+						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+					>
+						<FeatherIcon name="upload" class="h-4 w-4" />
+						{{ clientUploadBusy ? "Uploading…" : "Choose files" }}
+						<input type="file" multiple class="hidden" :disabled="clientUploadBusy" @change="onClientFilesPicked" />
+					</label>
+				</template>
+				<p v-else class="text-xs text-[color:var(--portal-muted)]">This project has no 06-CLIENT SUBMITTAL folder yet.</p>
+				<p v-if="clientUploadMsg" class="text-sm text-green-700">{{ clientUploadMsg }}</p>
+				<p v-if="clientUploadErr" class="text-sm text-red-600">{{ clientUploadErr }}</p>
+			</div>
 
 			<div class="grid gap-3 md:grid-cols-3">
 				<div class="rounded-xl border border-[color:var(--portal-border)] p-4 text-sm shadow-sm" style="background:var(--portal-surface)">
@@ -2291,6 +2354,7 @@ async function deleteProjectFile(f) {
 							<td class="px-4 py-3">
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="ml-1 text-xs text-[color:var(--portal-subtle)]">(private)</span>
+								<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 							</td>
 							<td class="px-4 py-3">{{ fmtFileSize(f.file_size) }}</td>
 							<td class="px-4 py-3">{{ subfolderLabel(f.folder) }}</td>

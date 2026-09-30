@@ -173,7 +173,10 @@ doc_events = {
 		"on_update": "portal_app.api.projects.sync_project_access_from_todo",
 		"on_trash": "portal_app.api.projects.sync_project_access_from_todo",
 	},
-	"User": {"on_trash": "portal_app.api.helper.delete_portal_user_customer_rows"},
+	"User": {
+		"on_trash": "portal_app.api.helper.delete_portal_user_customer_rows",
+		"on_update": "portal_app.api.helper.drop_customer_rows_without_role",
+	},
 	"Customer": {"on_trash": "portal_app.api.helper.delete_portal_user_customer_rows"},
 }
 

@@ -51,6 +51,7 @@ const inviteSendWelcome = ref(true);
 const inviteBusy = ref(false);
 const cpCanReset = ref(false);
 const cpCanInvite = ref(false);
+const cpCanLinkExisting = ref(false);
 const cpWarn = ref("");
 const showResetUser = ref(false);
 const resetTarget = ref(null);
@@ -156,6 +157,7 @@ async function loadCustomerPortalUsers() {
 		customerPortalUsers.value = [];
 		cpCanReset.value = false;
 		cpCanInvite.value = false;
+		cpCanLinkExisting.value = false;
 		return;
 	}
 	try {
@@ -166,11 +168,13 @@ async function loadCustomerPortalUsers() {
 		customerPortalUsers.value = res.users || [];
 		cpCanReset.value = !!res.can_reset_password;
 		cpCanInvite.value = !!res.can_invite;
+		cpCanLinkExisting.value = !!res.can_link_existing;
 	} catch (e) {
 		console.error(e);
 		customerPortalUsers.value = [];
 		cpCanReset.value = false;
 		cpCanInvite.value = false;
+		cpCanLinkExisting.value = false;
 	}
 }
 
@@ -447,16 +451,26 @@ async function syncCustomerPortalUserIds(userIds) {
 	cpSaving.value = true;
 	cpMessage.value = "";
 	cpError.value = "";
+	cpWarn.value = "";
 	try {
 		const res = await call({
 			method: "portal_app.api.projects.sync_customer_portal_users",
 			type: "POST",
 			args: { project: props.name, users: JSON.stringify(userIds) },
 		});
-		const notified = Object.keys(res?.notified || {});
-		cpMessage.value = notified.length
-			? `Added ${notified.join(", ")}. An access email is on its way.`
-			: "Saved.";
+		// notified maps user -> false when the mail could not be queued (no outgoing
+		// email account); say so instead of promising an email that never goes out.
+		const entries = Object.entries(res?.notified || {});
+		const sent = entries.filter(([, ok]) => ok).map(([u]) => u);
+		const failed = entries.filter(([, ok]) => !ok).map(([u]) => u);
+		cpWarn.value = failed.length
+			? `Added ${failed.join(", ")}, but the access email could not be sent. Check the outgoing email account.`
+			: "";
+		cpMessage.value = sent.length
+			? `Added ${sent.join(", ")}. An access email is on its way.`
+			: failed.length
+				? ""
+				: "Saved.";
 		await loadCustomerPortalUsers();
 		window.setTimeout(() => {
 			if (cpMessage.value === "Saved.") cpMessage.value = "";
@@ -1029,6 +1043,7 @@ async function submitNewCustomer() {
 						</li>
 					</ul>
 
+					<template v-if="cpCanLinkExisting">
 					<p class="mb-2 text-xs font-medium uppercase text-gray-500">Add existing user</p>
 					<label class="mb-2 block text-xs text-gray-600">Search by email, username, or full name — they are added as soon as you choose one.</label>
 					<div ref="cpPickerRef" class="mb-3 space-y-2" @focusin="onCpFocus">
@@ -1059,6 +1074,8 @@ async function submitNewCustomer() {
 							</button>
 						</div>
 					</div>
+					</template>
+					<p v-else class="mb-3 text-xs text-gray-500">Only a System Manager or Projects Manager can add customer portal users.</p>
 					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
 					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>
 					<p v-if="cpWarn" class="text-sm font-medium text-amber-700">{{ cpWarn }}</p>
@@ -1234,7 +1251,10 @@ async function submitNewCustomer() {
 						@uploaded="loadFiles"
 						@open-share="onOpenShareFromPanel"
 					/>
-					<p v-else class="mb-4 text-sm text-[color:var(--portal-muted)]">Customer portal access is view-only for files.</p>
+					<p v-else class="mb-4 text-sm text-[color:var(--portal-muted)]">
+						You can upload into 06-CLIENT SUBMITTAL from
+						<button type="button" class="font-medium underline" @click="router.push({ path: '/files', query: { project: project.name } })">the Files hub</button>.
+					</p>
 					<p v-if="fileDeleteError" class="mb-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
 						{{ fileDeleteError }}
 					</p>
@@ -1245,6 +1265,7 @@ async function submitNewCustomer() {
 								<FeatherIcon name="file" class="mr-1.5 inline h-3.5 w-3.5 text-[color:var(--portal-muted)]" />
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="portal-pill portal-pill-muted ml-1.5">private</span>
+								<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 							</span>
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
 								<a
