@@ -1119,38 +1119,44 @@ def _assert_user_eligible_for_customer_link(user, customer):
 			frappe.PermissionError,
 		)
 
-	existing = frappe.db.get_value("User", user, "portal_linked_customer")
-	if existing and existing != customer:
-		frappe.throw(
-			_("User {0} is already linked to another customer ({1}).").format(user, existing),
-			frappe.LinkValidationError,
-		)
+	# A login may belong to several customers (Portal User Customer); ATA keeps one
+	# Customer per project, so one client contact routinely spans several.
 
 
 def _attach_portal_customer_user(user, customer):
 	helper.ensure_portal_customer_role()
+	if not frappe.db.exists(helper.PORTAL_USER_CUSTOMER, {"user": user, "customer": customer}):
+		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": user, "customer": customer}).insert(
+			ignore_permissions=True
+		)
 	doc = frappe.get_doc("User", user)
 	doc.flags.ignore_permissions = True
-	if frappe.get_meta("User").has_field("portal_linked_customer"):
+	changed = False
+	if frappe.get_meta("User").has_field("portal_linked_customer") and not doc.portal_linked_customer:
 		doc.portal_linked_customer = customer
-	has_pc = any(r.role == helper.PORTAL_CUSTOMER_ROLE for r in doc.roles)
-	if not has_pc:
+		changed = True
+	if not any(r.role == helper.PORTAL_CUSTOMER_ROLE for r in doc.roles):
 		doc.append("roles", {"role": helper.PORTAL_CUSTOMER_ROLE})
-	doc.save()
+		changed = True
+	if changed:
+		doc.save()
 
 
 def _detach_portal_customer_user(user, customer):
-	if not frappe.get_meta("User").has_field("portal_linked_customer"):
+	"""Remove ONE customer from a login; the Portal Customer role goes only with the last."""
+	customers = helper.get_portal_linked_customers(user)
+	if customer not in customers:
 		return
-	if frappe.db.get_value("User", user, "portal_linked_customer") != customer:
-		return
+	frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": user, "customer": customer})
+	remaining = [c for c in customers if c != customer]
 	doc = frappe.get_doc("User", user)
 	doc.flags.ignore_permissions = True
-	if frappe.get_meta("User").has_field("portal_linked_customer"):
-		doc.portal_linked_customer = None
-	for row in list(doc.roles):
-		if row.role == helper.PORTAL_CUSTOMER_ROLE:
-			doc.remove(row)
+	if frappe.get_meta("User").has_field("portal_linked_customer") and doc.portal_linked_customer == customer:
+		doc.portal_linked_customer = remaining[0] if remaining else None
+	if not remaining:
+		for row in list(doc.roles):
+			if row.role == helper.PORTAL_CUSTOMER_ROLE:
+				doc.remove(row)
 	doc.save()
 
 
@@ -1164,7 +1170,7 @@ def get_customer_portal_users(project):
 
 	users = frappe.get_all(
 		"User",
-		filters={"portal_linked_customer": cust, "enabled": 1},
+		filters={"name": ["in", helper.get_customer_contact_users(cust) or [""]], "enabled": 1},
 		fields=["name", "full_name", "email", "last_login"],
 		order_by="name asc",
 		limit_page_length=200,
@@ -1206,25 +1212,31 @@ def sync_customer_portal_users(project, users):
 		new_list.append(u)
 
 	new_set = set(new_list)
+	# Enabled only: the UI list hides disabled contacts, so counting them here would
+	# silently detach them on the next add/remove click.
 	old_set = set(
 		frappe.get_all(
 			"User",
-			filters={"portal_linked_customer": cust},
+			filters={"name": ["in", helper.get_customer_contact_users(cust) or [""]], "enabled": 1},
 			pluck="name",
 		)
 	)
 
+	notified = {}
 	for u in new_set - old_set:
 		# Mutating an existing account's roles is a User write, not a project action.
 		if not frappe.has_permission("User", "write", user=frappe.session.user):
 			frappe.throw(_("You are not allowed to modify user accounts."), frappe.PermissionError)
 		_assert_user_eligible_for_customer_link(u, cust)
 		_attach_portal_customer_user(u, cust)
+		# Tell them: an access notice, or the welcome (set-password) mail if they have
+		# never set a password. Queued, so a mail failure cannot undo the link.
+		notified[u] = _send_portal_invite(u, cust)
 
 	for u in old_set - new_set:
 		_detach_portal_customer_user(u, cust)
 
-	return {"ok": True, "users": sorted(new_set)}
+	return {"ok": True, "users": sorted(new_set), "notified": notified}
 
 
 def _can_reset_customer_portal_passwords(user=None) -> bool:
@@ -1355,6 +1367,9 @@ def create_customer_portal_user_from_project(project, email, full_name, password
 	# _send_portal_access_notice); email_sent then means "queued".
 	doc.flags.delay_emails = True
 	doc.insert()
+	frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": cust}).insert(
+		ignore_permissions=True
+	)
 
 	return {
 		"name": doc.name,
@@ -1386,7 +1401,7 @@ def _assert_resettable_customer_contact(user, customer):
 		helper.has_portal_staff_project_access(user)
 		or frappe.db.exists("Project User", {"user": user})
 		or not helper.user_is_customer_portal_user(user)
-		or helper.get_portal_linked_customer(user) != customer
+		or customer not in helper.get_portal_linked_customers(user)
 	):
 		frappe.throw(
 			_("Only a customer portal user of this project's customer can be reset here."),
@@ -1441,7 +1456,7 @@ def reset_customer_portal_user_password(project, user, mode="email", new_passwor
 
 
 @frappe.whitelist()
-def search_portal_users(txt=""):
+def search_portal_users(txt="", customer_portal=0):
 	if not helper.user_can_use_portal():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	if helper.user_is_customer_portal_user() and not helper.has_portal_staff_project_access():
@@ -1453,6 +1468,10 @@ def search_portal_users(txt=""):
 		["enabled", "=", 1],
 		["name", "not in", ["Guest", "Administrator"]],
 	]
+	if cint(customer_portal):
+		# Customer-portal picker: only external (Website User) logins — staff can never
+		# be linked as a customer contact, so listing them only produced errors.
+		filters.append(["user_type", "=", "Website User"])
 	kwargs = dict(
 		filters=filters,
 		fields=["name", "full_name", "email", "user_image"],

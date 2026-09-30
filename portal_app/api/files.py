@@ -417,10 +417,10 @@ def _assert_valid_share_recipient(uid: str, project: str) -> None:
 	"""
 	if helper.has_portal_staff_project_access(uid):
 		return
-	linked_customer = helper.get_portal_linked_customer(uid)
-	if linked_customer:
-		# Customer contact: only for their own customer's projects.
-		if frappe.db.get_value("Project", project, "customer") != linked_customer:
+	linked_customers = helper.get_portal_linked_customers(uid)
+	if linked_customers:
+		# Customer contact: only for their own customers' projects.
+		if frappe.db.get_value("Project", project, "customer") not in linked_customers:
 			frappe.throw(
 				_("That user belongs to a different customer and cannot be given access."),
 				frappe.PermissionError,

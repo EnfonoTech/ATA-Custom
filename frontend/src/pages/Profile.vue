@@ -300,13 +300,23 @@ function extractErr(e) {
 							<FeatherIcon name="briefcase" class="h-4 w-4" />
 						</div>
 						<div class="min-w-0 flex-1">
-							<p class="portal-section-title">Linked customer (portal)</p>
-							<p class="mt-1 truncate font-semibold text-[color:var(--portal-text)]">
-								{{ profile.portal_linked_customer_name || profile.portal_linked_customer }}
+							<p class="portal-section-title">
+								{{ (profile.portal_linked_customers || []).length > 1 ? "Linked customers (portal)" : "Linked customer (portal)" }}
 							</p>
-							<p class="truncate font-mono text-xs text-[color:var(--portal-subtle)]">{{ profile.portal_linked_customer }}</p>
+							<template v-if="(profile.portal_linked_customers || []).length">
+								<div v-for="c in profile.portal_linked_customers" :key="c.name" class="mt-1">
+									<p class="truncate font-semibold text-[color:var(--portal-text)]">{{ c.customer_name || c.name }}</p>
+									<p class="truncate font-mono text-xs text-[color:var(--portal-subtle)]">{{ c.name }}</p>
+								</div>
+							</template>
+							<template v-else>
+								<p class="mt-1 truncate font-semibold text-[color:var(--portal-text)]">
+									{{ profile.portal_linked_customer_name || profile.portal_linked_customer }}
+								</p>
+								<p class="truncate font-mono text-xs text-[color:var(--portal-subtle)]">{{ profile.portal_linked_customer }}</p>
+							</template>
 							<p v-if="profile.is_customer_portal_user" class="mt-2 text-xs text-[color:var(--portal-muted)]">
-								You only see projects where this customer is linked.
+								You only see projects of the customers listed here.
 							</p>
 						</div>
 					</div>

@@ -172,7 +172,9 @@ doc_events = {
 		"after_insert": "portal_app.api.projects.sync_project_access_from_todo",
 		"on_update": "portal_app.api.projects.sync_project_access_from_todo",
 		"on_trash": "portal_app.api.projects.sync_project_access_from_todo",
-	}
+	},
+	"User": {"on_trash": "portal_app.api.helper.delete_portal_user_customer_rows"},
+	"Customer": {"on_trash": "portal_app.api.helper.delete_portal_user_customer_rows"},
 }
 
 # Scheduled Tasks
