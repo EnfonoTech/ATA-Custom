@@ -725,7 +725,7 @@ def list_project_files(project):
 		order_by="creation desc",
 	)
 	_flag_client_uploads(files)
-	return {"files": files, "settings": helper.get_portal_settings_dict(), "folders": folders}
+	return {"files": files, "settings": helper.get_public_portal_settings(), "folders": folders}
 
 
 @frappe.whitelist()
@@ -1536,6 +1536,9 @@ def list_folder_shares(project, folder_path=None):
 	Frappe's built-in sharing system. Visible to any user allocated to the project.
 	"""
 	helper.assert_project_access(project)
+	# Client contacts never manage shares; the list carries other people's emails and
+	# the URL of every guest link, which may point at internal folders.
+	_assert_not_customer_sharer()
 	if not _share_doctype_available():
 		return {"shares": _list_native_docshares(project, folder_path), "tracking_available": False}
 
@@ -2525,8 +2528,10 @@ def download_shared_file(token, file):
 	if not project or not folder:
 		frappe.throw(_("Invalid share link payload"), frappe.PermissionError)
 
+	# Fail CLOSED, like get_shared_folder_files: a missing share row (deleted instead
+	# of revoked) used to leave direct download URLs working until the token expired.
 	rec = _share_record_for_token(token)
-	if rec is not None and not _share_record_active(rec):
+	if not _share_record_active(rec):
 		frappe.throw(_("This share link has been revoked or expired."), frappe.PermissionError)
 
 	doc = frappe.get_doc("File", cstr(file))
@@ -2964,6 +2969,12 @@ def submit_to_client_submittal(file_name, project):
 		frappe.throw(_("Invalid file"))
 	if src.is_folder:
 		frappe.throw(_("Cannot submit a folder"))
+	# Submitting hands a file to the client, so it is a manage action (project team or
+	# manager), and never for contracts — those are manager-only and must not be
+	# copied into the client's folder by anyone who merely knows the docname.
+	helper.assert_manage_project(project)
+	if cstr(src.folder or "").startswith("Home/Contracts/"):
+		frappe.throw(_("Contract files cannot be submitted to the client."), frappe.PermissionError)
 
 	folder_ctx = get_project_folders(project)
 	target_folder = None

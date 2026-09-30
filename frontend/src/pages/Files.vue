@@ -1308,7 +1308,8 @@ async function onZipInput(e) {
 			{ project: project.value, target_folder: targetFolder.value },
 		);
 		zipMsg.value = `ZIP extracted: ${res?.uploaded ?? 0} file(s) uploaded${res?.failed ? `, ${res.failed} failed` : ""}.`;
-		await loadFilesAndFolders();
+		// loadFiles() also refreshes the folder list; loadFilesAndFolders never existed.
+		await loadFiles();
 		setTimeout(() => (zipMsg.value = ""), 6000);
 	} catch (err) {
 		const body = err?.responseBody;

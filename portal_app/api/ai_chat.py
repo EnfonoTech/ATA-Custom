@@ -21,10 +21,12 @@ def _scoped_file_rows(allowed, since=None, limit=20):
 	if since:
 		date_clause = " AND creation >= %s"
 		params.append(since)
+	# Contracts are manager-only (see contracts.py); keep their names out of answers.
+	contracts_clause = "" if helper.has_portal_staff_project_access() else " AND folder NOT LIKE 'Home/Contracts/%%'"
 	return frappe.db.sql(
 		f"""SELECT file_name, file_size, creation FROM `tabFile`
            WHERE is_folder = 0 AND attached_to_doctype = 'Project'
-             AND attached_to_name IN ({placeholders}){date_clause}
+             AND attached_to_name IN ({placeholders}){date_clause}{contracts_clause}
            ORDER BY creation DESC LIMIT {cint(limit)}""",
 		params,
 		as_dict=True,
@@ -34,10 +36,10 @@ def _scoped_file_rows(allowed, since=None, limit=20):
 def _scoped_file_count(allowed):
 	if not allowed:
 		return 0
-	return frappe.db.count(
-		"File",
-		{"is_folder": 0, "attached_to_doctype": "Project", "attached_to_name": ["in", allowed]},
-	)
+	filters = {"is_folder": 0, "attached_to_doctype": "Project", "attached_to_name": ["in", allowed]}
+	if not helper.has_portal_staff_project_access():
+		filters["folder"] = ["not like", "Home/Contracts/%"]
+	return frappe.db.count("File", filters)
 
 
 @frappe.whitelist()
@@ -45,6 +47,9 @@ def ask(question):
 	"""Query project database with natural language and return a structured answer."""
 	if not helper.user_can_use_portal():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	# Client contacts: the answers list file names from every folder of their projects,
+	# not only 06-CLIENT SUBMITTAL.
+	helper.assert_not_customer_only()
 
 	q = cstr(question).strip()
 	if not q:

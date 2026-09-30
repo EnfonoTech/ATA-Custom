@@ -793,6 +793,7 @@ async function submitNewCustomer() {
 								Files
 							</button>
 							<button
+								v-if="!isCustomerPortalUser"
 								type="button"
 								class="portal-btn"
 								@click="router.push({ path: '/tasks', query: { project: project.name } })"
@@ -1292,7 +1293,7 @@ async function submitNewCustomer() {
 					</ul>
 				</div>
 
-				<div class="portal-card-strong p-5">
+				<div v-if="!isCustomerPortalUser" class="portal-card-strong p-5">
 					<div class="mb-3 flex items-center justify-between">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="check-square" class="h-4 w-4 text-[color:var(--portal-accent)]" />

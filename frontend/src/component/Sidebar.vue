@@ -130,11 +130,15 @@ const groups = computed(() => {
 		items: isCust ? [] : [{ name: "ATA AI CHAT", path: "/ai-chat", icon: "zap", ai: true }],
 	};
 
-	// Defence in depth: drop any item still flagged comingSoon, then drop any group
-	// left with nothing in it, so an empty heading never renders.
-	return [workspace, ai, files, account]
-		.map((g) => ({ ...g, items: (g.items || []).filter((i) => !i.comingSoon) }))
-		.filter((g) => g.items.length);
+	// Defence in depth: drop any item still flagged comingSoon. Groups keep their
+	// position — the template addresses them by index (0 = workspace, 1 = AI, 2+ =
+	// the rest) — and each block hides itself when empty. Dropping the empty AI group
+	// for client contacts used to shift Files into the AI slot, which only renders
+	// ai items, leaving a bare "FILES" heading.
+	return [workspace, ai, files, account].map((g) => ({
+		...g,
+		items: (g.items || []).filter((i) => !i.comingSoon),
+	}));
 });
 
 function isActive(item) {
@@ -232,7 +236,7 @@ function navigate(item) {
 		<nav class="flex-1 space-y-4 overflow-y-auto py-3" :class="collapsed ? 'px-1.5' : 'px-2'">
 
 			<!-- ── Project Management group ── -->
-			<div class="space-y-0.5">
+			<div v-if="groups[0].items.length" class="space-y-0.5">
 				<p v-if="!collapsed" class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em]" style="color:var(--portal-section-label);">
 					{{ groups[0].title }}
 				</p>
@@ -256,7 +260,7 @@ function navigate(item) {
 			</div>
 
 			<!-- ── AI GROUP (before Team Structure) ── -->
-			<div v-if="groups[1]" class="space-y-0.5">
+			<div v-if="groups[1].items.length" class="space-y-0.5">
 				<p v-if="!collapsed" class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em]" style="color:var(--portal-section-label);">
 					{{ groups[1].title }}
 				</p>
@@ -326,7 +330,7 @@ function navigate(item) {
 			</div>
 
 			<!-- ── Remaining groups (Modules, Files, Analytics, Account) ── -->
-			<div v-for="group in groups.slice(2)" :key="group.title" class="space-y-0.5">
+			<div v-for="group in groups.slice(2).filter((g) => g.items.length)" :key="group.title" class="space-y-0.5">
 				<p v-if="!collapsed" class="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.14em]" style="color:var(--portal-section-label);">
 					{{ group.title }}
 				</p>

@@ -47,14 +47,14 @@ const routes = [
 			{ path: "dashboard", name: "Dashboard", component: Dashboard, meta: { requiresManager: true } },
 			{ path: "org-chart", name: "OrgChart", component: OrgChartPage, meta: { requiresManager: true } },
 			{ path: "teams", name: "Teams", component: TeamsPage, meta: { requiresManager: true } },
-			{ path: "gantt", name: "GanttChart", component: GanttChart },
-			{ path: "daily-task", name: "DailyTask", component: DailyTask },
+			{ path: "gantt", name: "GanttChart", component: GanttChart, meta: { staffOnly: true } },
+			{ path: "daily-task", name: "DailyTask", component: DailyTask, meta: { staffOnly: true } },
 			{ path: "contracts", name: "Contracts", component: Contracts, meta: { requiresManager: true } },
 			{ path: "projects", name: "Projects", component: Projects },
 			{ path: "projects/:name", name: "ProjectDetail", component: ProjectDetail, props: true },
-			{ path: "kanban", name: "Kanban", component: Kanban },
-			{ path: "tasks", name: "Tasks", component: Tasks },
-			{ path: "calendar", name: "Calendar", component: Calendar },
+			{ path: "kanban", name: "Kanban", component: Kanban, meta: { staffOnly: true } },
+			{ path: "tasks", name: "Tasks", component: Tasks, meta: { staffOnly: true } },
+			{ path: "calendar", name: "Calendar", component: Calendar, meta: { staffOnly: true } },
 			{ path: "files", name: "Files", component: Files },
 			{ path: "file-browser", name: "FileBrowser", component: AllFiles },
 			{ path: "shared-with-me", name: "SharedWithMe", component: SharedWithMe },
@@ -86,7 +86,7 @@ const routes = [
 			{ path: "coming-soon", name: "ComingSoon", component: ComingSoon },
 			// The sidebar has always linked to /ai-chat, but no route was registered and
 			// there is no catch-all, so the most prominent nav item rendered a blank page.
-			{ path: "ai-chat", name: "AIChat", component: AIChat },
+			{ path: "ai-chat", name: "AIChat", component: AIChat, meta: { staffOnly: true } },
 		],
 	},
 	// Anything unrecognised goes somewhere real instead of an empty router view.
@@ -126,6 +126,17 @@ router.beforeEach(async (to) => {
 
 	if (to.path === "/login" && isAuthenticated) {
 		return "/dashboard";
+	}
+
+	// Internal working tools. The sidebar hides them from client contacts and the
+	// APIs refuse them (helper.assert_not_customer_only); send a typed URL home.
+	if (to.meta.staffOnly && isAuthenticated) {
+		try {
+			const caps = await call({ method: "portal_app.api.projects.get_capabilities" });
+			if (caps?.is_customer_portal_user) return "/projects";
+		} catch {
+			return "/projects";
+		}
 	}
 
 	if (to.meta.requiresManager && isAuthenticated) {

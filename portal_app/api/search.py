@@ -39,7 +39,8 @@ def global_search(query):
 			projects += [p for p in by_code if p.name not in seen]
 
 	tasks = []
-	if allowed_names:
+	# Tasks are internal; client contacts never see them (see helper.assert_not_customer_only).
+	if allowed_names and not helper.is_customer_only():
 		tasks = frappe.get_all(
 			"Task",
 			filters={"project": ["in", allowed_names], "subject": ["like", like]},
