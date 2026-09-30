@@ -1,513 +1,384 @@
-# Portal App — End-user & UAT guide
+# ATA Project Portal — Start here
 
-This document is for **people testing or using the Project Portal** (the web app served under **`/portal-app/`** on your ERPNext site). It describes the intended workflow, what each area does, and how **files** relate to **ERPNext** and **Frappe Drive**.
-
-Your administrator may change permissions and settings; if something here conflicts with internal policy, follow your administrator.
+This page is the front door to the documentation. It tells you what the portal is, which guide to read, what features exist and where to find them.
 
 ---
 
-## 1. How to open the portal
+## What the portal is
 
-1. In a browser, go to:  
-   `https://<your-site-domain>/portal-app/`  
-   (or your host’s equivalent; the app lives under the path **`portal-app`**.)
-2. You should see the **login** page. Sign in with the same **email/username and password** as ERPNext Desk (unless your org uses a different auth flow).
-3. After login, the portal checks that your user is allowed to use the project portal (see **Who can access** below). If access is denied, you will be logged out with an error—contact your administrator.
+The **ATA Project Portal** is a web app for ATA's architecture projects.
 
-**Tip:** Bookmark **`/portal-app/login`** for testers. After **Logout**, you are sent back to the portal login page.
+- It runs on the company's **ERPNext v15** site. ERPNext is the business system that holds the real records. ERPNext is built on **Frappe**, a framework for business apps.
+- The portal is a Frappe **app** called `portal_app`. An app is a package of extra code installed on the site.
+- The screens are a **Vue single-page app** (SPA: one web page that changes screens without reloading). It lives at **`/portal-app`**.
+- The portal has **no separate database**. It stores its data in the ERPNext site: mostly standard ERPNext records (listed below), plus a few DocTypes (tables) of its own: Portal User Customer, Portal Folder Share, Portal Project Settings, Portal Folder Route Rule, Portal File Type and Portal Demo Seed Run. The standard records are:
+  - each project is an ERPNext **Project**;
+  - each document is an ERPNext **File** attached to that project;
+  - each folder is also a **File** record, marked as a folder, under `Home/Attachments/<project ID>/…`. Folders are not attached to the Project. The portal finds them by their path;
+  - each project team member is a row in the project's **Users** table;
+  - each client company is an ERPNext **Customer**.
+- **Staff** use the portal to plan projects, keep documents in a standard folder tree and share them.
+- **Client contacts** sign in to see their own projects. They send and receive files mainly through one folder, **06-CLIENT SUBMITTAL**. Staff can also share other files with them by name.
 
----
-
-## 2. Who can access the portal
-
-A user can use the portal if **any** of the following is true:
-
-- They have the ERPNext role **Projects User**, **Projects Manager**, or **System Manager**, or  
-- They appear on at least one ERPNext **Project** in the **Project User** child table (team list), or  
-- They have the role **Portal Customer** and their **User** record has **Portal linked Customer** set to a valid **Customer** ID (Desk → User). Those users only see projects whose **Customer** field matches that link.
-
-**Projects Manager** and **System Manager** typically see **all** projects. **Portal Customer** users see **only** projects linked to their customer. Other internal users see projects where they are listed as team members.
-
-Administrators maintain access in **Desk** → **Project** (team / Project User rows), **User** roles, and the **Portal linked Customer** field (after `portal_app` migrate). You can also create **Portal Customer** users from the portal **Admin** page (if you have User create permission), with the Customer ID filled in.
-
-### Linking a customer to a project (internal users)
-
-On **Project detail**, the **Customer (ERPNext)** section lets eligible users **search** existing customers, **create** a new one (same name reuses the existing record—no duplicate), or **clear** the link. Projects must have the correct **Customer** set for **Portal Customer** users to see them.
-
----
-
-## 3. Recommended workflow for testing (UAT)
-
-Use this order so each feature has data to work with.
-
-| Step | Action | What to verify |
-|------|--------|----------------|
-| 1 | Log in | Access granted; redirect to dashboard |
-| 2 | **Dashboard** | Portfolio metrics, recent projects, quick actions (if shown) |
-| 3 | **Projects** | List, search, filters; open a project row |
-| 4 | **Project detail** | Summary cards, **Customer** link (if permitted), **Team**, **Tasks**, **Files** |
-| 5 | **Files** (hub) | Pick a project, list files; upload (internal users; **Portal Customer** only into 06-CLIENT SUBMITTAL, shown as **Client upload**) |
-| 6 | **Kanban** | Projects grouped by portal Kanban stage (or status fallback) |
-| 7 | **Calendar** | Project and task dates appear |
-| 8 | **Profile** | Name/contact fields save; header name updates after refresh if applicable |
-| 9 | **Logout** | Returns to **`/portal-app/login`** |
-
-**Optional (role-dependent):**
-
-- **New project** (on **Projects**): Only if your role/settings allow creation; you are added to the team automatically on create.
-- **Team changes** on a project: Only **Portal Project Manager** (field on the Project in Desk) or **Projects Manager** / **System Manager**.
-- **Admin** (sidebar): Only for users who can create **User** records and/or run **demo seed** (System Manager + specific settings). Not a normal end-user screen.
+> **Words used in these guides**
+> - **DocType** = a table/form in ERPNext (for example *Project*, *Task*, *File*).
+> - **Desk** = ERPNext's normal back-office screens, at `/app`.
+> - **Role** = a named set of permissions given to a user (for example *Projects User*).
+> - **Staff** = any ATA login that is not a client contact (System Manager, Projects Manager, Projects User, or anyone on a project team).
+>   **Careful:** DEVELOPER_GUIDE.md and `/tech-guide` use these words differently. There, **staff** means only System Managers and Projects Managers, and everyone else who is not a client is an **internal user**.
+> - **Manager** = a user with the System Manager or Projects Manager role. A Lead Architect or a team lead is not a manager unless they also have one of these roles.
+> - **Edit rights on a project** = you are a manager, or you are on that project's project team. Being in a Portal Team does not count. Client contacts never have edit rights.
+> - **Client contact** = a login with the *Portal Customer* role and no System Manager or Projects Manager role. A manager role always wins; a Projects User role does not.
+> - **Everyone** (in the tables below) = every signed-in portal user, client contacts included.
+> - **Website User** = a login with no access to Desk. Client contacts are Website Users.
+> - **Assign To** = Desk's way of giving a record to a person. It creates a *ToDo* for them.
+> - **Project team** = the people in a project's *Users* table. Being on it gives a Projects User edit rights on that project.
+> - **Portal Team** = a group of staff in one office, stored as an ERPNext *Department*. The Teams page, the Org Chart and the Gantt chart use it. It gives **no** access to any project.
+> - **Department** = the ERPNext record that holds a Portal Team.
+> - **Lead Architect** = the person in a project's *Portal Project Manager* field. It is a field, not a role. Some error messages call it the "portal project manager".
+> - **Kanban** = a board with one column per project stage. **Gantt chart** = a timeline of projects and milestones.
+> - **Webhook URL** = the web address the portal sends a file to when it also stores the file on an external drive.
+> - **Scheduler** = the site's background timer. It sends queued emails and, once an hour, switches off shares that have expired. If it is off, no email goes out and no share expires.
+> - **Error Log** / **Email Queue** = Desk lists of background errors and of emails waiting to be sent.
+> - **`bench migrate`** = the server command that applies app updates to the site.
 
 ---
 
-## 4. Screen reference
+## Which document do I need?
 
-### Dashboard
+| I want to… | Read this file | Hosted page on the site |
+|---|---|---|
+| Use the portal day to day (staff or client contact) | [USER_GUIDE.md](./USER_GUIDE.md) | **`/handbook`**. Public, no login needed. |
+| Use the portal as a client contact | [USER_GUIDE.md → 22. For clients](./USER_GUIDE.md#22-for-clients-how-to-use-the-portal) | `/handbook` |
+| Give a client access to their projects | [USER_GUIDE.md → 23. Giving a client access, end to end](./USER_GUIDE.md#23-for-ata-staff-giving-a-client-access-end-to-end) | `/handbook` |
+| Take a client's access away | [USER_GUIDE.md → 23.11 Removing access](./USER_GUIDE.md#2311-removing-access) | `/handbook` |
+| A staff member joins, changes role or leaves | [USER_GUIDE.md → 20.4 Staff joining, changing role or leaving](./USER_GUIDE.md#204-staff-joining-changing-role-or-leaving) | `/handbook` |
+| Look after, fix or extend the portal, or understand how it works with ERPNext | [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) | **`/tech-guide`**. Needs a login. System Managers only. |
+| Test the portal before handover (UAT = user acceptance testing) | [TESTING.md](./TESTING.md) (a quick walk through every screen) and [docs/UAT_TEST_GUIDE.md](./docs/UAT_TEST_GUIDE.md) (the full test script) | **`/test-guide`**. Needs a login. System Managers only. |
+| Hand the site over to ATA | [DEVELOPER_GUIDE.md → 10.10 Before handing over a site](./DEVELOPER_GUIDE.md#1010-before-handing-over-a-site) | `/tech-guide` |
+| Fix something that is not working | 1. [Known issues in this release](#known-issues-in-this-release) (this page)<br>2. [USER_GUIDE.md → 27. Known issues and workarounds](./USER_GUIDE.md#27-known-issues-and-workarounds) and [28. FAQ and troubleshooting](./USER_GUIDE.md#28-faq-and-troubleshooting)<br>3. [DEVELOPER_GUIDE.md → 10. Operations runbook](./DEVELOPER_GUIDE.md#10-operations-runbook) | `/handbook`, `/tech-guide` |
+| Install the app on a site, or update it | [README.md](./README.md), then [DEVELOPER_GUIDE.md → 10.0 Installing on a new site](./DEVELOPER_GUIDE.md#100-installing-on-a-new-site) | — |
+| Deploy a change, roll it back, or upgrade Frappe/ERPNext | [README.md → Updating a site](./README.md#updating-a-site), [DEVELOPER_GUIDE.md → 10.1](./DEVELOPER_GUIDE.md#101-deploy-a-change), [Roll back a bad deploy](./DEVELOPER_GUIDE.md#roll-back-a-bad-deploy), [10.14](./DEVELOPER_GUIDE.md#1014-before-and-after-upgrading-frappe-or-erpnext) | `/tech-guide` |
+| Get the big picture (this page) | [DOCUMENTATION.md](./DOCUMENTATION.md) | — |
 
-- Overview of **projects you can access**: counts, status / Kanban breakdowns, recent list.
-- **Pinned from last visits** (if shown) is stored in **this browser only** (local storage), not on the server.
-- Any **file policy** text comes from **Portal Project Settings** in Desk (see below).
+Before you use or set up the portal, read [Important rules and limits](#important-rules-and-limits).
 
-### Projects
+The old address `/user-guide` still works. It sends you to `/handbook`.
 
-- Table of projects with search and **status** filter.
-- Click a row to open **Project detail**.
-- **New project** opens a form (title, optional code, dates, customer link name) when your user is allowed to create projects.
-- **Servers column:** three small badges — **T** (Google Drive), **A** (Autodesk), and **ERP**. T/A open their linked server URL in a new tab when set on the project's edit form; greyed out and non-clickable when empty. **ERP** opens a small popup with two links: **Client Server** (the client-side server link set on the project) and **Project Files** (jumps to the **Files** hub filtered to this project).
-- **Value visibility:** the **estimated cost** shown on a project (list, Kanban, dashboard) is only visible to **System Manager** (all projects) and **Projects Manager** (only the project(s) where they are the **Portal Project Manager**) — other roles never see it.
-
-### Organization Chart
-
-- Collapsible hierarchy of teams and members, built from **Teams** data (each department is a top-level node; members are children).
-- Click the **+ / −** button on a node to expand/collapse its reports. Click a member row to see their details (avatar, role, office, direct-report count) in the right panel.
-- **Office filter** buttons (RIYADH / LISBON / MANILA / All) narrow the tree; **Headcount Summary** panel shows active employee counts per office.
-
-### Teams
-
-- Workload view of teams (ERPNext **Department** records tagged with an office). Filter by office; see each team's member list and active-project count.
-- **Add / remove member** (individually or by picking a whole **User Group** at once) — only for users allowed to manage teams. Membership is implemented as Frappe's native **Assign To** on the Department, kept in sync with each project's team.
-
-### Contracts
-
-- **Management-only** area (System Manager / Projects Manager on that specific project) for uploading contract/agreement documents — kept entirely separate from the shared project **Files** area so regular team members never see it.
-- Files are stored under a dedicated `Home/Contracts/<project>` folder tree, always **private**, and restricted to **`.pdf`, `.doc`, `.docx`, `.jpg`, `.jpeg`, `.png`**.
-- Pick a project on the left, then **Upload Contract**, open, or delete files on the right.
-
-### Gantt Chart
-
-- Team-grouped timeline of all projects you can access, with office/team filters. Useful for a portfolio-level view of overlapping schedules.
-- **Milestones:** the **+ Milestone** button (or the flag icon on a project row) lets a manager set a short text label plus the **date** it falls on — the red flag on the timeline is positioned at that real date. A milestone with no date only shows the flag at the project's bar end (legacy rows saved before the date field existed).
-
-### Daily Task
-
-- A personal, per-user reminder board (4 weeks) of small dated-and-timed items — title, date/time, colour, complete/incomplete. Not tied to a project.
-- Staff (System Manager / Projects Manager) can assign an item to someone else; regular users can only create items for themselves.
-- Stored as standard calendar **Event** records (two small hidden custom fields), not a new DocType. Replaces the earlier **Daily Gantt** screen.
-
-### AI Chat
-
-- Sidebar link **"ATA AI Chat"** opens a Q&A-style panel that answers questions about project counts, budgets, recent uploads, and tasks using rule-based keyword matching over the portal's own data (not a live AI/LLM call).
-- **Known issue:** as of this writing the `/ai-chat` route is not registered in the app router, so this screen does not currently load — see **Common issues** below.
-
-### Project detail
-
-- **Summary:** Status, Kanban stage, client, timeline, cost, progress (from ERPNext **Project**).
-- **Customer (ERPNext):** Search customers, create without duplicate name, link or clear (project managers / others allowed by the portal; **Portal Customer** users cannot change this).
-- **Team:** Search users, add/remove, **Save team** (only if you are allowed to manage the project). **Portal Customer** users do not manage team.
-- **Files:** Internal users: drag-and-drop or click to upload; optional **Private**. **Portal Customer** users: list and open 06-CLIENT SUBMITTAL, and upload into it from the Files hub (tagged **Client Upload** in Desk, **Client upload** badge in the portal). Same storage as the **Files** hub (see **Files and Frappe Drive**).
-- **Tasks:** Read-only list of **Task** documents linked to this project.
-
-### Kanban
-
-- Columns follow the **Portal Kanban Stage** custom field on **Project** when present; otherwise ERP **status** is used.
-- Click a card to open that project’s detail page.
-
-### Calendar
-
-- Shows dated **Project** and **Task** entries you are allowed to see.
-
-### Files (hub)
-
-- Select a **project**, then list and upload files attached to that **Project** in ERPNext.
-- Banners may appear if administrators enabled flags in **Portal Project Settings** (Frappe Drive, Google Drive, BIM placeholders)—read them as **guidance**, not as automatic sync (see next section).
-
-### File Browser (all files)
-
-- Cross-project file listing with category/classification filters and search — for finding a file when you don't remember which project it's under.
-
-### Shared with me / Manage shares
-
-- **Shared with me:** files/folders another user has explicitly shared with you (Drive-style), grouped by project.
-- **Manage shares** (project admins): audit and **revoke** active share links/grants across every project you manage.
-
-### Folder Rules / File Tools (admin & auditor)
-
-- **Folder Rules:** define automatic routing of uploaded files into secondary folders based on file type ("Mirror" or "Cross-route").
-- **File Tools:** edit the company-wide folder template applied to new projects (manual rows, or import from a ZIP/folder structure).
-
-### Admin (System Manager)
-
-- Create portal users (Projects User / Projects Manager / Portal Customer roles only).
-- Run or manage **demo seed** data runs (tracked and reversible) for training/sales demos — includes an option to import a project list from an uploaded `.docx` file.
-
-### Profile
-
-- Update **full name**, **mobile**, **language**, **time zone** where permitted.
-- **Appearance:** Use the **profile menu** (top right) → **Theme · Light / Dark / System** to change display mode; choice is saved in the browser.
-
-### Sidebar
-
-- **Collapse:** Use the chevron on the sidebar or **Ctrl+B** (⌘+B on Mac); preference is saved in the browser.
+> **Warning — keep it safe.** This repository is public on GitHub, and `/handbook` can be read by anyone. Never put any of these in these documents: passwords or app passwords (including the outgoing mailbox), API keys or tokens, `site_config.json` values such as the encryption key, server IP addresses, SSH or jump-host details, test or UAT logins, real people's names or emails, or real client names. Use neutral examples such as `client@example.com`, "Customer A" or `PROJ-0001`.
 
 ---
 
-## 5. Files, ERPNext, and Frappe Drive (important)
+## Who is who (roles at a glance)
 
-### What the portal actually stores
+| Role | Who has it | What they can see | What they can change |
+|---|---|---|---|
+| **System Manager** | ERP administrators | Every project, including every project's money value (estimated cost) | Everything. Only a System Manager can reset a client's password. Once a project has a Lead Architect, only a System Manager or that Lead Architect can hand it to someone else. |
+| **Projects Manager** | Senior staff | Every project. Money value only on projects where they are the Lead Architect | Every project, with three limits:<br>1. They can set the **Portal Team** only on projects where they are the Lead Architect.<br>2. They can see and change the money value (**estimated cost**) only on those projects.<br>3. They cannot hand a project that has a different Lead Architect to someone else (only a System Manager can).<br>They can add an existing client login to a customer. They cannot invite a new client login unless they are allowed to create user accounts. |
+| **Projects User** | Staff | Every project | **Any project:** upload and share files; send a copy to the client folder (**Submit** in the File Browser); delete files they uploaded; revoke shares they created; update and comment on tasks assigned to them.<br>**Projects whose project team they are on (in the portal):** edit the details, rename or delete the project, link a customer, move its stage, rename folders, delete any file, revoke any share, create tasks and milestones, remove client logins.<br>**Not allowed:** change the project team (unless they are the Lead Architect); add an existing client login (System and Projects Managers only) or invite a new one (System Manager by default). |
+| **Portal Customer** | Client contacts (Website Users) | Only the projects of their own customer(s). On each project page they also see its status, stage, dates, progress, task list, task comments and the **Team** card (which shows project team members' login emails). Among files: only **06-CLIENT SUBMITTAL**, plus anything staff shared with them by name | Nothing on projects except uploading files into 06-CLIENT SUBMITTAL (plus their own profile, password and personal reminders) |
+| **Auditor** (add-on role) | Staff who look after the folder standard | Same as their other portal role | The company-wide folder template (**File tools**, and the folder template import on the **Admin** page) |
+| **Team lead** (not an ERPNext role: the *Portal Team Lead* field on a Portal Team) | The person named as *Portal Team Lead* on a Portal Team | Their own Portal Team on the **Teams** page | Their Portal Team's name, office and members. They cannot create new teams. |
 
-When you **upload a file** in the portal (project detail or **Files** hub), the system creates a standard ERPNext **File** document **attached to the Project** (`attached_to_doctype = Project`, `attached_to_name = <project id>`). Files live on **your ERPNext site** (public or private URL depending on the **Private** option and site configuration). They are the same attachments you would see on the **Project** form in **Desk**.
+*Auditor* is an add-on role. Give it together with Projects User or Projects Manager. On its own it does not let a person sign in to the portal.
 
-- **Open** uses the file URL returned by the system (respects login / private file rules).
-- **Private:** When checked, the file is stored as a private attachment in Frappe/ERPNext (typical pattern: access only when logged in with permission).
+> **Warning:** Auditor is a standard ERPNext role. In Desk it also opens many accounting reports, for example Trial Balance and Profit and Loss. Give it only to people who may see those. Otherwise ask a System Manager to edit the folder template for you.
 
-#### Upload destination modes (new)
+*Administrator* holds every role automatically, including Portal Customer. The portal treats it as a System Manager, but some screens act differently (header search shows no teams, for example). Check client and Projects User behaviour with real test logins of those roles, never with Administrator.
 
-Portal upload now supports selectable destination modes in the Files screen:
+**What a Lead Architect can do on their project**
 
-- **ERPNext File only**: create attachment on `Project` (default behavior)
-- **External platform only**: send file to configured external integration endpoint, no ERPNext File row
-- **Both ERPNext + External**: save ERPNext File and send same file to external endpoint
+The Lead Architect of a project also gets these rights on that one project:
 
-External upload is provider-based:
-- Frappe Drive
-- Google Drive
-- BIM 360 / ACC
+1. Apart from System and Projects Managers, only the Lead Architect can change who is on the project team (the **Team** card and its **Save team** button).
+2. Only the Lead Architect or a System Manager can set the project's **Portal Team** (the team it is grouped under on the Gantt chart).
+3. A Projects Manager sees the project's money value, and can change it, only if they are its Lead Architect.
 
-To enable direct external upload, configure webhook URLs in **Portal Project Settings**:
-- `Frappe Drive upload webhook URL`
-- `Google Drive upload webhook URL`
-- `BIM 360 / ACC upload webhook URL`
+**Who can set the Lead Architect:** only managers get a list of names in the Lead Architect picker, so in practice only they can fill it. A Projects Manager can fill it while it is empty or while they hold it. Once someone else holds it, only a System Manager can change it. To edit the project's other details, a person needs edit rights on the project.
 
-Also enable the corresponding provider flags in **Portal Project Settings**.
+**In practice:**
 
-### What “Frappe Drive” means here
-
-**Frappe Drive** is a **separate product** (often its own site or app) for team file management, sharing, and previews. It is **not** the same table as ERPNext **File** rows on **Project**.
-
-In **Portal Project Settings** (Desk → **Portal Project Settings**, single):
-
-- **Use Frappe Drive on this server** — When enabled, the **Files** area shows an informational banner that Drive is part of your organisation’s story.
-- **Drive / site base URL** — Optional URL (e.g. your Drive or team wiki base) shown next to that banner so users can **open Drive in another tab** for large folders or collaboration workflows.
-
-**The portal does not automatically upload or mirror portal attachments into Frappe Drive** with the stock app: uploads stay as **File** on **Project**. If your organisation wants a single source of truth in Drive, you either:
-
-- use **Desk / Drive** for those assets and link to them in process documentation, or  
-- add a **custom integration** (outside this guide).
-
-Treat the Drive settings as **communication + deep-link helpers** for testers and staff, unless your implementer has added extra automation.
-
-### Other flags in settings
-
-- **Internal file policy note** — Shown on the dashboard / files context when filled; use for “classification”, retention, or naming rules.
-- **Google Drive / BIM 360** — Currently **placeholders** in settings; any real integration would be custom or future work.
+- A Lead Architect sees the Team controls only if they are also on the project team, or are a manager.
+- A Lead Architect who is a Projects User sees an empty **Portal Team** list, unless they lead a Portal Team. Ask a manager to set the Portal Team.
 
 ---
 
-## 6. Where Desk still matters
+## Feature overview
 
-Heavy ERPNext setup is done in **Desk**, not in the portal:
+**Staff**, **Manager**, **Edit rights** and **Everyone** are explained in *Words used in these guides* above. The **Guide** column says where to read more: the user guide explains how to use a feature, and the developer guide explains how it works inside.
 
-- **Project** master data, **Portal Project Manager**, **Portal Kanban Stage**, **Portal Project Code**
-- **Customer** links, accounting, **Task** creation/editing in depth
-- **Portal Project Settings** (Drive URL, file note, who can create projects, demo seed flags)
-- **User** and **Role** assignment
-
-The portal is for **day-to-day visibility**, **team membership** (where allowed), **file exchange on the project**, and **planning views** (Kanban / calendar).
-
----
-
-## 7. Testing checklist (quick)
-
-- [ ] Login and access check  
-- [ ] Dashboard loads without error  
-- [ ] At least one project visible (or create one if permitted)  
-- [ ] Project detail → team save (as permitted)  
-- [ ] Upload file → appears in list → open/download works  
-- [ ] Private upload vs public (per your security test plan)  
-- [ ] Kanban and Calendar show expected projects  
-- [ ] Profile save  
-- [ ] Theme: Light / Dark / System  
-- [ ] Sidebar collapse (Ctrl+B)  
-- [ ] Logout → portal login URL  
-
-For a full manual QA checklist covering every screen (Org Chart, Teams, Gantt, Daily Task, Contracts, Files/sharing, Admin, known issues), see **[TESTING.md](TESTING.md)**.
-
----
-
-## 8. Common issues
-
-| Symptom | What to check |
-|--------|----------------|
-| “You do not have access to the project portal” | User needs a portal role or **Project User** row on a project. |
-| No projects in the list | User not on any project team; or not Projects Manager / System Manager. |
-| Cannot create project | **Portal Project Settings** → “Allow any portal user to create projects”, or user needs manager/create permission. |
-| Cannot change team | User is not **Portal Project Manager** on that project and not Projects/System Manager. |
-| Upload fails | Network; session expired (log in again); file size limits on server; permission on **Project**. |
-| Drive banner but files “only” on ERPNext | Expected: see **Files, ERPNext, and Frappe Drive** above. |
-| **"ATA AI Chat" sidebar link does nothing / blank page** | Known gap — the `/ai-chat` route is not yet wired up in the app; report to your administrator/developer rather than retrying. |
-| Task quick-create project/assignee dropdown stays empty | Known gap — the underlying lookup endpoints are not yet implemented; create/assign the task from **Project detail** or Desk instead. |
-| "Submit to Client Submittal" button in File Browser errors | Known gap — the backend action for this button is not yet implemented. |
-
----
-
-## 9. For administrators (one line each)
-
-- Install/build: `bench install-app portal_app`, `bench build --app portal_app`, migrate site after DocType changes.  
-- **Node** for frontend build: match `frontend/.nvmrc` if Vite fails on old Node.  
-- **Demo data** (if implemented): **Admin** page and/or `bench execute` per your implementation notes—**never** enable demo seed on production without review.
+| Feature / screen | Who uses it | Where | Guide |
+|---|---|---|---|
+| **Getting in and your account** | | | |
+| Sign in (standard ERPNext login; anyone without portal access is signed out again). **Forgot Password?** opens ERPNext's standard password reset. Use it if you never set a password. | Everyone | `/portal-app/login` | [User](./USER_GUIDE.md#3-signing-in-and-your-account) · [Developer](./DEVELOPER_GUIDE.md#61-portal_appapiauth) |
+| Profile: name, mobile, language, time zone, change password, linked customers | Everyone | `/portal-app/profile` | [User](./USER_GUIDE.md#3-signing-in-and-your-account) |
+| Top bar: search for projects and tasks (staff also get teams) with Ctrl/⌘ + K, notifications bell, light/dark mode, colour theme, **New Project** button (it opens the create form only for people allowed to create projects), avatar menu (**Profile**, **Switch to Desk**, **Logout**). Ctrl/⌘ + B folds the side menu. | Everyone | Every page | [User](./USER_GUIDE.md#4-finding-your-way-around) |
+| Coming Soon page: a placeholder for modules that are not built yet (the Dashboard's **Total Team Members** card opens it) | Everyone | `/portal-app/coming-soon` | — |
+| **Projects and planning** | | | |
+| Dashboard: headline numbers, milestones, recent activity | System Manager, Projects Manager | `/portal-app/dashboard` | [User](./USER_GUIDE.md#5-dashboard-managers) · [Developer](./DEVELOPER_GUIDE.md#69-portal_appapidashboard) |
+| Projects list: Year / Cards / Table views, search, status filter, print. Create, edit, delete and assign a Lead Architect (needs rights) | Everyone. Clients see only their customers' projects | `/portal-app/projects` | [User](./USER_GUIDE.md#6-projects-list) · [Developer](./DEVELOPER_GUIDE.md#63-portal_appapiprojects--projects-tasks-teams-customers-client-logins) |
+| Project page: rename, link a customer, project team members, **Portal Team** (the team the project is grouped under on the Gantt chart), files, tasks | Anyone who can open the project. Changes need edit rights | `/portal-app/projects/<ID>` | [User](./USER_GUIDE.md#7-the-project-page) · [Developer](./DEVELOPER_GUIDE.md#63-portal_appapiprojects--projects-tasks-teams-customers-client-logins) |
+| Client logins (Project page → **Customer** and **Customer portal users** cards) | Staff with edit rights on the project. See [Client logins](#client-logins) for who can do each action. | Project page | [User](./USER_GUIDE.md#23-for-ata-staff-giving-a-client-access-end-to-end) · [Developer](./DEVELOPER_GUIDE.md#65-customer-portal-flows-in-plain-steps) |
+| Kanban: see projects by stage. Moving a project needs edit rights on it | Staff | `/portal-app/kanban` | [User](./USER_GUIDE.md#8-kanban-board) |
+| Gantt Chart & Milestones | Staff | `/portal-app/gantt` | [User](./USER_GUIDE.md#9-gantt-chart-and-milestones) · [Developer](./DEVELOPER_GUIDE.md#610-portal_appapigantt) |
+| Calendar of project and task dates | Staff | `/portal-app/calendar` | [User](./USER_GUIDE.md#10-calendar) |
+| Tasks: filter, edit in the list, comments, quick create (creating a task needs edit rights on the project) | Staff | `/portal-app/tasks` | [User](./USER_GUIDE.md#11-tasks) · [Developer](./DEVELOPER_GUIDE.md#63-portal_appapiprojects--projects-tasks-teams-customers-client-logins) |
+| Daily Task: a personal 4-week reminder board | Staff. Managers can also add reminders for someone else (see [Projects and teams](#projects-and-teams)) | `/portal-app/daily-task` | [User](./USER_GUIDE.md#12-daily-task-personal-reminders) |
+| Contracts: contract documents, stored in their own folder apart from the project folders. See [Files and uploads](#files-and-uploads) for where their names still show. | **Contracts page:** System Manager, Projects Manager.<br>**A project's contracts:** anyone with edit rights on that project can list, upload, delete and download them, a Projects User on its project team included.<br>**In Desk** they are ordinary Project attachments: any staff member who can open the Project in Desk can open them. | `/portal-app/contracts` | [User](./USER_GUIDE.md#17-file-tools-routing-rules-and-contracts) · [Developer](./DEVELOPER_GUIDE.md#612-portal_appapicontracts) |
+| ATA AI Chat: answers simple questions (counts, lists, budgets) from live data. It matches keywords; it is not a real AI | Staff (hidden from client contacts in the menu only, see [Projects and teams](#projects-and-teams)) | `/portal-app/ai-chat` | [User](./USER_GUIDE.md#21-ata-ai-chat) · [Developer](./DEVELOPER_GUIDE.md#613-portal_appapiai_chat) |
+| **Files and sharing** | | | |
+| Files hub: pick a project and folder, upload files, a whole folder or a ZIP, rename folders (needs edit rights), delete (edit rights, or your own uploads), download several files as a ZIP, share. | Staff. Clients see 06-CLIENT SUBMITTAL only and can upload into it | `/portal-app/files` | [User: uploading](./USER_GUIDE.md#14-uploading-files) · [User: files](./USER_GUIDE.md#15-working-with-files-files-hub-and-file-browser) · [Developer](./DEVELOPER_GUIDE.md#64-portal_appapifiles--folders-uploads-downloads-sharing) |
+| File type: each upload can carry a file type from the **Portal File Type** list. The portal picks one from the file extension, and you can change it before you upload. | Staff | Files hub, and the **Files** card on a project page | [User](./USER_GUIDE.md#14-uploading-files) · [Developer](./DEVELOPER_GUIDE.md#46-portal-file-type) |
+| File Browser: browse by year, project and folder. **Submit** (it opens *Submit to Client*) copies a file into the project's 06-CLIENT SUBMITTAL folder as `NN_<today>_<file name>`, so the project's client contacts can see the copy. Check the project before you click it. | Everyone (clients see their folder only). **Submit** and **Share** work for any staff member on any project, and never for clients (see [Known issues](#known-issues-in-this-release)) | `/portal-app/file-browser` | [User](./USER_GUIDE.md#15-working-with-files-files-hub-and-file-browser) |
+| Shared: everything shared with you, your team projects and your own uploads | Everyone | `/portal-app/shared-with-me` | [User](./USER_GUIDE.md#16-sharing-files-and-folders) |
+| Shares: check and revoke every share on projects you have edit rights on | Users with edit rights on at least one project | `/portal-app/manage-shares` | [User](./USER_GUIDE.md#16-sharing-files-and-folders) · [Developer](./DEVELOPER_GUIDE.md#510-sharing-model) |
+| Public share link: view and download a shared folder without logging in | Anyone who has the link | `/portal-app/shared-folder?token=…` | [User](./USER_GUIDE.md#16-sharing-files-and-folders) · [Developer](./DEVELOPER_GUIDE.md#510-sharing-model) |
+| Routing rules: copy uploads into a second folder automatically. See [Files and uploads](#files-and-uploads). | Page: users with edit rights on at least one project. Saving: System Manager, Projects Manager | `/portal-app/folder-rules` | [User](./USER_GUIDE.md#17-file-tools-routing-rules-and-contracts) · [Developer](./DEVELOPER_GUIDE.md#93-folder-route-rules) |
+| File tools: edit the company-wide folder template for new projects | Auditor, System Manager | `/portal-app/file-tools` | [User](./USER_GUIDE.md#17-file-tools-routing-rules-and-contracts) · [Developer](./DEVELOPER_GUIDE.md#92-folder-template) |
+| **Teams and administration** | | | |
+| Teams: Portal Team cards; create teams, rename them, change their office, add and remove members | **Create teams:** System Manager, Projects Manager. **Edit a team:** those managers, or the team lead for their own team only. | `/portal-app/teams` | [User](./USER_GUIDE.md#18-teams) · [Developer](./DEVELOPER_GUIDE.md#66-portal_appapiteams) |
+| Org Chart: Portal Teams drawn as a tree. Managers can also rename a team, change its office and add or remove members from here | System Manager, Projects Manager | `/portal-app/org-chart` | [User](./USER_GUIDE.md#19-org-chart) |
+| Admin: create portal users, run and delete demo data, import the folder template (from a ZIP or by picking a folder) | See [Admin and setup](#admin-and-setup) | `/portal-app/admin` | [User](./USER_GUIDE.md#20-admin-page) · [Developer](./DEVELOPER_GUIDE.md#67-portal_appapiportal_admin) |
+| **Inside ERPNext (Desk and background)** | | | |
+| Desk workspace **Project Portal**: shortcuts and links to every portal DocType | Desk users | `/app/project-portal` | [Developer](./DEVELOPER_GUIDE.md#49-desk-page-portal_app-and-workspace-project-portal) |
+| Desk page **Portal App** (`/app/portal_app`) and the **Project Portal** tile on `/apps` open the same portal | Desk users | Desk | [Developer](./DEVELOPER_GUIDE.md#49-desk-page-portal_app-and-workspace-project-portal) |
+| Portal Project Settings: logo and name, who may create projects, folder template, optional external-drive upload settings (Frappe Drive, Google Drive and BIM 360 webhook URLs), client welcome text | System Manager | Desk → **Portal Project Settings** | [Developer](./DEVELOPER_GUIDE.md#91-portal-project-settings) |
+| **Portal User Customer**: which client login may see which customer. Add and remove customers from the project page instead (see [Client logins](#client-logins)). | System Manager | Desk → **Portal User Customer** | [Developer](./DEVELOPER_GUIDE.md#41-portal-user-customer) |
+| **Portal File Type**: the file types offered when uploading, picked from the file extension | System Manager (Projects Manager and Projects User can read) | Desk → **Portal File Type** | [User](./USER_GUIDE.md#14-uploading-files) |
+| **Portal Folder Share**: a record of every share and public link | System Manager, Projects Manager | Desk → **Portal Folder Share** | [Developer](./DEVELOPER_GUIDE.md#42-portal-folder-share) |
+| **Portal Folder Route Rule**: the routing rules | System Manager (Projects Manager can read) | Desk → **Portal Folder Route Rule** | [Developer](./DEVELOPER_GUIDE.md#47-portal-folder-route-rule) |
+| **Portal Demo Seed Run**: demo data batches that can be deleted again | System Manager | Desk → **Portal Demo Seed Run** | [Developer](./DEVELOPER_GUIDE.md#48-portal-demo-seed-run-and-portal-demo-seed-item) |
+| Files uploaded by clients are tagged **Client Upload** in Desk and show a **Client upload** badge in the portal's file lists | Staff | Desk → File list, filter by tag; portal file lists | [User](./USER_GUIDE.md#15-working-with-files-files-hub-and-file-browser) |
+| Desk **Assign To** on a Project keeps the project team up to date (and the other way round) | Background | Desk → Project form | [Developer](./DEVELOPER_GUIDE.md#33-hookspy-entry-by-entry) |
+| Client contacts are sent to `/portal-app` after signing in or setting a password | Background | ERPNext login | [Developer](./DEVELOPER_GUIDE.md#75-where-clients-land-after-setting-a-password) |
+| Removing the Portal Customer role from a User removes all their customer links and shares | Background | Desk → User form | [Developer](./DEVELOPER_GUIDE.md#59-client-access-comes-only-from-portal-user-customer) |
+| Hourly job that switches off expired shares | Background | Scheduler | [Developer](./DEVELOPER_GUIDE.md#106-checking-the-hourly-share-expiry) |
 
 ---
 
-*This guide matches the **portal_app** behaviour: ERPNext **Project**–centric SPA at **`/portal-app/`**, files as **File** attachments on **Project**, and **Portal Project Settings** for policy text and Frappe Drive **URL/banner** hints.*
+## Where the data lives in ERPNext
+
+| In the portal | In ERPNext |
+|---|---|
+| A project | A **Project** record. The extra portal fields start with `portal_`, for example the project code, Lead Architect and Kanban stage. |
+| A project team member | A row in the project's **Users** table (*Project User*). It is kept in step with Desk **Assign To**. |
+| A task and its comments | An ERPNext **Task**. Comments are **Comment** records on the Task and show on its Desk timeline. |
+| A document | A **File** record attached to the Project, in the File Manager folder `Home/Attachments/<project ID>/…`. **Add files through the portal, not with the Desk form's Attach button.** A file attached in Desk goes to `Home/Attachments` with no project folder. It shows in no folder in the portal, clients never see it, and folder shares and links do not include it. |
+| A folder | A **File** row with *Is Folder* ticked, under `Home/Attachments/<project ID>/…`. Folders are not attached to the project. The portal finds them by their path. |
+| A file's type | The *Portal File Type* field on the File |
+| A client upload | A private File in 06-CLIENT SUBMITTAL, tagged **Client Upload** |
+| A contract | A private **File** attached to the Project, in `Home/Contracts/<project ID>`. Staff can see its name in several portal lists, and in Desk anyone who can open the Project can open it (see [Files and uploads](#files-and-uploads)). |
+| A client company | A **Customer** record |
+| A client login | A **User** (Website User) with the role *Portal Customer*, plus one **Portal User Customer** row for each customer it may see. Only these rows give access. |
+| A share | A **Portal Folder Share** record. A share with a named person also adds ERPNext **DocShare** rows (DocShare = Frappe's "shared with this person" record). A public link has no DocShare: it is the Portal Folder Share record plus a signed token that expires. |
+| A routing rule | A **Portal Folder Route Rule** record |
+| A Portal Team | A **Department** directly under *All Departments* that has a *Portal Office*. Members are **Assign To** entries on the Department. Being in a Portal Team gives no project rights at all. Staff can read every project because of their role. Edit rights on a project come from a manager role, or from being on that project's own project team (its Users table). |
+| A milestone | A row in the project's *Portal Milestones* table |
+| A daily reminder | A private **Event** (calendar entry) |
+| A notification (the bell) | A **Notification Log** record, the same one the Desk bell uses |
+| Demo data | A **Portal Demo Seed Run** record that lists everything it created |
+| Portal settings | **Portal Project Settings** (a DocType with a single record) |
 
 ---
 
-## 10. BRD Baseline (ATA Project Management System)
+## Key URLs
 
-The following baseline is included from the official BRD:
-
-### BUSINESS REQUIREMENTS DOCUMENT
-- **Project Management System**
-- **Based on ERPNext Platform**
-- **ATA Architecture**
-- **February 3, 2026**
-
-### Document Information
-- **Project Name:** ATA Project Management System
-- **Organization:** ATA Architecture
-- **Platform:** ERPNext (Frappe Framework)
-- **Implementation Partner:** OpenArabia
-- **Date:** 2/3/2026
-- **Version:** 1.0
-
-### 1. Executive Summary
-ATA Architecture requires a comprehensive project management system to effectively manage architectural projects, track tasks, monitor costs, and optimize resource utilization. This BRD defines the business requirements for an ERPNext-based project management solution.
-
-#### 1.1 Project Objectives
-- Centralize project tracking and management
-- Implement structured task assignment and tracking with Gantt charts
-- Enable accurate project costing and budget management
-- Track timesheet and resource utilization
-- Provide real-time project visibility and reporting
-
-#### 1.2 Key Benefits
-- Enhanced project visibility (real-time status tracking and dashboards)
-- Improved resource management (team allocation and utilization)
-- Better cost control (actual vs budget tracking)
-- Timeline management with visual Gantt planning
-- Data-driven decisions with reporting and analytics
-
-### 2. Current State Analysis
-#### 2.1 Existing Challenges
-- Manual spreadsheet-driven tracking
-- Limited real-time portfolio visibility
-- Informal task management
-- Budget overruns from delayed cost visibility
-- Resource conflicts
-- Manual reporting burden
-
-### 3. Business Objectives
-- Centralized project management
-- Task and timeline control
-- Financial oversight
-- Resource optimization
-- Automated reporting
-
-### 4. Functional Requirements
-
-#### 4.1 Project Management
-**FR-PM-001 (High): Project Assignment & Management**
-- Create projects (name, code, client, dates)
-- Assign project manager and team with roles
-- Track project lifecycle and status
-- Define budget and financial parameters
-- Link projects to clients
-
-**FR-PM-002 (High): Project Views & Dashboards**
-- List view with filtering/sorting
-- Kanban board
-- Calendar view
-- Portfolio dashboard
-- Project-specific dashboard
-- Role-customized views
-
-#### 4.2 Task Management
-**FR-TM-001 (High): Task Creation & Assignment**
-- Task creation linked to projects
-- Assignment to team members with deadlines
-- Priority (Low/Medium/High/Urgent)
-- Expected vs actual hours
-- Dependencies and subtasks
-- Task file attachments
-
-**FR-TM-002 (High): Multiple Task Views**
-- Tree view
-- Kanban view with drag/drop status updates
-- Calendar view
-- Gantt integration
-- My Tasks view
-- Seamless view switching
-
-**FR-TM-003 (High): Task Status & Progress Tracking**
-- Configurable status workflow
-- Progress tracking (0-100%)
-- Completion indicators
-- Status change notifications
-- Activity logs
-- Comment threads
-
-#### 4.3 Gantt Chart Integration
-**FR-GC-001 (High): Visual Timeline Representation**
-- Timeline rendering for tasks
-- Dependency lines
-- Milestones
-- Color coding by status/priority/assignee
-- Zoom (day/week/month)
-- Export image/PDF
-
-**FR-GC-002 (Medium): Interactive Gantt Features**
-- Drag/drop schedule changes
-- Dependency recalculation
-- Visual dependency creation
-- Baseline vs actual
-- Conflict alerts
-- Today indicator
-
-**FR-GC-003 (Medium): Milestone Management**
-- Milestones with target dates
-- Link tasks to milestones
-- Track completion
-- Approaching-date alerts
-- Prominent milestone display
-- Milestone reports
-
-#### 4.4 Costing & Budgeting
-**FR-CB-001 (High): Project Budget Management**
-- Set total budget
-- Category-level budget breakdown
-- Revision audit history
-- Threshold alerts (80/90/100%)
-
-**FR-CB-002 (High): Cost Tracking**
-- Labor cost from approved timesheets
-- Manual expense entry
-- Link costs to tasks
-- Real-time budget vs actual
-- Cost reporting by project/task/category/period
-
-**FR-CB-003 (Medium): Profitability Analysis**
-- Gross margin calculation
-- Revenue vs costs (if available)
-- Forecast profitability
-
-#### 4.5 Time Sheet Management
-**FR-TS-001 (High): Timesheet Entry & Submission**
-- Daily/weekly entries
-- Project/task linking
-- Hours + notes
-- Billable/non-billable
-- Submission workflow
-- Draft save
-- Copy previous timesheet
-
-**FR-TS-002 (High): Timesheet Approval Workflow**
-- Route to manager/supervisor
-- Approve/reject with comments
-- Employee notifications
-- Bulk approval
-- Approval history
-- Approved-only costing impact
-
-**FR-TS-003 (Medium): Time Analysis & Reporting**
-- Time by project/task/employee
-- Actual vs estimated hours
-- Utilization reports
-- Export to payroll/billing
-- Weekly/monthly/quarterly reporting
-
-#### 4.6 Reporting & Analytics
-**FR-RA-001 (High): Project Dashboards**
-- Timeline/budget/task visuals
-- Overdue and at-risk highlights
-
-**FR-RA-002 (High): Standard Reports**
-- Project status reports
-- Task completion reports
-- Timesheet summaries
-- Export to PDF/Excel
-
-**FR-RA-003 (Medium): Custom Report Builder**
-- Field/filter/group/sort query builder
-- Saved report templates
-- Sharing custom reports
-
-### 5. User Roles & Permissions
-- **System Admin:** Full access
-- **Director/Executive:** Read-only portfolio/report access
-- **Project Manager:** Full control over assigned projects
-- **Architect/Designer:** Project read + task/timesheet write
-- **Team Member:** Assigned-task scope
-- **Finance/Accounts:** Read-only financial scope
-
-### 6. Technical Requirements
-#### 6.1 Platform & Technology
-- ERPNext on Frappe, MariaDB
-- English + Arabic support
-- Cloud deployment
-
-#### 6.2 Performance Requirements
-- Page load < 3s
-- Gantt render < 5s for 100+ tasks
-- Report generation < 10s
-- 50+ concurrent users
-- 99.5% uptime
-
-#### 6.3 Security Requirements
-- RBAC
-- SSL/TLS
-- Audit trail
-- Strong passwords
-- Optional 2FA
-
-### 7. Success Criteria
-#### 7.1 Adoption
-- 100% active projects in-system within 4 weeks
-- 90% daily active team use
-- 90% timesheet compliance
-- User satisfaction >= 4.0/5.0
-
-#### 7.2 Business Impact
-- 50% reduction in manual status effort
-- Improved budget accuracy
-- Better resource visibility
-- Reduced project delays
-- Better data-driven decisions
-
-### 8. Implementation Approach
-- **Timeline:** 8–12 weeks (OpenArabia proposal)
-- **Phases:** setup/config -> migration/integration -> UAT/training -> pilot/go-live
-- **Dependencies:** infra readiness, stakeholder availability, migration data quality, timely approvals
-
-### 9. Conclusion
-The BRD defines an ERPNext-based end-to-end project management solution for ATA Architecture, covering project lifecycle, tasks, timelines, resources, costs, and analytics.
-
-#### 9.1 Next Steps
-- Review and approve BRD
-- Finalize OpenArabia contract
-- Schedule kickoff
-- Identify champions
-- Prepare migration data
+| Address | What it is | Who can open it |
+|---|---|---|
+| `/portal-app` | The portal. Managers land on the Dashboard, everyone else on Projects. | Signed-in portal users |
+| `/portal-app/login` | The portal sign-in page. Good to bookmark. | Anyone |
+| `/handbook` | The illustrated user handbook | Anyone, no login |
+| `/tech-guide` | The technical guide | Signed-in System Managers |
+| `/test-guide` | The UAT tester guide | Signed-in System Managers |
+| `/user-guide` | Old address. Sends you to `/handbook`. | Anyone |
+| `/portal-app/shared-folder?token=…` | A public share link | Anyone who has the link, until it expires or is revoked |
+| Desk → workspace **Project Portal** (`/app/project-portal`) | Shortcuts: Open Portal, Project, Task, Portal Project Settings, **User Guide** (opens `/handbook`), **Technical Guide** (opens `/tech-guide`). Cards: Portal Setup, Files & Sharing, Projects. | Desk users |
 
 ---
 
-**End of BRD baseline section**
+## Important rules and limits
+
+### Projects and teams
+
+- **Staff can open every project.** Being on a project's **project team** is what gives a Projects User edit rights on it.
+- **The project-team rule applies in the portal only.** In Desk, ERPNext's standard permissions give every Projects User read, write, create, delete and share on **every** Project, and so on every file attached to a project. A staff member who can use Desk can change or delete any project there. Give Desk access only to people you trust with the whole portfolio.
+- **"Allow any portal user to create projects" is on by default** in Portal Project Settings. Switch it off if only managers should create projects.
+- **Desk Assign To changes project rights.**
+  1. Assigning a Project to someone in Desk adds them to the project team, so they get edit rights on that project.
+  2. Closing or cancelling that assignment in Desk removes them from the project team again. This does not happen if they have another open assignment on the same project.
+  3. If this sync fails, nobody sees a message. The only trace is an entry in Desk → **Error Log** titled "sync_project_access_from_todo failed".
+- **Portal Teams need an Office.** Only Departments directly under *All Departments* that have a *Portal Office* show on Teams, the Org Chart, the Gantt and the pickers. If you clear a team's office, the team disappears from all of them.
+- **Portal Team membership is an Assign To on the Department.** If a member's ToDo is closed or cancelled in Desk, they drop out of the Portal Team.
+- **Team leads** are set in Desk on the Department's *Portal Team Lead* field, or when a new user is created on the Admin page (**Team Manager**). A team lead can rename their Portal Team and change its office and members, but cannot create teams.
+- **A hidden menu item is not a locked page.** Client contacts do not see Tasks, Kanban, Calendar, Gantt, Daily Task or ATA AI Chat in the menu, but those addresses still open if typed in. Project data on them is limited to the client's own projects.
+- **Long lists stop at 500 without a warning.** The Projects list and Kanban show at most 500 projects, and Tasks and Calendar at most 500 tasks. Use search or filters to narrow the list.
+- **Header search finds projects by name or project code only.** It does not search the project ID (for example PROJ-0001), the customer or file names. To find a project by its ID, use the search box on the Projects list. To find a file, open its project in the File Browser and use its search box.
+- **ERPNext rules can block a save.** A task's dates cannot be later than its project's Expected End Date: move the project's end date first. A project cannot be deleted while any task, timesheet or share record (revoked ones too) still points to it, and the Projects list then shows "Could not delete project". Setting a task to **Completed** makes ERPNext close all its assignments. The task leaves *Only my tasks* and *Assigned to you*, and an assignee who is not on the project team can no longer edit it or add comments.
+- **When a manager adds a reminder for someone else, the manager still owns it.** It shows on the other person's Daily Task board, but only the manager sees it in the Desk calendar and can change or delete it there. Frappe's daily "Upcoming Events for Today" email also goes to the manager, not to the other person. Staff get that daily email for their own reminders too.
+
+### Files and uploads
+
+- **The client folder name must be exact.** Clients see only a folder named **`06-CLIENT SUBMITTAL`**. Some older projects use `06 - CLIENT SUBMITTAL` (with spaces), and clients cannot see those. The portal will not add a correct folder next to an old one. To fix an old project:
+  1. Open the **Files** hub and pick the project. You need edit rights on it.
+  2. On the `06 - CLIENT SUBMITTAL` folder, click **Rename**.
+  3. Type `06-CLIENT SUBMITTAL` exactly and save.
+  4. Share the folder again, and make new links. Old shares and links on it stop working.
+
+  **Once a folder is named `06-CLIENT SUBMITTAL`, never rename it.** Clients lose it at once, and its shares and public links stop working.
+
+  Keep exactly one folder per project whose name starts with `06-CLIENT SUBMITTAL`, and never begin any other folder name with that text (for example, do not archive an old folder as `06-CLIENT SUBMITTAL OLD`). Rename such folders to something like `99-ARCHIVE CLIENT SUBMITTAL`.
+- **Folders are built once per project.** The portal builds the folder tree from the template only when a project has no folders yet: when a project is created in the portal, at the first portal upload, when a template import on the Admin page or in File tools is applied to that project, or when a Mirror routing rule needs a folder. Opening a project does not build it.
+- **A project created in Desk has no folders.** To build them:
+  1. Open the **Files** hub and pick the project.
+  2. Click the **Project folder (all files)** card.
+  3. Click **Use this folder for upload**.
+  4. Upload one file.
+- **Template changes affect new projects only.** Changing the template never adds or renames folders in existing projects. Importing a template on the Admin page or in File tools replaces the live template at once. On the Admin page, **Apply to project** says "Folders applied" but builds nothing on a project that already has folders.
+- **Upload files and Upload folder put each upload in a new dated folder.**
+  1. The portal makes a new sub-folder inside the folder you picked. Its name is a running number plus today's date, for example `03_2026-09-30`. When you upload one file or one folder, its name is added at the end, for example `03_2026-09-30_plan`.
+  2. With **Upload files**, each file is also renamed to *file name*\_*folder name*\_*date*. For example, `plan.pdf` uploaded into `01-DOCUMENTS` becomes `plan_01-DOCUMENTS_2026-09-30.pdf`. You can change the name in the confirm box before you upload.
+  3. **Upload folder** keeps the original file names and the folder's own sub-folders inside the new dated folder.
+
+  Exceptions:
+  - **Upload ZIP** and uploads by client contacts: no dated folder, no renaming.
+  - **Store in = "External platform only"**: nothing is stored in the portal. **Upload files** in the Files hub makes no dated folder. **Upload folder**, and any upload from a project page, still leave an empty dated folder behind.
+
+  The running number counts every sub-folder already in the chosen folder, standard ones included. The first upload into `01-DOCUMENTS` is therefore numbered `07`. A second upload with the same name on the same day gets `_v2`, `_v3`. If the exact same file content is already stored on the site, ERPNext may keep that file's existing name instead of the one you typed.
+- **Only the Upload ZIP button unpacks a ZIP.** A ZIP that you drop in or pick with **Upload files** is stored as one file.
+- **Uploads are private by default.** A private file can be opened only by a signed-in person who can open its project. Staff can open every project, so they can open every private file. Client contacts can open only files in 06-CLIENT SUBMITTAL and files shared with them by name. Client uploads are always private. If you untick **Private upload** before **Upload files** or **Upload folder**, the file is **public**. Anyone who has its web address can open it without signing in, and revoking shares does not change that. Leave the box ticked unless the file is meant for the public. (**Upload ZIP** and **Submit** in the File Browser always store private files.)
+- **Some file types are blocked.** Web and program files cannot be uploaded, for example .html, .svg, .js, .exe, .php, .py and .bat. Put such a file inside a ZIP and upload the ZIP with **Upload files** (it is stored as one file). **Upload ZIP** skips blocked file types when it unpacks and reports them as failed.
+- **ERPNext can block more file types.** If Desk → System Settings → *Allowed File Extensions* is filled in (one type per line, for example `PDF`), every portal upload whose type is not on that list is refused: normal uploads, files inside a ZIP, contracts, client uploads and **Submit** in the File Browser. Leave the field empty, or list every type ATA uses, including the CAD/BIM formats and `ZIP`.
+- **Upload size limits.** Several limits apply, and the smallest one wins:
+  1. The site's `max_file_size` setting (in the site's configuration file). If it is not set, each file can be at most **10 MB**.
+  2. Desk → System Settings → *Max File Size (MB)*. If this has a smaller number than (1), the smaller number applies. Leave it empty, or set it at least as high as (1).
+  3. The whole upload request: capped at `max_file_size` if it is set, otherwise at 25 MB.
+  4. The web server's own upload limit.
+
+  These limits apply to single uploads, each file inside a ZIP, contracts and **Submit** in the File Browser. A file over the limit fails with "File size exceeded the maximum allowed size…" or an "HTTP 413" error. Ask an administrator to raise the limits ([DEVELOPER_GUIDE.md → 9.10](./DEVELOPER_GUIDE.md#910-raising-the-upload-limit) and [10.7](./DEVELOPER_GUIDE.md#107-common-problems-and-fixes)). The portal's own ZIP limits (up to 2000 files or 500 MB per upload, 500 files or 500 MB per download) apply only after these.
+- **External drives are optional.** In the Files hub, **Advanced options → Store in** can also send a file to Frappe Drive, Google Drive or BIM 360 / ACC. This works only when that provider is switched on in Portal Project Settings and has a webhook URL.
+- **Treat each drive webhook URL like a password.** Anyone who has the URL can send files to that drive. The URLs are set in Portal Project Settings (Frappe Drive, Google Drive or BIM 360), and the portal does not hide them from signed-in users, client contacts included. Leave the webhook fields empty and the providers switched off unless you accept that. Never put a password, key or token inside a webhook URL.
+- **Routing rules run only from a project page.** They copy an upload into a second folder: either the same path in another tree (*Mirror*), or, for files of a chosen classification, a different folder (*Cross-route*). They run only when you upload from the **Files** card on a project page, not from the Files hub, **Upload ZIP**, Desk or client uploads. No rules come with the app: a manager must create them. The **Add documents mirror** button fills in the 01-DOCUMENTS → 03-BALADIYA/01-DOCUMENTS rule (Baladiya = the municipality).
+
+  Separately from routing rules, the project-page panel also copies an upload made into a `02-CONCEPT/01-CONCEPT STUDIES/<discipline>` folder into that folder's sub-folders (except those whose name starts with `1.`). An upload into such a `1. …` folder is copied into its own sub-folders. Each copy gets its own dated folder. The copies are listed in the confirm box, and you can remove them there before you upload.
+- **Contracts are not fully private, even inside the portal.** They are private Files attached to the project in `Home/Contracts/<project ID>`.
+  - Staff can see contract **file names** (not contents) in ATA AI Chat answers about recent files, and on the Shares page (under "Project folder (all files)", for projects they have edit rights on). Managers also see them in the Dashboard's Recent Activity.
+  - Contracts never appear in the Files hub or the File Browser.
+  - The Contracts page shows only to managers, but anyone with edit rights on the project can reach its contracts.
+  - In Desk, anyone who can open that Project can see and open them.
+
+  Give contract files neutral names. Allowed types: .pdf, .doc, .docx, .jpg, .jpeg, .png.
+- **Portal downloads are not in the Access Log.** Files opened from the Files hub, the File Browser, a project page, a ZIP download or a public link are sent by the portal itself and write no entry in Desk → **Access Log**. Only private files opened through ERPNext's own file links (for example from the Shared page, the Contracts page or Desk) are logged. The *opens* count on a public link is not reliable either (see [Known issues](#known-issues-in-this-release)).
+
+### Sharing
+
+- **Shares expire.** A share with a person lasts 30 days by default and a public link 7 days. In the Files hub share dialog you can choose any number from 1 to 365 days. A share made from the File Browser always lasts 30 days. There is no Extend button: share again with the same person to reset the date (this also makes you the owner of that share, so the person who first made it can no longer revoke it unless they have edit rights on the project), or make a new link. An hourly job switches off expired shares, so the site scheduler must be on. Access ends when the hourly job runs, so it can last up to an hour after the expiry date.
+- **A public link opens every file in that folder and its sub-folders, private files included.** A link on the whole project folder also opens 01-DOCUMENTS/01-CLIENT DATA (IDs, title deeds). Use short expiries, and revoke links when you are done.
+- **Always revoke from the portal** (the share dialog or the Shares page). In Desk, never delete Portal Folder Share records and never tick their **Revoked** box by hand. If you do, a share with a person keeps its DocShare rows and stays open with no end date (the hourly job skips rows already marked revoked).
+- **Public links depend on the site's encryption key.** Each link carries a code made from the `encryption_key` value in the site's configuration. If that key changes, for example when the site is restored onto a new server without its old configuration, every existing public link stops working. Make new links after such a move. (Never copy the key itself into any document.)
+
+### Client logins
+
+For the steps in order (link the customer, invite, the client sets a password, first upload), see [USER_GUIDE.md → 23](./USER_GUIDE.md#23-for-ata-staff-giving-a-client-access-end-to-end).
+
+**Who can do what.** Every action is on the project page, needs edit rights on the project, and needs a Customer on the project first.
+
+| Action | Who can do it |
+|---|---|
+| Invite a new login (**Invite customer user**) | System Manager (or anyone allowed to create user accounts) |
+| Add an existing login (**Add existing user**) | System Manager, Projects Manager, or anyone allowed to create user accounts |
+| Remove a login | Anyone with edit rights on the project, including a Projects User on its project team |
+| Reset a password | System Manager only |
+
+- **Inviting.** By default the new login gets a welcome email with a link to set its own password. You may instead type a password (at least 8 characters; the site's password policy also applies) and pass it on by a safe route. If the email already has a login, that login is linked to this customer and keeps its current password. If it has never set a password, keep **Send a welcome email** ticked, or the invite is refused.
+- **Only Portal User Customer rows give a client access.** The *Portal linked Customer* field on the User form is display-only. It shows one customer (the primary one) and does not control what the client sees. Use the project page (**Customer portal users** card) to add or remove a customer. The **Portal User Customer** list in Desk works only for a login that already has the Portal Customer role. A row added there gives no role, runs no staff check and sends no email. Deleting the last row there does not remove the role. **Admin → Create portal user** makes new logins only, with one customer; add more customers later from each project page.
+- **The project's Customer decides which clients see it, straight away.** Linking a Customer on the project page shows the project (its 06-CLIENT SUBMITTAL folder, status, tasks and team emails) to every client contact of that customer at once. Changing or clearing the Customer removes it from the old customer's contacts at once. Check the customer name before you click it. After a change, open the **Shares** page and revoke any shares made to the old customer's contacts on that project; they are not removed for you.
+- **Removing a client login works per customer, not per project.** It removes the login's access to every project of that customer and cancels its folder and file shares there. Its other customers stay. When a login loses its last customer, it also loses the Portal Customer role, but the login itself stays enabled. To shut a client contact out completely:
+  1. On a project page of each of its customers, click **Remove from portal** next to the login. This also cancels its shares.
+  2. Then disable the User in Desk.
+
+  Do it in this order. A disabled login no longer shows on the card, so you cannot remove it from its customers afterwards.
+- **Removing the Portal Customer role in Desk removes every customer from that login, and its shares.** Adding the role back does not bring them back.
+- **Invite only client email addresses.** The portal refuses a login that has System Manager or Projects Manager, or that is on any project team. It does **not** refuse a Projects User who is on no project team. That login gets the Portal Customer role and from then on is treated as a client, because Portal Customer wins over Projects User. To undo it, remove the customer from that login.
+- **Pickers list client logins too.** The Team card's **Add user** box, the Lead Architect list, the Teams page's **Add member** dialog, the Daily Task **Assign to** box and the share pickers list every enabled login, client contacts included. Check the email before you add someone. A client login that is on any project team can no longer be linked to a customer or have its password reset from a project page ("This is an internal user and cannot be linked…"), and ERPNext emails it a Project Collaboration Invitation. To undo it, remove the person from every project team (and from any Portal Team you added them to), then link them again.
+- **Clients see more than files.** A client's project page shows the project's status, stage, dates, progress, task names and the project team members' login emails (Team card). The Tasks and Calendar pages are hidden from their menu but still open by address, so a client can also read the **comments** on their projects' tasks. Keep internal remarks out of task names and task comments. Use a channel the client cannot see for them.
+- **Resetting a client's password (System Manager only).** On the **Customer portal users** card, click **Reset password** and choose one:
+  1. **Email them a reset link.** This needs a working outgoing Email Account.
+  2. **Set a new password now.** It must be at least 8 characters and must pass the site's password policy, if one is switched on in System Settings. It signs the client out everywhere. Pass it to the client by a safe route, for example by phone, not in a plain email.
+- **See who has signed in.** Each login on the card shows when it last signed in, or "Invited — hasn't signed in yet".
+- **Client contacts land in the portal.** After they sign in on the normal ERPNext login page, or set a password from an email link, they are sent to `/portal-app`.
+
+### Email
+
+For every email the portal sends, see [USER_GUIDE.md → 25. Emails the portal sends](./USER_GUIDE.md#25-emails-the-portal-sends).
+
+- **Emails are queued.** When the portal says an email was sent, it means the email was queued. The site's scheduler sends it within a few minutes through the outgoing **Email Account**. Both must work: the Email Account must be set up, and the scheduler must be switched on. If an email does not arrive, look in Desk → **Email Queue**.
+- **Welcome and reset links expire.** How long they last is set in Desk → System Settings → *Reset Password Link Expiry Duration*. Frappe's default is 20 minutes, which is too short for welcome emails, so set it to a few days (for example 72 hours). If that field is empty, the links never expire. Each link works only once.
+- **Inviting someone again does not spoil their first link.** If the person still has an unused welcome link that has not expired, the portal does not send a new one, because a new link would make the old one stop working. It sends a short "You now have access" email instead. A person who already has a password gets the same short email.
+- **Share emails are optional.** When you share with a person from the Files hub, tick **Email the user when I add them** to queue a "You were granted access…" email with a link to the **Shared** page. Shares made from the File Browser never send an email.
+- **ERPNext sends its own project emails.** Whenever someone is added to a project team (by **New project**, by Desk **Assign To**, or by **Save team**), ERPNext emails them a "Project Collaboration Invitation" with a link to the project in Desk.
+- **Staff land on the apps screen after setting a password.** Staff who set their password from a welcome email are taken to the ERPNext apps screen (`/apps`), or to the default app if one is set in System Settings. Tell them to click the **Project Portal** tile or use `/portal-app`. Only client contacts are sent to the portal automatically.
+
+### Admin and setup
+
+- **Before first use, set these in ERPNext** (full list in [DEVELOPER_GUIDE.md → 10.0 Installing on a new site](./DEVELOPER_GUIDE.md#100-installing-on-a-new-site)):
+  - a default **Company**. Without it, creating a project or a team fails with "Set a default Company…";
+  - **Selling Settings → Default Customer Group** and **Default Territory**, which are used for customers created from the portal;
+  - a default outgoing **Email Account**, and the **scheduler** switched on;
+  - **System Settings → Reset Password Link Expiry Duration**. Frappe's default is 20 minutes, which is too short for welcome emails;
+  - the upload size limits, if people will upload large drawings (see *Upload size limits* in [Files and uploads](#files-and-uploads));
+  - leave **Two Factor Authentication** and **Force User to Reset Password** off for portal users (the portal sign-in page cannot handle them, see [Known issues](#known-issues-in-this-release));
+  - at least one Portal Team: a Department under *All Departments* with a *Portal Office*.
+- **Who can use the Admin page.**
+  - **Create users:** people allowed to create user accounts (System Manager by default). The roles offered are Projects User, Projects Manager and Portal Customer. Two extra options: **Team Manager** makes the new user the team lead (*Portal Team Lead*) of a Portal Team you pick; only managers see it. **Super Admin** also gives the System Manager role, that is, full ERP rights; only a System Manager sees it. This form makes new logins only.
+  - **Folder template import:** Auditor or System Manager. Import from a ZIP (**Upload ZIP…**) or by picking a folder on your computer (**Upload Folder…**). An Auditor does not see Admin in the menu, so they open `/portal-app/admin` by address.
+  - **Demo data:** System Manager only, and only when **Allow portal demo seed** is ticked in Portal Project Settings or the site is in developer mode.
+- **The built screens are not in git.** The folder `portal_app/public/frontend` is created by the build. Every install and deploy must build it (Node 22). See [README.md](./README.md).
+- **Change portal fields and the workspace in the app's code, not in Desk.** Every `bench migrate` resets the portal's custom fields (for example the Kanban stage and Phase options) and the **Project Portal** workspace to what the app defines. The ten default **Portal File Types** also come back on every migrate if deleted. Edit them instead of deleting them.
+- **Demo data is for test sites only.** A demo run creates real, working logins (one of them a Projects Manager), projects and files. Tick **Allow portal demo seed** only on a test site, and delete each run from the Admin page when you are done. Use only the Admin page (or a Portal Demo Seed Run) to make demo data. The older command-line seed (`portal_app.demo_seed.seed_showcase`) records nothing, so its users and projects cannot be removed automatically.
+- **Before handing the site over** (full list in [DEVELOPER_GUIDE.md → 10.10](./DEVELOPER_GUIDE.md#1010-before-handing-over-a-site)):
+  1. Remove the test logins. `/test-guide` shows the UAT accounts stored in the site configuration key `ata_uat_accounts`. Empty it (`bench --site <site> set-config ata_uat_accounts "[]" --parse`), run `bench --site <site> clear-website-cache`, and disable the test users in Desk.
+  2. Delete every Portal Demo Seed Run from the Admin page, then untick **Allow portal demo seed**.
+  3. Decide on **Allow any portal user to create projects** (it ships switched on).
+  4. Check the outgoing Email Account and the reset-link expiry.
+  5. Check that no webhook URL in Portal Project Settings contains a password, key or token, and that no project files are public.
+
+---
+
+## Known issues in this release
+
+These bugs are in the current code. Use the workaround until they are fixed.
+
+- **Client menu:** client contacts see a **FILES** heading with no links under it, so Files, File Browser and Shared are missing from their menu. They reach the Files hub with the **Files** / **Open in Files hub** buttons on a project page, or at `/portal-app/files`. File Browser (`/portal-app/file-browser`) and Shared (`/portal-app/shared-with-me`) open only by address. Files that staff shared with them outside 06-CLIENT SUBMITTAL appear only on the Shared page. The avatar menu also shows **Switch to Desk** to client contacts; it opens ERPNext's "not permitted" page. Clients should ignore it.
+- **Contract file names show in more places than expected:** the names (not the contents) of contract files appear to staff in ATA AI Chat answers and on the Shares page, and to managers in the Dashboard's Recent Activity. Give contracts neutral names.
+- **File Browser:** client contacts see **Submit** and **Share** buttons. Clicking them shows a permission error. Ignore the buttons.
+- **Sign-in:** someone who has no portal access sees "Server error. Please try again." instead of an access message. Check their roles and project teams. The **Remember me** box does nothing.
+- **Two Factor Authentication / Force User to Reset Password:** the portal sign-in page cannot complete either step. If either is switched on for a user, `/portal-app/login` shows "Sign-in did not keep a session (cookies blocked or wrong site URL)…" and the user stays signed out. Leave both off for portal users, or ask those users to sign in at ERPNext's normal `/login` page instead (client contacts are then sent on to `/portal-app`). A password changed from the portal's Profile page, or set with **Reset password → Set a new password now**, also does not reset the "days since last password change" counter, so a *Force User to Reset Password* policy keeps asking. See [DEVELOPER_GUIDE.md → 9.8](./DEVELOPER_GUIDE.md#98-other-erpnext-settings-the-portal-depends-on).
+- **Upload ZIP (Files hub):** the ZIP is unpacked, but a red "loadFilesAndFolders is not defined" message appears and the list does not refresh. Reload the page.
+- **Upload to an external drive:** with **Store in the portal and send to the external drive**, a failed drive upload still shows as a success. Check the drive, and look in Desk → **Error Log** for "External upload failed".
+- **Edit Project (the pencil icon in the Projects Table view):**
+  1. Only a System Manager can save it on a project whose Lead Architect is someone else. Everyone else gets "Only a System Manager can reassign the portal project manager."
+  2. Saving clears the project's **Remarks**.
+  3. ERPNext works out Progress from the tasks, so the slider value does not stick (unless the project's *% Complete Method* is set to Manual in Desk).
+  4. *In Progress* and *On Hold* are not real ERPNext statuses. The next save of the project from anywhere puts it back to Open or Completed. On a project whose *% Complete Method* is Manual, choosing *In Progress* or *On Hold* makes the save fail with 'Status cannot be "In Progress"…'.
+  5. For a Projects User the form does not load the Lead Architect. If they are the project's Lead Architect, saving the form **clears** the Lead Architect, and they lose the right to change the project team and the Portal Team. Ask a manager to set it again. Until this is fixed, Lead Architects should rename a project from its project page instead of this form.
+- **Team and Portal Team cards:** everyone with edit rights on the project sees **Add user**, **Remove**, **Save team** and the Portal Team picker. Saving the team works only for System Managers, Projects Managers and the project's Lead Architect. Others get "Only a Projects Manager, System Manager, or this project's own lead can manage its team." Setting the Portal Team works only for a System Manager or the Lead Architect, so a Projects Manager who does not lead the project is refused too. A Lead Architect who has no manager role must also be on the project team to see these controls.
+- **Save team:** every save rebuilds the team rows, so ERPNext emails a new "Project Collaboration Invitation" to every member each time.
+- **New task (Tasks page):** the **Assign to** box is ignored and the task is created with nobody assigned. Assign it in Desk.
+- **Daily Task:** dates are one day off in Saudi time (UTC+3). The TODAY badge sits on tomorrow's tile, and reminders are saved one day early.
+- **Kanban:** a column shows only when at least one project is in that stage, so you cannot move a project into an empty stage.
+- **Dashboard:** "Projects Delayed" can count finished (Done) projects, "Planning" counts as At Risk, and the period drop-downs (This Month, This Week…) do not change any number. "Sales This Month" is the estimated value of projects *created* this month, not ERPNext sales. "Active Projects" counts every project, finished ones too. "Team Performance" is always empty. "Budget Utilization" shows the same portfolio average on every row. "Total Team Members" counts every enabled staff login, not Portal Team members. The side menu's **ATA Teams** count uses Employee records, and the Org Chart total counts team places (someone in two teams counts twice), so the three numbers differ.
+- **Gantt:** only the current calendar year can be shown. The office filter moves projects of teams in other offices to "Unassigned to a team" instead of hiding them.
+- **Shares page:** "Created by me" also shows shares that other people created.
+- **Shares page, "ERPNext share" rows:** **Revoke** fails with "Could not revoke share.". These rows are shares made in Desk. Remove them in Desk, from the **Share** panel in the File's or Project's sidebar.
+- **Renaming a shared folder:** existing shares and public links on that folder stop working. Share the folder again after renaming it.
+- **Public link "opens" count:** it never goes above 1, so do not use it to tell how often a link was used.
+- **Routing rules:** saving a rule from the portal clears its Notes. A Mirror rule always matches the source folder and everything inside it (like "starts with"), whatever match mode is chosen.
+- **Teams page:** a team lead sees **Create team**, but the server refuses it. Ask a manager to create the team.
+- **Admin → Create portal user → Team Manager** may fail with "No permission to share Department" for a System Manager who has no HR role, and then the user is not created (not yet confirmed on this site). Workaround: create the user without Team Manager, then add them on the Teams page and set *Portal Team Lead* on the Department in Desk.
+- **Demo data in Desk:** saving a new *Portal Demo Seed Run* in Desk runs the seed at once, even when **Allow portal demo seed** is off. Only create seed runs from the Admin page, and only on a test site.
+
+---
+
+## Background: the original requirements
+
+ATA's original business requirements document (BRD, version 1.0, February 2026) used to be copied at the end of this file. It lists *functional requirements* (FRs) by area: FR-PM projects, FR-TM tasks, FR-GC Gantt chart, FR-CB costing, FR-TS timesheets and FR-RA reports. Some parts are not built as portal screens (timesheets, detailed cost tracking, a report builder). Use standard ERPNext Desk for those. To read the full BRD, ask the repository owner.
