@@ -2,6 +2,8 @@
 
 A custom Frappe app for **ERPNext v15**. It adds the ATA Project Portal, a web app at **`/portal-app`** for projects, tasks, planning views, a standard project folder tree, file sharing and a client portal. Everything is stored in normal ERPNext records such as Project, Task, File, Customer and User.
 
+Every login has one of five roles: **Super Admin**, **Department Admin**, **Team Lead**, **Team Member** or **Client Customer**. The role and the Department data decide which projects a person sees and what they can change. See [DOCUMENTATION.md → Who is who](./DOCUMENTATION.md#who-is-who-roles-at-a-glance).
+
 ### Documentation
 
 **Start with [DOCUMENTATION.md](./DOCUMENTATION.md).** It has an overview, a list of every feature and the key addresses.
@@ -33,7 +35,7 @@ bench build --app portal_app
 
 `bench build --app portal_app` also runs the `build` script in the app's root `package.json`, which builds the Vue screens into `portal_app/public/frontend`. That folder is **not** stored in git, so it has to be built on every server.
 
-Installing (and every `bench migrate`) adds the portal's custom fields to Project, Department, User, Event and File. It also creates the **Portal Customer** role, adds the default file types and imports the Desk workspace **Project Portal**.
+Installing (and every `bench migrate`) adds the portal's custom fields to Project, Department, User, Event and File. It also creates the **Client Customer** role (an older *Portal Customer* role is renamed, not replaced) and the **Department Admin** and **Team Lead** roles, adds the default file types and imports the Desk workspace **Project Portal**.
 
 ### Updating a site
 
@@ -44,6 +46,8 @@ Installing (and every `bench migrate`) adds the portal's custom fields to Projec
    2. `bench --site <site> migrate`.
 
    Otherwise: `bench --site <site> clear-cache`. (Full steps: [DEVELOPER_GUIDE.md §10.1](./DEVELOPER_GUIDE.md#101-deploy-a-change).)
+
+   The five-role update of 13 October 2026 needs a migrate: it renames the client role, adds the `Portal Department Admin` DocType and three patches, and files the loose files in each client folder. Afterwards a Team Member sees only the projects they are on, so put people on their projects (see [DEVELOPER_GUIDE.md §3.4](./DEVELOPER_GUIDE.md#34-patches)).
 4. `bench --site <site> clear-website-cache`
 5. Reload the web and background workers: `bench restart`, or send a QUIT signal to the gunicorn and worker processes through `supervisorctl`.
 
@@ -63,7 +67,7 @@ Pre-commit is configured to use the following tools for checking and formatting 
 - prettier
 - pyupgrade
 
-Automated tests live in `portal_app/tests/`. Run them on a **test site** that has tests allowed, never on production:
+Automated tests live in `portal_app/tests/` (74 tests). Run them on a **development or test site** that has tests allowed, never on production:
 
 ```bash
 bench --site <test-site> run-tests --app portal_app
