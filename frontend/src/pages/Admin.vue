@@ -726,7 +726,7 @@ const totalCreated = computed(() =>
 								<input type="checkbox" :checked="deptAdminTeams.includes(t.name)" @change="toggleDeptAdminTeam(t.name)" />
 								{{ t.department_name }}
 							</label>
-							<span v-if="!teamOptions.length" class="text-xs text-[color:var(--portal-muted)]">No departments yet. Create a team in the Org Chart first.</span>
+							<span v-if="!teamOptions.length" class="text-xs text-[color:var(--portal-muted)]">No departments yet. Create a team on the Teams page first.</span>
 						</div>
 					</div>
 					<p v-if="role === 'super_admin'" class="text-xs text-amber-700">

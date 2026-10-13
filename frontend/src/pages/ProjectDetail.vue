@@ -32,6 +32,12 @@ const canPickFromOrgChart = computed(() => canAddMembers.value && !!portalCapabi
 const isCustomerPortalUser = computed(() => !!portalCapabilities.value?.is_customer_portal_user);
 const sessionUser = computed(() => portalCapabilities.value?.portal_user || "");
 
+/** Incoming = what ATA sent, Outgoing = what the client sent; worded for whoever is looking. */
+function clientDirectionText(direction) {
+	if (isCustomerPortalUser.value) return direction === "incoming" ? "From ATA" : "Your upload";
+	return direction === "incoming" ? "Sent to client" : "From client";
+}
+
 function canDeleteFileOnDetail(f) {
 	if (!f || f.is_folder || isCustomerPortalUser.value) return false;
 	if (canManage.value) return true;
@@ -147,8 +153,8 @@ function rememberProject(p) {
 	}
 }
 
-async function loadDashboard() {
-	loading.value = true;
+async function loadDashboard({ silent = false } = {}) {
+	if (!silent) loading.value = true;
 	try {
 		payload.value = await call({
 			method: "portal_app.api.projects.project_dashboard",
@@ -382,7 +388,7 @@ async function addTeamUsers(users) {
 			args: { project: props.name, users: JSON.stringify(fresh) },
 		});
 		teamMessage.value = fresh.length === 1 ? "Added to the team." : `${fresh.length} people added to the team.`;
-		await loadDashboard();
+		await loadDashboard({ silent: true });
 		return true;
 	} catch (e) {
 		teamError.value = apiErr(e);
@@ -412,7 +418,7 @@ async function removeTeamUser(row) {
 			args: { project: props.name, users: JSON.stringify([row.user]) },
 		});
 		teamMessage.value = "Removed from the team.";
-		await loadDashboard();
+		await loadDashboard({ silent: true });
 	} catch (e) {
 		teamError.value = apiErr(e);
 	} finally {
@@ -1356,7 +1362,7 @@ async function submitNewCustomer() {
 								<FeatherIcon name="file" class="mr-1.5 inline h-3.5 w-3.5 text-[color:var(--portal-muted)]" />
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="portal-pill portal-pill-muted ml-1.5">private</span>
-								<span v-if="f.client_direction" class="portal-pill ml-1.5" :class="f.client_direction === 'incoming' ? 'portal-pill-accent' : 'portal-pill-success'">{{ f.client_direction === "incoming" ? "Sent to client" : "From client" }}</span>
+								<span v-if="f.client_direction" class="portal-pill ml-1.5" :class="f.client_direction === 'incoming' ? 'portal-pill-accent' : 'portal-pill-success'">{{ clientDirectionText(f.client_direction) }}</span>
 								<span v-else-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 							</span>
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
