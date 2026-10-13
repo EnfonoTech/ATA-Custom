@@ -4,10 +4,11 @@ PUBLIC on purpose. It is the guide ATA hands to its own staff, and requiring a
 login to read the instructions for logging in is a circle. It replaced the old
 /user-guide, which said much the same thing.
 
-Because it is public it must contain NO credentials and NO client data. The
-figures are drawn illustrations with generic example names, not screenshots of
-the live register, precisely so this page can stay open. If real screenshots are
-ever added, this page has to go back behind a login.
+Because it is public it must contain NO credentials and NO client data. Most
+figures are drawn illustrations with generic example names. The newest ones are
+screenshots of a DEMO copy of the portal (made-up people and projects, nothing
+from the live register) and say so in their caption. A screenshot of the live
+site must never be added: that would put this page behind a login.
 
 Counts come from the database rather than being written into the page, so the
 guide cannot drift out of date — but they are deliberately coarse (how many
