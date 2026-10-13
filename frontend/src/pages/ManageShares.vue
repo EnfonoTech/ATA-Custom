@@ -485,7 +485,7 @@ function openFolderInFiles(project, folderPath) {
 				</div>
 				<p class="text-base font-semibold text-[color:var(--portal-text)]">Project admin only</p>
 				<p class="max-w-md text-sm text-[color:var(--portal-muted)]">
-					This page is for portal project managers. Project members can still share folders from
+					This page is for the people who manage a project's access (Super Admin, Department Admin, Team Lead or Lead Architect). Project members can still share folders from
 					<router-link to="/files" class="font-medium underline">Files</router-link> and revoke their own grants from each folder's Share modal.
 				</p>
 			</div>

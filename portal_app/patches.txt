@@ -1,4 +1,5 @@
 [pre_model_sync]
+portal_app.patches.rename_portal_customer_role
 
 [post_model_sync]
 portal_app.patches.add_project_portal_fields
@@ -6,3 +7,5 @@ portal_app.patches.add_portal_customer_access
 portal_app.patches.make_project_files_private
 portal_app.patches.backfill_portal_user_customer
 portal_app.patches.remove_client_project_docshares
+portal_app.patches.setup_portal_role_model
+portal_app.patches.create_client_incoming_outgoing_folders

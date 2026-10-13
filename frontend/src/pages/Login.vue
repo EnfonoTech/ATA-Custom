@@ -166,12 +166,14 @@
 
 					<!-- Card header -->
 					<div class="card-header">
-						<h1 class="card-title">ERP Portal</h1>
-						<p class="card-sub">Please enter your credentials to continue</p>
+						<h1 class="card-title">{{ forgotMode ? "Reset your password" : "ERP Portal" }}</h1>
+						<p class="card-sub">
+							{{ forgotMode ? "Enter the email of your account and we will send you a reset link." : "Please enter your credentials to continue" }}
+						</p>
 					</div>
 
 					<!-- Form -->
-					<form class="space-y-5" @submit.prevent="handleLogin">
+					<form v-if="!forgotMode" class="space-y-5" @submit.prevent="handleLogin">
 
 						<!-- Email / Username -->
 						<div>
@@ -225,7 +227,7 @@
 								<input type="checkbox" v-model="rememberMe" class="remember-check"/>
 								Remember me
 							</label>
-							<a :href="`/login#forgot`" class="forgot-link">Forgot Password?</a>
+							<a href="#forgot" class="forgot-link" @click.prevent="openForgot">Forgot Password?</a>
 						</div>
 
 						<!-- Sign In button -->
@@ -237,6 +239,39 @@
 							</span>
 						</button>
 
+					</form>
+
+					<!-- Forgot password: asks for the email, the server mails a reset link -->
+					<form v-else class="space-y-5" @submit.prevent="handleForgot">
+						<div>
+							<label class="field-label" for="forgot-email">Email</label>
+							<input
+								id="forgot-email"
+								v-model="forgotEmail"
+								type="email"
+								autocomplete="email"
+								placeholder="name@company.com"
+								class="field-input"
+								:disabled="forgotBusy"
+							/>
+						</div>
+						<p
+							v-if="forgotMsg"
+							class="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"
+							role="status"
+						>
+							{{ forgotMsg }}
+						</p>
+						<button type="submit" class="signin-btn" :disabled="forgotBusy || !!forgotMsg">
+							<span v-if="!forgotBusy">Send reset link</span>
+							<span v-else class="flex items-center justify-center gap-2">
+								<span class="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
+								Sending…
+							</span>
+						</button>
+						<div class="text-center">
+							<a href="#signin" class="forgot-link" @click.prevent="closeForgot">Back to sign in</a>
+						</div>
 					</form>
 
 					<p class="card-footer-note">
@@ -262,6 +297,12 @@ const loading      = ref(false);
 const error        = ref("");
 const showPassword = ref(false);
 const rememberMe   = ref(false);
+
+// "Forgot Password?": same card, a different form.
+const forgotMode   = ref(false);
+const forgotEmail  = ref("");
+const forgotBusy   = ref(false);
+const forgotMsg    = ref("");
 
 const brandLogo    = ref("");
 const brandName    = ref("");
@@ -326,6 +367,42 @@ const handleLogin = async () => {
 		showToast("Server error. Please try again.");
 	} finally {
 		loading.value = false;
+	}
+};
+
+const openForgot = () => {
+	forgotMode.value = true;
+	forgotMsg.value  = "";
+	error.value      = "";
+	forgotEmail.value = email.value.includes("@") ? email.value.trim() : "";
+};
+
+const closeForgot = () => {
+	forgotMode.value = false;
+	forgotMsg.value  = "";
+	error.value      = "";
+};
+
+const handleForgot = async () => {
+	const addr = forgotEmail.value.trim();
+	if (!addr || !addr.includes("@")) {
+		showToast("Enter the email address of your account.");
+		return;
+	}
+	forgotBusy.value = true;
+	error.value      = "";
+	try {
+		// The server answers the same way whether or not the address has a login.
+		const res = await call({
+			method: "portal_app.api.auth.request_password_reset",
+			type: "POST",
+			args: { email: addr },
+		});
+		forgotMsg.value = res?.message || "If that address belongs to a portal login, a reset link is on its way.";
+	} catch (e) {
+		showToast(getFrappeError(e?.responseBody) || "Could not send the reset link. Please try again in a little while.");
+	} finally {
+		forgotBusy.value = false;
 	}
 };
 

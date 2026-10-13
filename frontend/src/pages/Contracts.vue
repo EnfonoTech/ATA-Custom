@@ -136,7 +136,7 @@ onMounted(loadProjects);
 					Contracts
 				</h1>
 				<p class="mt-1 text-sm text-[color:var(--portal-muted)]">
-					A restricted upload area for contract documents — kept separate from the shared project Files, visible only to project managers.
+					A restricted upload area for contract documents — kept separate from the shared project Files, visible only to Super Admins and Department Admins.
 				</p>
 			</div>
 

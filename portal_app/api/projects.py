@@ -105,60 +105,65 @@ def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
 
 
 def _assert_may_set_project_manager(project: str, payload: dict) -> None:
-	"""Only a System Manager may hand the portal-manager role to someone else.
+	"""Who may name (or clear) a project's Lead Architect.
 
-	portal_project_manager is not a label: helper.can_view_project_value() grants a
-	Projects Manager sight of a project's money precisely when this field names them.
-	Leaving it writable by any Projects Manager therefore lets them self-grant that
-	permission on any project in the portfolio.
+	portal_project_manager is not a label: helper.can_view_project_value() shows a
+	project's money to the person it names. A Super Admin is unrestricted. A Department
+	Admin may name anyone else or clear it, but may not take the role over from somebody
+	else (that would be a way to unlock the project's money). Everyone else can only claim
+	an unassigned project for themselves.
 	"""
 	if payload.get("portal_project_manager") is None:
 		return
 	new_pm = cstr(payload.get("portal_project_manager")).strip()
 	if new_pm and helper.is_customer_only(new_pm):
 		frappe.throw(_("A client contact cannot be the Lead Architect."), frappe.PermissionError)
-	if "System Manager" in frappe.get_roles():
+	if helper.is_super_admin():
 		return
 	current = frappe.db.get_value("Project", project, "portal_project_manager")
+	if helper.is_dept_admin():
+		if new_pm == frappe.session.user and current not in (None, "", frappe.session.user):
+			frappe.throw(
+				_("Ask a Super Admin to make you the Lead Architect of a project somebody else leads."),
+				frappe.PermissionError,
+			)
+		return
 	if current not in (None, "", frappe.session.user):
 		frappe.throw(
-			_("Only a System Manager can reassign the portal project manager."),
+			_("Only a Super Admin or a Department Admin can reassign the Lead Architect."),
 			frappe.PermissionError,
 		)
 
 
 def _assert_may_set_team(project: str, payload: dict) -> None:
-	"""A Projects Manager may only put their OWN projects (the ones where they are
-	named as portal_project_manager) under a team — not any project in the
-	portfolio, even though assert_manage_project already lets them edit any
-	project's other fields. System Manager is unrestricted, same as everywhere
-	else this two-tier rule shows up (see _assert_may_set_project_manager)."""
+	"""Which department a project belongs to (portal_team). A Super Admin is unrestricted;
+	a Department Admin may only put it under a department they administer (or clear it),
+	so they cannot push a project into somebody else's scope; the project's own Lead
+	Architect keeps the right they always had."""
 	if payload.get("portal_team") is None:
 		return
-	if "System Manager" in frappe.get_roles():
+	team = cstr(payload.get("portal_team")).strip()
+	if helper.is_super_admin():
 		return
+	if helper.is_dept_admin():
+		if not team or team in helper.admin_department_names():
+			return
+		frappe.throw(
+			_("A Department Admin can only put a project under a department they administer."),
+			frappe.PermissionError,
+		)
 	manager = frappe.db.get_value("Project", project, "portal_project_manager")
 	if manager != frappe.session.user:
 		frappe.throw(
-			_("Only a System Manager, or the project's own Portal Project Manager, can set its team."),
+			_("Only a Super Admin, a Department Admin, or the project's own Lead Architect can set its team."),
 			frappe.PermissionError,
 		)
 
 
 def _manageable_project_names(allowed_names: list) -> list:
-	"""Which of `allowed_names` this caller may CHANGE, in O(1) queries.
-
-	Mirrors helper.can_manage_project without calling it per project (it re-reads the
-	Project table each time). Staff manage the whole portfolio; a Projects User manages
-	only the projects they are on the team of; customer users manage nothing.
-	"""
-	# Staff first — Administrator carries the Portal Customer role too.
-	if helper.has_portal_staff_project_access():
-		return list(allowed_names)
-	if helper.user_is_customer_portal_user():
-		return []
-	member_of = set(helper.project_member_names())
-	return [n for n in allowed_names if n in member_of]
+	"""Which of `allowed_names` this caller may CHANGE, in O(1) queries
+	(see helper.get_manageable_project_names)."""
+	return helper.get_manageable_project_names(allowed=allowed_names)
 
 
 def _safe_order_by(sort_by: str, sort_order: str) -> str:
@@ -362,6 +367,11 @@ def project_dashboard(name):
 		"tasks": tasks,
 		"kanban_stage": stage,
 		"customer_display_name": cust_display,
+		# What this caller may do to the project's team (the Team card shows the matching buttons).
+		"team_rights": {
+			"can_add": helper.can_add_project_members(name),
+			"can_remove": helper.can_remove_project_members(name),
+		},
 	}
 
 
@@ -826,12 +836,11 @@ def get_capabilities():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	settings = helper.get_portal_settings_dict()
-	roles = set(frappe.get_roles())
 	can_create = bool(settings.get("allow_any_portal_user_to_create_project"))
 	if not can_create:
 		# Deliberately do NOT fall back to ERPNext's core "Project create" permission —
 		# see helper.assert_can_create_project for why. Only these two paths may create.
-		if "Projects Manager" in roles or "System Manager" in roles:
+		if helper.has_portal_staff_project_access():
 			can_create = True
 
 	allowed_names = helper.get_allowed_project_names()
@@ -849,8 +858,9 @@ def get_capabilities():
 
 	is_customer_portal = helper.user_is_customer_portal_user()
 	staff_project_access = helper.has_portal_staff_project_access()
-	# Users with Portal Customer + Projects Manager must still get staff UI (manageable list, uploads, etc.)
+	# An admin who also carries the client role must still get the admin UI (manageable list, uploads, etc.)
 	effective_customer_portal = is_customer_portal and not staff_project_access
+	portal_role = helper.get_portal_role()
 
 	return {
 		"can_create_project": can_create and not effective_customer_portal,
@@ -867,16 +877,27 @@ def get_capabilities():
 		"can_edit_portal_folder_template": helper.can_edit_portal_folder_template()
 		if not effective_customer_portal
 		else False,
-		# Staff manage every team; a team's own portal_team_lead manages just that team
-		# (the Teams page itself already only lists the team(s) helper.get_teams
-		# scopes to them — see teams.get_teams).
-		"can_manage_teams": (helper.can_manage_teams() or bool(helper.led_department_names()))
-		and not effective_customer_portal,
-		# System Manager / Projects Manager only — gates management-level views (Dashboard,
-		# Org Chart, Teams) and management-level fields (estimated cost, project manager)
-		# away from regular "Projects User" team members.
+		# A Super Admin manages every team, a Department Admin the departments they
+		# administer (see teams.get_org_chart for the per-team flags). A Team Lead does not
+		# manage the team itself: they assign people to projects from the Org Chart.
+		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
+		# Super Admin / Department Admin only: management-level views (Dashboard, Teams)
+		# and management-level fields (estimated cost, Lead Architect).
 		"is_manager": staff_project_access,
 		"portal_user": frappe.session.user,
+		# The five portal roles: super_admin, department_admin, team_lead, team_member,
+		# client_customer (see helper.get_portal_role).
+		"portal_role": portal_role,
+		"portal_role_label": helper.ROLE_LABELS.get(portal_role, ""),
+		"is_super_admin": helper.is_super_admin(),
+		"is_department_admin": helper.is_dept_admin(),
+		"is_team_lead": helper.is_team_lead(),
+		"can_view_org_chart": helper.can_view_org_chart(),
+		# Change someone's role from the Org Chart (the server decides, team by team).
+		"can_edit_org_roles": staff_project_access and not effective_customer_portal,
+		"can_reset_passwords": staff_project_access and not effective_customer_portal,
+		"admin_team_names": helper.admin_department_names() if helper.is_dept_admin() else [],
+		"led_team_names": helper.led_department_names() if helper.is_team_lead() else [],
 	}
 
 
@@ -939,14 +960,12 @@ def create_project(project_name, company=None, **kwargs):
 	return {"name": doc.name, "project_name": doc.project_name}
 
 
-@frappe.whitelist()
-def sync_project_team(project, users):
-	helper.assert_manage_project_team(project)
+def _clean_team_users(users) -> list[str]:
+	"""Validate a list of logins that are about to join a project team."""
 	if isinstance(users, str):
 		users = json.loads(users or "[]")
 	if not isinstance(users, list):
 		frappe.throw(_("users must be a list of user IDs"))
-
 	seen = set()
 	clean = []
 	for u in users:
@@ -966,19 +985,119 @@ def sync_project_team(project, users):
 			frappe.throw(
 				_("Client contacts cannot be added to the project team: {0}").format(u), frappe.PermissionError
 			)
+		if u in ("Administrator", "Guest"):
+			frappe.throw(_("This account cannot be on a project team."), frappe.PermissionError)
 		seen.add(u)
 		clean.append(u)
+	return clean
 
+
+def _apply_project_team(project: str, new_users: list[str]) -> dict:
+	"""Set the project's team to `new_users`, checking the right to add and the right to
+	remove SEPARATELY (a Team Lead or Lead Architect may add people, only a Super Admin or
+	Department Admin may take people off)."""
 	doc = frappe.get_doc("Project", project)
+	current = [row.user for row in doc.users]
+	added = [u for u in new_users if u not in current]
+	removed = [u for u in current if u not in new_users]
+	if added and not helper.can_add_project_members(project):
+		frappe.throw(
+			_("You cannot add people to this project's team. Ask a Team Lead, Department Admin or Super Admin."),
+			frappe.PermissionError,
+		)
+	if removed and not helper.can_remove_project_members(project):
+		frappe.throw(
+			_("Only a Super Admin or a Department Admin can remove people from a project team."),
+			frappe.PermissionError,
+		)
+	if not added and not removed:
+		return {"ok": True, "users": current, "added": [], "removed": []}
 	for row in list(doc.users):
-		doc.remove(row)
-	for u in clean:
+		if row.user in removed:
+			doc.remove(row)
+	for u in added:
 		doc.append("users", {"user": u})
 	doc.save(ignore_permissions=True)
+	final = [row.user for row in doc.users]
+	_sync_project_assignment(project, final)
+	return {"ok": True, "users": final, "added": added, "removed": removed}
 
-	_sync_project_assignment(project, clean)
 
-	return {"ok": True, "users": [row.user for row in doc.users]}
+@frappe.whitelist()
+def sync_project_team(project, users):
+	"""Set a project's whole team (the Team card). Adding and removing are checked
+	separately, see _apply_project_team."""
+	helper.assert_manage_project_team(project)
+	return _apply_project_team(project, _clean_team_users(users))
+
+
+@frappe.whitelist(methods=["POST"])
+def add_project_members(project, users):
+	"""Add people to a project's team without touching who is already on it. This is what
+	"Assign to project" in the Org Chart and "Add from org chart" on the project page use."""
+	if not helper.can_add_project_members(project):
+		frappe.throw(
+			_("You cannot add people to this project's team. Ask a Team Lead, Department Admin or Super Admin."),
+			frappe.PermissionError,
+		)
+	doc = frappe.get_doc("Project", project)
+	current = [row.user for row in doc.users]
+	wanted = _clean_team_users(users)
+	return _apply_project_team(project, current + [u for u in wanted if u not in current])
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_project_members(project, users):
+	"""Take people off a project's team. Super Admin / Department Admin only (a Team Lead
+	or Lead Architect may add people but not remove them). The people who stay are not
+	re-validated, so someone whose login was since disabled can still be taken off."""
+	if not helper.can_remove_project_members(project):
+		frappe.throw(
+			_("Only a Super Admin or a Department Admin can remove people from a project team."),
+			frappe.PermissionError,
+		)
+	if isinstance(users, str):
+		users = json.loads(users or "[]")
+	if not isinstance(users, list):
+		frappe.throw(_("users must be a list of user IDs"))
+	gone = {u.strip() for u in users if isinstance(u, str) and u.strip()}
+	doc = frappe.get_doc("Project", project)
+	current = [row.user for row in doc.users]
+	return _apply_project_team(project, [u for u in current if u not in gone])
+
+
+@frappe.whitelist()
+def get_assignable_projects(for_user=None):
+	"""Projects the caller can put people on (the "Assign to project" picker). With
+	`for_user`, each row also says whether that person is already on its team."""
+	helper.assert_portal_user()
+	if helper.is_customer_only():
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	allowed = helper.get_allowed_project_names()
+	if not allowed:
+		return []
+	if not (helper.is_super_admin() or helper.is_dept_admin() or helper.is_team_lead()):
+		# A Lead Architect may add people to the projects they lead.
+		allowed = [n for n in allowed if frappe.db.get_value("Project", n, "portal_project_manager") == frappe.session.user]
+		if not allowed:
+			return []
+	fields = ["name", "project_name", "status", "customer"]
+	if frappe.get_meta("Project").has_field("portal_project_code"):
+		fields.append("portal_project_code")
+	rows = frappe.get_all(
+		"Project",
+		filters={"name": ["in", allowed]},
+		fields=fields,
+		order_by="modified desc",
+		limit_page_length=500,
+	)
+	if for_user:
+		on = set(
+			frappe.get_all("Project User", filters={"user": for_user, "parenttype": "Project"}, pluck="parent")
+		)
+		for r in rows:
+			r["already_on_team"] = 1 if r["name"] in on else 0
+	return rows
 
 
 def _sync_project_assignment(project, users):
@@ -1330,7 +1449,7 @@ def sync_customer_portal_users(project, users):
 	notified = {}
 	if (new_set - old_set) and not _can_link_customer_logins():
 		frappe.throw(
-			_("Only a System Manager or Projects Manager can add customer portal users."),
+			_("Only a Super Admin or a Department Admin can add customer portal users."),
 			frappe.PermissionError,
 		)
 	for u in new_set - old_set:
@@ -1347,7 +1466,7 @@ def sync_customer_portal_users(project, users):
 
 
 def _can_reset_customer_portal_passwords(user=None) -> bool:
-	return "System Manager" in frappe.get_roles(user or frappe.session.user)
+	return helper.is_super_admin(user or frappe.session.user)
 
 
 def _user_has_password(user) -> bool:
@@ -1545,45 +1664,15 @@ def reset_customer_portal_user_password(project, user, mode="email", new_passwor
 	helper.assert_manage_project(project)
 	if not _can_reset_customer_portal_passwords():
 		frappe.throw(
-			_("Only a System Manager can reset a customer portal user's password."), frappe.PermissionError
+			_("Only a Super Admin can reset a Client Customer's password."), frappe.PermissionError
 		)
 	cust = _project_customer_required(project)
 	user = cstr(user).strip()
 	_assert_resettable_customer_contact(user, cust)
 
-	doc = frappe.get_doc("User", user)
-	mode = cstr(mode).strip() or "email"
-	if mode == "email":
-		doc.db_set("redirect_url", helper.PORTAL_HOME)
-		try:
-			# password_reset_mail() hard-codes now=True; queue the same mail instead.
-			link = doc.reset_password(send_email=False)
-			doc.send_login_mail(
-				_("Password Reset"),
-				"password_reset",
-				{"link": link},
-				now=False,
-				custom_template=frappe.db.get_system_setting("reset_password_template"),
-			)
-		except frappe.OutgoingEmailError:
-			frappe.clear_last_message()
-			frappe.throw(_("No outgoing email account is configured, so the reset link could not be sent."))
-		return {"ok": True, "mode": "email", "email": doc.email}
+	from portal_app.api.portal_admin import reset_password_for
 
-	if mode == "set":
-		new_password = cstr(new_password)
-		if len(new_password) < 8:
-			frappe.throw(_("The new password must be at least 8 characters."))
-		doc.flags.ignore_permissions = True
-		# new_password on save runs the site Password Policy, then updates __Auth.
-		doc.new_password = new_password
-		doc.save()
-		from frappe.sessions import clear_sessions
-
-		clear_sessions(user=user, force=True)
-		return {"ok": True, "mode": "set", "email": doc.email}
-
-	frappe.throw(_("Unknown reset mode."))
+	return reset_password_for(user, mode, new_password)
 
 
 @frappe.whitelist()

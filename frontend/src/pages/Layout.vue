@@ -30,6 +30,13 @@ const portalCapabilities = ref({
 	team_member_project_names: [],
 	can_edit_portal_folder_template: false,
 	portal_user: "",
+	portal_role: "",
+	is_super_admin: false,
+	is_department_admin: false,
+	is_team_lead: false,
+	can_view_org_chart: false,
+	can_edit_org_roles: false,
+	can_reset_passwords: false,
 });
 
 async function loadPortalCapabilities() {
@@ -45,6 +52,7 @@ async function loadPortalCapabilities() {
 const portalAdmin = ref({
 	can_create_users: false,
 	can_run_demo_seed: false,
+	can_reset_passwords: false,
 });
 
 async function loadPortalAdmin() {

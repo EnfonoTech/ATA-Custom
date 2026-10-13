@@ -170,7 +170,7 @@ onMounted(async () => {
 				<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Auditor role required</h2>
 				<p class="mt-1 text-sm text-[color:var(--portal-muted)]">
 					You need the <strong class="text-[color:var(--portal-text)]">Auditor</strong> role to edit the company-wide folder template.
-					Ask a System Manager to assign it from <strong>Desk → User → your user → Roles</strong>.
+					Ask a Super Admin to assign it from <strong>Desk → User → your user → Roles</strong>.
 				</p>
 			</div>
 

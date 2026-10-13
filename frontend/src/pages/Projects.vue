@@ -155,7 +155,7 @@ async function submitEdit() {
 	saving.value = true; editError.value = "";
 	try {
 		// Send only changed fields. Sending everything re-submitted Lead Architect on
-		// every save, which the server refuses for anyone but a System Manager.
+		// every save, which the server refuses for anyone but a Super Admin.
 		const changed = {};
 		for (const [k, v] of Object.entries(editForm.value)) {
 			if (k === "name") continue;

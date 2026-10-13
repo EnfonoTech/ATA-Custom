@@ -23,8 +23,17 @@ def ensure_department_portal_custom_fields():
 					"fieldtype": "Link",
 					"options": "User",
 					"insert_after": "portal_office",
-					"description": "Who the Org Chart shows as this team's Lead. Falls back to the "
-					"alphabetically-first assigned member if left unset.",
+					"description": "The Team Lead of this team. A Team Lead assigns people from the Org "
+					"Chart to the projects of the team. Set it from the portal Org Chart.",
+				},
+				{
+					"fieldname": "portal_department_admins",
+					"label": "Portal Department Admins",
+					"fieldtype": "Table",
+					"options": "Portal Department Admin",
+					"insert_after": "portal_team_lead",
+					"description": "Department Admins of this department. They manage its people and see its "
+					"projects. Set them from the portal Org Chart.",
 				},
 			]
 		},
@@ -303,10 +312,17 @@ def ensure_daily_task_custom_fields():
 	frappe.clear_cache(doctype="Event")
 
 
+def ensure_portal_roles():
+	from portal_app.api import helper
+
+	helper.ensure_portal_roles()
+
+
 def after_install():
 	ensure_department_portal_custom_fields()
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
+	ensure_portal_roles()
 	lift_project_attachment_limit()
 	ensure_daily_task_custom_fields()
 	ensure_portal_file_type_field()
@@ -318,6 +334,7 @@ def after_migrate():
 	ensure_department_portal_custom_fields()
 	ensure_project_portal_custom_fields()
 	ensure_portal_customer_access()
+	ensure_portal_roles()
 	lift_project_attachment_limit()
 	ensure_daily_task_custom_fields()
 	ensure_portal_file_type_field()

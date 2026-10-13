@@ -11,6 +11,8 @@ const officeList    = ref(["ALL"]);
 
 const portalCapabilities = inject("portalCapabilities", ref({}));
 const canManageTeams = computed(() => !!portalCapabilities.value?.can_manage_teams);
+// Only a Super Admin creates teams; a Department Admin looks after the ones they were given.
+const isSuperAdmin = computed(() => !!portalCapabilities.value?.is_super_admin);
 
 function apiErr(e) {
   const body = e?.responseBody;
@@ -66,13 +68,15 @@ async function loadTeams() {
         name:        dept.department_name,
         office:      dept.office || "OTHER",
         memberCount: dept.member_count,
+        canEdit:     !!dept.can_edit,
         memberList:     (dept.members || []).map(m => ({
           id:          m.name,
           name:        m.employee_name,
           designation: m.designation || "",
           email:       m.company_email || "",
+          teamRole:    m.team_role || "team_member",
         })),
-        lead:           (dept.members && dept.members[0]) ? dept.members[0].employee_name : dept.department_name,
+        lead:           ((dept.members || []).find(m => m.team_role === "team_lead") || (dept.members || [])[0] || {}).employee_name || dept.department_name,
         projectCount:   dept.project_count || 0,
         activeProjects: dept.active_project_count || 0,
       }));
@@ -321,7 +325,7 @@ async function removeMember(m) {
             </div>
 
             <button
-              v-if="canManageTeams"
+              v-if="isSuperAdmin"
               type="button"
               class="portal-btn portal-btn-primary flex items-center gap-1.5 whitespace-nowrap"
               @click="openNewTeam"
@@ -431,7 +435,7 @@ async function removeMember(m) {
           </div>
           <div class="flex items-center gap-1">
             <button
-              v-if="canManageTeams"
+              v-if="canManageTeams && selectedTeam.canEdit"
               class="h-8 w-8 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-accent-soft)]"
               title="Edit team"
               @click="openEditTeam"
@@ -449,7 +453,7 @@ async function removeMember(m) {
           <div class="flex items-center justify-between mb-3">
             <div class="text-xs font-semibold uppercase tracking-wider" style="color:var(--portal-muted);">Team Members</div>
             <button
-              v-if="canManageTeams"
+              v-if="canManageTeams && selectedTeam.canEdit"
               class="flex items-center gap-1 text-xs font-semibold rounded-lg px-2 py-1 transition hover:bg-[color:var(--portal-accent-soft)]"
               style="color:var(--portal-accent);"
               @click="openAddMember"
@@ -475,7 +479,7 @@ async function removeMember(m) {
                 <div v-if="m.email" class="text-[10px] mt-0.5" style="color:var(--portal-subtle);">{{ m.email }}</div>
               </div>
               <button
-                v-if="canManageTeams"
+                v-if="canManageTeams && selectedTeam.canEdit && (m.teamRole !== 'department_admin' || isSuperAdmin)"
                 class="h-7 w-7 rounded-full flex items-center justify-center flex-shrink-0 transition hover:bg-red-50"
                 title="Remove from team"
                 :disabled="removingMemberId === m.id"
