@@ -2,7 +2,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint
+from frappe.utils import cint, cstr
 
 from portal_app.api import helper
 
@@ -10,7 +10,7 @@ from portal_app.api import helper
 def _can_create_users() -> bool:
 	if frappe.session.user == "Guest":
 		return False
-	if "System Manager" in frappe.get_roles():
+	if helper.is_super_admin():
 		return True
 	try:
 		return bool(frappe.has_permission("User", "create", user=frappe.session.user))
@@ -19,7 +19,7 @@ def _can_create_users() -> bool:
 
 
 def _can_run_seed_via_portal() -> bool:
-	"""System Manager PLUS an explicit opt-in on this site.
+	"""Super Admin PLUS an explicit opt-in on this site.
 
 	Seeding creates real, enabled login accounts and real Projects/Tasks/Files. On a
 	production site that must never be one misclick away, so it additionally requires
@@ -28,15 +28,16 @@ def _can_run_seed_via_portal() -> bool:
 	"""
 	if frappe.session.user == "Guest":
 		return False
-	if "System Manager" not in frappe.get_roles():
+	if not helper.is_super_admin():
 		return False
 	if cint(frappe.conf.get("developer_mode")):
 		return True
 	return bool(helper.get_portal_settings_dict().get("allow_portal_demo_seed"))
 
 
-ALLOWED_PORTAL_USER_ROLES = frozenset({"Projects User", "Projects Manager", "Portal Customer"})
-SUPER_ADMIN_ROLE = "System Manager"
+# The five portal roles a login can be created with (see helper.ROLE_LABELS).
+ROLE_KEYS = ("super_admin", "department_admin", "team_lead", "team_member", "client_customer")
+SUPER_ADMIN_ROLE = helper.SUPER_ADMIN_ROLE
 
 
 @frappe.whitelist()
@@ -44,20 +45,24 @@ def get_portal_admin_capabilities():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
+	can_manage_teams = helper.can_manage_teams()
 	return {
 		"can_create_users": _can_create_users(),
 		"can_run_demo_seed": _can_run_seed_via_portal(),
 		"can_edit_folder_template": helper.can_edit_portal_folder_template(),
-		# Only an existing Super Admin (System Manager) may hand that role to someone
-		# else — same self-perpetuating-privilege guard as elsewhere in this app.
-		"can_grant_super_admin": SUPER_ADMIN_ROLE in frappe.get_roles(),
-		"can_assign_team_manager": helper.can_manage_teams(),
+		# Only an existing Super Admin may hand that role to someone else — same
+		# self-perpetuating-privilege guard as elsewhere in this app.
+		"can_grant_super_admin": helper.is_super_admin(),
+		"can_assign_team_roles": can_manage_teams,
+		"can_assign_team_manager": can_manage_teams,
+		"can_reset_passwords": helper.has_portal_staff_project_access(),
+		"portal_role": helper.get_portal_role(),
 	}
 
 
 @frappe.whitelist()
 def list_teams_for_picker():
-	"""Minimal {name, department_name} list for the "Team Manager" team picker."""
+	"""Minimal {name, department_name} list for the team pickers (create user, roles)."""
 	helper.assert_manage_teams()
 	return frappe.get_all(
 		"Department",
@@ -67,28 +72,63 @@ def list_teams_for_picker():
 	)
 
 
+def _legacy_role_key(roles_json, is_super_admin, team_lead_of) -> str:
+	"""Map the arguments an older, still-open browser tab sends (roles_json, is_super_admin,
+	team_lead_of) to a role key, so a tab opened before this release does not break."""
+	roles = []
+	if roles_json:
+		try:
+			parsed = json.loads(roles_json)
+		except Exception:
+			frappe.throw(_("Invalid roles"))
+		if not isinstance(parsed, list):
+			frappe.throw(_("Invalid roles"))
+		roles = [cstr(r).strip() for r in parsed if r]
+	if cint(is_super_admin):
+		return "super_admin"
+	if helper.PORTAL_CUSTOMER_ROLE in roles or helper.LEGACY_PORTAL_CUSTOMER_ROLE in roles:
+		return "client_customer"
+	if team_lead_of:
+		return "team_lead"
+	if helper.LEGACY_PROJECTS_MANAGER_ROLE in roles:
+		return "department_admin"
+	return "team_member"
+
+
 @frappe.whitelist(methods=["POST"])
 def create_portal_user(
 	email,
 	full_name,
 	password=None,
-	roles_json=None,
+	role=None,
 	send_welcome_email=0,
 	portal_linked_customer=None,
+	team=None,
+	teams_json=None,
+	roles_json=None,
 	is_super_admin=0,
 	team_lead_of=None,
 ):
+	"""Create a login with one of the five portal roles.
+
+	  super_admin       the whole portal (Frappe System Manager)
+	  department_admin  looks after one or more departments (`teams_json`)
+	  team_lead         leads `team`
+	  team_member       a team member, optionally on `team`
+	  client_customer   an external client contact of `portal_linked_customer`
+	"""
 	if not _can_create_users():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
 	helper.ensure_portal_customer_role()
+	helper.ensure_portal_roles()
 	helper.ensure_user_portal_linked_customer_field()
 
 	email = (email or "").strip().lower()
 	full_name = (full_name or "").strip()
 	password = password or ""
 	portal_linked_customer = (portal_linked_customer or "").strip()
-	team_lead_of = (team_lead_of or "").strip()
+	team = cstr(team or team_lead_of).strip()
 
 	if not email or not full_name:
 		frappe.throw(_("Valid email and full name are required"))
@@ -99,56 +139,57 @@ def create_portal_user(
 	if frappe.db.exists("User", email):
 		frappe.throw(_("User already exists"))
 
-	# roles_json omitted entirely (e.g. a direct API caller) defaults to Projects User;
-	# an explicitly-provided empty list (all checkboxes unticked in the form) must be
-	# rejected, not silently fall back to the same default — it used to be
-	# indistinguishable from "not provided" here, so unticking every role box was
-	# accepted instead of refused.
-	roles = None
-	if roles_json:
+	role_key = cstr(role).strip() or _legacy_role_key(roles_json, is_super_admin, team_lead_of)
+	if role_key not in ROLE_KEYS:
+		frappe.throw(_("Pick a role for this person."))
+
+	teams = []
+	if teams_json:
 		try:
-			parsed = json.loads(roles_json)
+			parsed = json.loads(teams_json)
 		except Exception:
-			frappe.throw(_("Invalid roles"))
+			frappe.throw(_("Invalid teams"))
 		if not isinstance(parsed, list):
-			frappe.throw(_("Invalid roles"))
-		roles = [str(r).strip() for r in parsed if r]
-	if roles is None:
-		roles = ["Projects User"]
+			frappe.throw(_("Invalid teams"))
+		teams = [cstr(t).strip() for t in parsed if t]
+	if role_key == "department_admin" and not teams and team:
+		teams = [team]
 
-	if not roles:
-		frappe.throw(_("Select at least one role"))
-
-	for r in roles:
-		if r not in ALLOWED_PORTAL_USER_ROLES:
-			frappe.throw(_("Role {0} cannot be assigned from the portal").format(r))
-
-	if cint(is_super_admin):
+	if role_key == "super_admin" and not helper.is_super_admin():
 		# Granting full ERP admin access is a privilege only an existing Super
 		# Admin may hand out — not merely anyone who can create portal users.
-		if SUPER_ADMIN_ROLE not in frappe.get_roles():
-			frappe.throw(_("Only a Super Admin can create another Super Admin."), frappe.PermissionError)
-		roles.append(SUPER_ADMIN_ROLE)
+		frappe.throw(_("Only a Super Admin can create another Super Admin."), frappe.PermissionError)
+	if role_key == "department_admin":
+		if not helper.is_super_admin():
+			frappe.throw(_("Only a Super Admin can create a Department Admin."), frappe.PermissionError)
+		if not teams:
+			frappe.throw(_("Pick the department(s) this Department Admin will look after."))
+	if role_key == "team_lead" and not team:
+		frappe.throw(_("Pick the team this Team Lead will lead."))
 
-	if team_lead_of:
-		# Naming someone a team's Team Manager is a team edit — same tier as
-		# renaming the team or changing its office (see teams.update_team).
-		helper.assert_manage_teams()
-		if not frappe.db.exists("Department", team_lead_of):
-			frappe.throw(_("Team not found"))
-
-	is_portal_customer = "Portal Customer" in roles
-	if is_portal_customer:
-		# Staff access always wins over the customer link (helper.is_customer_only), so a
-		# customer contact that also holds a staff role would see the whole portfolio.
-		if len(set(roles)) > 1 or team_lead_of:
-			frappe.throw(_("A Portal Customer cannot also have staff roles. Create it with Portal Customer only."))
+	is_client = role_key == "client_customer"
+	if is_client:
+		if team or teams:
+			frappe.throw(_("A Client Customer cannot be part of a team."))
 		if not portal_linked_customer:
 			frappe.throw(_("Pick the customer this portal user belongs to."))
 		if not frappe.db.exists("Customer", portal_linked_customer):
 			frappe.throw(_("Invalid Customer for portal link."))
 	else:
 		portal_linked_customer = ""
+		for t in teams or ([team] if team else []):
+			if not frappe.db.exists("Department", t):
+				frappe.throw(_("Team not found"))
+			# Placing someone in a team is a team edit: Super Admin, or that team's Department Admin.
+			helper.assert_manage_team(t)
+
+	roles = (
+		[helper.PORTAL_CUSTOMER_ROLE]
+		if is_client
+		else [helper.SUPER_ADMIN_ROLE, helper.TEAM_MEMBER_ROLE]
+		if role_key == "super_admin"
+		else [helper.TEAM_MEMBER_ROLE]
+	)
 
 	parts = full_name.split(None, 1)
 	first_name = parts[0]
@@ -161,44 +202,200 @@ def create_portal_user(
 		"last_name": last_name,
 		"enabled": 1,
 		"send_welcome_email": cint(send_welcome_email),
-		# A Portal Customer has no desk access, so it is a Website User. Frappe would
+		# A Client Customer has no desk access, so it is a Website User. Frappe would
 		# rewrite this anyway; being explicit keeps headcount queries honest and avoids
 		# consuming a System User licence seat per client contact.
-		"user_type": "Website User" if roles == ["Portal Customer"] else "System User",
+		"user_type": "Website User" if is_client else "System User",
 	}
 	if password:
 		# new_password runs the site Password Policy and strength scoring during insert.
 		# frappe.utils.password.update_password(), used previously, bypasses both, so a
 		# 6-character password was accepted on a site that requires far more.
 		user_dict["new_password"] = password
-	if is_portal_customer:
+	if is_client:
 		# update_password() sends a Website User here after the welcome/reset link.
 		user_dict["redirect_url"] = helper.PORTAL_HOME
 	if portal_linked_customer and frappe.get_meta("User").has_field("portal_linked_customer"):
 		user_dict["portal_linked_customer"] = portal_linked_customer
 
 	doc = frappe.get_doc(user_dict)
-	for role in roles:
-		doc.append("roles", {"role": role})
+	for r in roles:
+		doc.append("roles", {"role": r})
 
 	# Queue the welcome mail; sending it inside the request commits mid-request and an
 	# SMTP failure would then surface after the user already exists.
 	doc.flags.delay_emails = True
 	doc.insert(ignore_permissions=True)
-	if is_portal_customer:
+	if is_client:
 		frappe.get_doc(
 			{"doctype": helper.PORTAL_USER_CUSTOMER, "user": doc.name, "customer": portal_linked_customer}
 		).insert(ignore_permissions=True)
 
-	if team_lead_of:
-		frappe.db.set_value("Department", team_lead_of, "portal_team_lead", doc.name)
-		# The Lead must also be an actual team member (Assign To), or they simply
-		# wouldn't appear in get_teams()'s member list to be shown as the lead.
-		from frappe.desk.form.assign_to import add as assign_add
+	# Team placement and team roles go through the same code the Org Chart uses, so the
+	# rules (and the Department Admin / Team Lead roles) are identical.
+	if not is_client:
+		from portal_app.api import teams as teams_api
 
-		assign_add({"doctype": "Department", "name": team_lead_of, "assign_to": [doc.name]}, ignore_permissions=True)
+		if role_key == "department_admin":
+			for t in teams:
+				teams_api.set_member_role(t, doc.name, "department_admin")
+		elif role_key == "team_lead":
+			teams_api.set_member_role(team, doc.name, "team_lead")
+		elif team:
+			teams_api.add_team_member(team, doc.name)
 
-	return {"ok": True, "name": doc.name, "email": email, "email_sent": bool(doc.flags.email_sent)}
+	return {
+		"ok": True,
+		"name": doc.name,
+		"email": email,
+		"role": role_key,
+		"email_sent": bool(doc.flags.email_sent),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def set_super_admin(user, enabled=1):
+	"""Make someone a Super Admin, or take the role away. Super Admins only. You cannot
+	change your own role, and the last Super Admin cannot be removed (nobody would be left
+	to manage roles)."""
+	if not helper.is_super_admin():
+		frappe.throw(_("Only a Super Admin can change who is a Super Admin."), frappe.PermissionError)
+	user = cstr(user).strip()
+	if not user or user in ("Administrator", "Guest") or not frappe.db.exists("User", user):
+		frappe.throw(_("User not found"))
+	if not frappe.db.get_value("User", user, "enabled"):
+		frappe.throw(_("{0} is disabled.").format(user))
+	if helper.is_customer_only(user):
+		frappe.throw(_("A Client Customer cannot be a Super Admin."), frappe.PermissionError)
+	if user == frappe.session.user:
+		frappe.throw(_("You cannot change your own role. Ask another Super Admin."), frappe.PermissionError)
+
+	enabled = bool(cint(enabled))
+	doc = frappe.get_doc("User", user)
+	have = {r.role for r in doc.roles}
+	if enabled:
+		if helper.SUPER_ADMIN_ROLE in have:
+			return {"ok": True, "user": user, "is_super_admin": True}
+		doc.append("roles", {"role": helper.SUPER_ADMIN_ROLE})
+		if helper.TEAM_MEMBER_ROLE not in have:
+			doc.append("roles", {"role": helper.TEAM_MEMBER_ROLE})
+	else:
+		if helper.SUPER_ADMIN_ROLE not in have:
+			return {"ok": True, "user": user, "is_super_admin": False}
+		remaining = [u for u in _super_admin_names() if u != user]
+		if not remaining:
+			frappe.throw(_("This is the last Super Admin. Make someone else a Super Admin first."))
+		for row in list(doc.roles):
+			if row.role == helper.SUPER_ADMIN_ROLE:
+				doc.remove(row)
+	doc.flags.ignore_permissions = True
+	doc.save()
+	return {"ok": True, "user": user, "is_super_admin": enabled}
+
+
+def _super_admin_names() -> list:
+	holders = set(
+		frappe.get_all("Has Role", filters={"parenttype": "User", "role": helper.SUPER_ADMIN_ROLE}, pluck="parent")
+	)
+	holders -= {"Administrator", "Guest"}
+	if not holders:
+		return []
+	return frappe.get_all("User", filters={"name": ["in", list(holders)], "enabled": 1}, pluck="name")
+
+
+def reset_password_for(user: str, mode: str = "email", new_password=None) -> dict:
+	"""Reset a login's password. `email` sends a reset link (valid for the System Settings
+	"reset password link expiry"); `set` sets the password directly and signs them out
+	everywhere. The caller must already have been checked.
+
+	The mail is QUEUED, never sent inside the request: EmailQueue.send() commits mid-request
+	and an SMTP failure there would surface after the link had already been generated."""
+	doc = frappe.get_doc("User", user)
+	mode = cstr(mode).strip() or "email"
+	if mode == "email":
+		if helper.is_customer_only(user):
+			# update_password() sends a Website User here after they set the password.
+			doc.db_set("redirect_url", helper.PORTAL_HOME)
+		try:
+			# password_reset_mail() hard-codes now=True; queue the same mail instead.
+			link = doc.reset_password(send_email=False)
+			doc.send_login_mail(
+				_("Password Reset"),
+				"password_reset",
+				{"link": link},
+				now=False,
+				custom_template=frappe.db.get_system_setting("reset_password_template"),
+			)
+		except frappe.OutgoingEmailError:
+			frappe.clear_last_message()
+			frappe.throw(_("No outgoing email account is configured, so the reset link could not be sent."))
+		return {"ok": True, "mode": "email", "email": doc.email}
+
+	if mode == "set":
+		new_password = cstr(new_password)
+		if len(new_password) < 8:
+			frappe.throw(_("The new password must be at least 8 characters."))
+		doc.flags.ignore_permissions = True
+		# new_password on save runs the site Password Policy, then updates __Auth.
+		doc.new_password = new_password
+		doc.save()
+		from frappe.sessions import clear_sessions
+
+		clear_sessions(user=user, force=True)
+		return {"ok": True, "mode": "set", "email": doc.email}
+
+	frappe.throw(_("Unknown reset mode."))
+
+
+@frappe.whitelist(methods=["POST"])
+def reset_user_password(user, mode="email", new_password=None):
+	"""Reset someone's password from the Org Chart or the Admin page. Who may reset whom:
+	see helper.can_reset_password_for. Setting a password directly is for Super Admins; a
+	Department Admin sends the reset link, which the person uses themselves."""
+	user = cstr(user).strip()
+	if not frappe.db.exists("User", user) or not frappe.db.get_value("User", user, "enabled"):
+		frappe.throw(_("User not found"))
+	if not helper.can_reset_password_for(user):
+		frappe.throw(_("You cannot reset this person's password."), frappe.PermissionError)
+	if cstr(mode).strip() == "set" and not helper.is_super_admin():
+		frappe.throw(
+			_("Only a Super Admin can set a password directly. Send the reset link instead."),
+			frappe.PermissionError,
+		)
+	return reset_password_for(user, mode, new_password)
+
+
+@frappe.whitelist()
+def search_resettable_users(txt=""):
+	"""Logins whose password the caller may reset (the Admin page's reset tool)."""
+	if not helper.has_portal_staff_project_access():
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+	safe = cstr(txt).replace("%", "").replace("_", "").strip()[:100]
+	kwargs = dict(
+		filters=[["enabled", "=", 1], ["name", "not in", ["Guest", "Administrator"]]],
+		fields=["name", "full_name", "user_type"],
+		order_by="full_name asc",
+		limit_page_length=60,
+	)
+	if safe:
+		kwargs["or_filters"] = [
+			["name", "like", "%" + safe + "%"],
+			["full_name", "like", "%" + safe + "%"],
+		]
+	rows = frappe.get_all("User", **kwargs)
+	out = []
+	for r in rows:
+		if helper.can_reset_password_for(r.name):
+			out.append(
+				{
+					"name": r.name,
+					"full_name": r.full_name or r.name,
+					"role_label": helper.ROLE_LABELS.get(helper.get_portal_role(r.name), ""),
+				}
+			)
+		if len(out) >= 20:
+			break
+	return out
 
 
 def run_demo_seed():

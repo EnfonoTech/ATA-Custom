@@ -287,6 +287,11 @@ function todayIso() {
 	const dd = String(d.getDate()).padStart(2, "0");
 	return `${d.getFullYear()}-${mm}-${dd}`;
 }
+/** Pill text for a file in the client folder: Incoming = what ATA sent, Outgoing = what the client sent. */
+function clientDirectionText(direction) {
+	if (isCustomerPortalUser.value) return direction === "incoming" ? "From ATA" : "Your upload";
+	return direction === "incoming" ? "Sent to client" : "From client";
+}
 function openSubmitModal(f) {
 	submitFile.value  = f;
 	submitError.value = "";
@@ -316,7 +321,7 @@ async function confirmSubmitToClient() {
 			type: "POST",
 			args: { file_name: f.name, project: proj },
 		});
-		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to Client Submittal.`;
+		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to the client's Incoming folder.`;
 		if (projCache[proj]) delete projCache[proj];
 		setTimeout(() => { submitOk.value = ""; closeSubmitModal(); }, 3000);
 	} catch (e) {
@@ -845,7 +850,8 @@ watch(activeFolder, (newFolder) => {
 										<FeatherIcon :name="extIcon(f.file_name)" class="h-4 w-4" style="color:var(--portal-accent)" />
 									</span>
 									<span class="min-w-0 truncate font-medium group-hover:underline" style="color:var(--portal-text)">{{ f.file_name }}</span>
-									<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
+									<span v-if="f.client_direction" class="portal-pill ml-1.5" :class="f.client_direction === 'incoming' ? 'portal-pill-accent' : 'portal-pill-success'" :title="f.uploaded_by_client ? `Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}` : ''">{{ clientDirectionText(f.client_direction) }}</span>
+									<span v-else-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 								</a>
 								<span v-else class="flex items-center gap-3" style="color:var(--portal-muted)">
 									<span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style="background:var(--portal-surface-alt)">
@@ -891,7 +897,7 @@ watch(activeFolder, (newFolder) => {
 										type="button"
 										class="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold shadow-sm transition active:scale-95"
 										style="border-color:rgba(245,158,11,0.35);background:var(--portal-accent-soft);color:var(--portal-accent)"
-										title="Submit to 06-CLIENT SUBMITTAL with SL.NO + date naming"
+										title="Submit to 06-CLIENT SUBMITTAL / Incoming with SL.NO + date naming"
 										@click.stop="openSubmitModal(f)"
 									>
 										<FeatherIcon name="send" class="h-3 w-3" />
@@ -938,7 +944,7 @@ watch(activeFolder, (newFolder) => {
 							</div>
 							<div>
 								<h2 class="text-base font-bold" style="color:var(--portal-text)">Submit to Client</h2>
-								<p class="text-xs" style="color:var(--portal-muted)">Copies to <strong>06-CLIENT SUBMITTAL</strong> with serial + date naming</p>
+								<p class="text-xs" style="color:var(--portal-muted)">Copies to <strong>06-CLIENT SUBMITTAL / Incoming</strong> with serial + date naming</p>
 							</div>
 						</div>
 						<button type="button" class="rounded-lg p-1.5 transition" style="color:var(--portal-subtle)" :disabled="submitBusy" @click="closeSubmitModal">

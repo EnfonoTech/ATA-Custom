@@ -246,7 +246,7 @@ function openFolderInFiles(project, folderPath) {
 				</div>
 				<p class="text-base font-semibold text-[color:var(--portal-text)]">Nothing shared with you yet</p>
 				<p class="max-w-md text-sm text-[color:var(--portal-muted)]">
-					When a project manager shares a folder or file with you, it will appear here grouped by project.
+					When a colleague shares a folder or file with you, it will appear here grouped by project.
 				</p>
 			</div>
 

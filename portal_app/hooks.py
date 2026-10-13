@@ -169,6 +169,8 @@ has_permission = {
 
 doc_events = {
 	"Project": {"validate": "portal_app.api.projects.refuse_client_project_users"},
+	# Keeps the Department Admin / Team Lead roles in step with the department's data.
+	"Department": {"on_update": "portal_app.api.helper.sync_department_role_markers"},
 	"ToDo": {
 		"validate": "portal_app.api.projects.refuse_client_project_todo",
 		"after_insert": "portal_app.api.projects.sync_project_access_from_todo",

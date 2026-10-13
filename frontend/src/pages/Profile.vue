@@ -9,6 +9,13 @@ const portalCapabilities = inject("portalCapabilities", ref({}));
 const refreshPortalCapabilities = inject("refreshPortalCapabilities", () => Promise.resolve());
 const manageCount = computed(() => (portalCapabilities.value?.manageable_project_names || []).length);
 const canEditTemplate = computed(() => !!portalCapabilities.value?.can_edit_portal_folder_template);
+const canViewOrgChart = computed(() => !!portalCapabilities.value?.can_view_org_chart);
+const orgChartBlurb = computed(() => {
+	const caps = portalCapabilities.value || {};
+	if (caps.is_super_admin) return "change roles, remove people, assign them to projects and reset passwords for every team";
+	if (caps.is_department_admin) return "change roles, remove people, assign them to projects and send password resets for your departments";
+	return "assign the people of your team to its projects";
+});
 
 const loading = ref(true);
 const saving = ref(false);
@@ -29,9 +36,10 @@ const error = ref("");
 // toggle.
 const PORTAL_ROLES = [
 	"System Manager",
-	"Projects Manager",
+	"Department Admin",
+	"Team Lead",
 	"Projects User",
-	"Portal Customer",
+	"Client Customer",
 	"Administrator",
 ];
 const showAllRoles = ref(false);
@@ -232,6 +240,15 @@ function extractErr(e) {
 						</div>
 					</div>
 
+					<div v-if="profile?.portal_role_label" class="px-5 pb-4">
+						<p class="portal-section-title mb-2">Portal role</p>
+						<div class="flex flex-wrap items-center gap-1.5">
+							<span class="portal-pill portal-pill-accent">{{ profile.portal_role_label }}</span>
+							<span v-for="t in profile.admin_team_names || []" :key="'a:' + t" class="portal-pill portal-pill-muted">Department Admin · {{ t }}</span>
+							<span v-for="t in profile.led_team_names || []" :key="'l:' + t" class="portal-pill portal-pill-muted">Team Lead · {{ t }}</span>
+						</div>
+					</div>
+
 					<div v-if="profile?.roles?.length" class="px-5 pb-5">
 						<p class="portal-section-title mb-2">Roles</p>
 						<div class="flex flex-wrap items-center gap-1.5">
@@ -254,7 +271,7 @@ function extractErr(e) {
 
 				<!-- Permissions -->
 				<div
-					v-if="manageCount > 0 || canEditTemplate"
+					v-if="manageCount > 0 || canEditTemplate || canViewOrgChart"
 					class="portal-callout"
 				>
 					<p class="portal-section-title flex items-center gap-1.5">
@@ -265,6 +282,10 @@ function extractErr(e) {
 						<li v-if="manageCount > 0" class="flex items-start gap-2">
 							<FeatherIcon name="check-circle" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--portal-success)]" />
 							<span>You can manage <strong>{{ manageCount }}</strong> project(s), including delete/share/rename on Files where applicable.</span>
+						</li>
+						<li v-if="canViewOrgChart" class="flex items-start gap-2">
+							<FeatherIcon name="check-circle" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--portal-success)]" />
+							<span>From the <strong>Org Chart</strong> you can {{ orgChartBlurb }}.</span>
 						</li>
 						<li v-if="canEditTemplate" class="flex items-start gap-2">
 							<FeatherIcon name="check-circle" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[color:var(--portal-success)]" />
@@ -278,6 +299,14 @@ function extractErr(e) {
 						>
 							<FeatherIcon name="paperclip" class="h-3.5 w-3.5" />
 							Open Files
+						</button>
+						<button
+							v-if="canViewOrgChart"
+							class="portal-btn portal-btn-ghost text-xs"
+							@click="router.push('/org-chart')"
+						>
+							<FeatherIcon name="git-branch" class="h-3.5 w-3.5" />
+							Org Chart
 						</button>
 						<button
 							v-if="canEditTemplate"

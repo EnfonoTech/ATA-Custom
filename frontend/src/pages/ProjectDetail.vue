@@ -22,6 +22,13 @@ const canShareFolder = computed(
 );
 const canLinkCustomer = computed(() => canManage.value && !!portalCapabilities.value?.can_manage_customers);
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
+// What this person may do to the project's team: a Team Lead / Department Admin / Super Admin
+// (or the project's Lead Architect) can add people; only a Super Admin or Department Admin can
+// take them off. The server decides, project_dashboard returns the answer.
+const teamRights = computed(() => payload.value?.team_rights || { can_add: false, can_remove: false });
+const canAddMembers = computed(() => !!teamRights.value.can_add);
+const canRemoveMembers = computed(() => !!teamRights.value.can_remove);
+const canPickFromOrgChart = computed(() => canAddMembers.value && !!portalCapabilities.value?.can_view_org_chart);
 const isCustomerPortalUser = computed(() => !!portalCapabilities.value?.is_customer_portal_user);
 const sessionUser = computed(() => portalCapabilities.value?.portal_user || "");
 
@@ -88,6 +95,14 @@ const teamSaving = ref(false);
 const teamMessage = ref("");
 const teamError = ref("");
 
+// "Add from org chart" picker
+const showOrgPicker = ref(false);
+const orgChartData = ref({ teams: [], unassigned: [], super_admins: [] });
+const orgLoading = ref(false);
+const orgErr = ref("");
+const orgSearch = ref("");
+const orgPicked = ref(new Set());
+
 const projectTitleDraft = ref("");
 const titleSaving = ref(false);
 const titleError = ref("");
@@ -114,6 +129,7 @@ function onOpenShareFromPanel(folderPath) {
 }
 
 const project = computed(() => payload.value?.project);
+const teamRows = computed(() => (project.value?.users || []).filter((r) => r.user));
 const tasks = computed(() => payload.value?.tasks || []);
 const kanbanStage = computed(() => payload.value?.kanban_stage || "—");
 const hasProjectCustomer = computed(() => !!(project.value?.customer));
@@ -352,15 +368,99 @@ watch(searchQ, (q) => {
 	searchTimer = setTimeout(() => runUserSearch(q), 200);
 });
 
-function addTeamUser(u) {
-	if (!u || teamList.value.includes(u)) return;
-	teamList.value = [...teamList.value, u];
-	searchQ.value = "";
-	searchHits.value = [];
+/** Add people to the team right away (the server checks the caller may add to THIS project). */
+async function addTeamUsers(users) {
+	const fresh = [...new Set((users || []).filter((u) => u && !teamList.value.includes(u)))];
+	if (!fresh.length) return false;
+	teamSaving.value = true;
+	teamMessage.value = "";
+	teamError.value = "";
+	try {
+		await call({
+			method: "portal_app.api.projects.add_project_members",
+			type: "POST",
+			args: { project: props.name, users: JSON.stringify(fresh) },
+		});
+		teamMessage.value = fresh.length === 1 ? "Added to the team." : `${fresh.length} people added to the team.`;
+		await loadDashboard();
+		return true;
+	} catch (e) {
+		teamError.value = apiErr(e);
+		return false;
+	} finally {
+		teamSaving.value = false;
+	}
 }
 
-function removeTeamUser(u) {
-	teamList.value = teamList.value.filter((x) => x !== u);
+async function addTeamUser(u) {
+	searchQ.value = "";
+	searchHits.value = [];
+	await addTeamUsers([u]);
+}
+
+/** Take someone off the team (Super Admin / Department Admin only). */
+async function removeTeamUser(row) {
+	if (!row?.user || !canRemoveMembers.value) return;
+	if (!window.confirm(`Remove ${row.full_name || row.user} from this project's team?`)) return;
+	teamSaving.value = true;
+	teamMessage.value = "";
+	teamError.value = "";
+	try {
+		await call({
+			method: "portal_app.api.projects.remove_project_members",
+			type: "POST",
+			args: { project: props.name, users: JSON.stringify([row.user]) },
+		});
+		teamMessage.value = "Removed from the team.";
+		await loadDashboard();
+	} catch (e) {
+		teamError.value = apiErr(e);
+	} finally {
+		teamSaving.value = false;
+	}
+}
+
+async function openOrgPicker() {
+	orgSearch.value = "";
+	orgPicked.value = new Set();
+	orgErr.value = "";
+	showOrgPicker.value = true;
+	orgLoading.value = true;
+	try {
+		orgChartData.value = await call({ method: "portal_app.api.teams.get_org_chart" });
+	} catch (e) {
+		orgErr.value = apiErr(e);
+	} finally {
+		orgLoading.value = false;
+	}
+}
+
+function toggleOrgPick(user) {
+	const s = new Set(orgPicked.value);
+	s.has(user) ? s.delete(user) : s.add(user);
+	orgPicked.value = s;
+}
+
+/** The org chart as pick lists: one group per team, people already on the project are greyed. */
+const orgGroups = computed(() => {
+	const q = orgSearch.value.trim().toLowerCase();
+	const hit = (m) => !q || (m.full_name || "").toLowerCase().includes(q) || (m.user || "").toLowerCase().includes(q);
+	const groups = (orgChartData.value.teams || []).map((t) => ({
+		key: t.name,
+		label: t.department_name,
+		office: t.office,
+		people: (t.members || []).filter(hit),
+	}));
+	const loose = (orgChartData.value.unassigned || []).filter(hit);
+	if (loose.length) groups.push({ key: "__none__", label: "Not in a team yet", office: "", people: loose });
+	return groups.filter((g) => g.people.length);
+});
+
+async function submitOrgPicker() {
+	if (!orgPicked.value.size) return;
+	const ok = await addTeamUsers([...orgPicked.value]);
+	if (ok) showOrgPicker.value = false;
+	else orgErr.value = teamError.value;
 }
 
 async function loadUserGroups() {
@@ -372,7 +472,7 @@ async function loadUserGroups() {
 	}
 }
 
-/** Add every member of the selected User Group to the team at once, then persist. */
+/** Add every member of the selected User Group to the team at once. */
 async function addTeamUserGroup() {
 	if (!selectedGroup.value) return;
 	addingGroup.value = true;
@@ -382,9 +482,8 @@ async function addTeamUserGroup() {
 			method: "portal_app.api.teams.get_user_group_members",
 			args: { user_group: selectedGroup.value },
 		});
-		for (const m of members || []) addTeamUser(m);
 		selectedGroup.value = "";
-		await saveTeam();
+		await addTeamUsers(members || []);
 	} catch (e) {
 		teamError.value = apiErr(e);
 	} finally {
@@ -409,7 +508,7 @@ async function runUserSearch(q) {
 	try {
 		searchHits.value = await call({
 			method: "portal_app.api.projects.search_portal_users",
-			args: { txt: (q || "").trim() },
+			args: { txt: (q || "").trim(), staff_only: 1 },
 		});
 	} catch (e) {
 		console.error(e);
@@ -417,18 +516,10 @@ async function runUserSearch(q) {
 	}
 }
 
-/** Enter key on the team-search input: pick the top hit, add to team, save immediately. */
+/** Enter key on the team-search input: add the top hit straight away. */
 async function onTeamSearchEnter() {
 	const top = (searchHits.value || []).find((h) => !teamList.value.includes(h.name));
-	if (top) {
-		addTeamUser(top.name);
-		await saveTeam();
-		return;
-	}
-	// No usable suggestion — if there's at least one user typed, just save current list.
-	if (teamList.value.length) {
-		await saveTeam();
-	}
+	if (top) await addTeamUser(top.name);
 }
 
 function onDocClickClosePickers(e) {
@@ -555,25 +646,6 @@ function apiErr(e) {
 		}
 	}
 	return body?.message || body?.exc || "Request failed.";
-}
-
-async function saveTeam() {
-	teamSaving.value = true;
-	teamMessage.value = "";
-	teamError.value = "";
-	try {
-		await call({
-			method: "portal_app.api.projects.sync_project_team",
-			type: "POST",
-			args: { project: props.name, users: JSON.stringify(teamList.value) },
-		});
-		teamMessage.value = "Team updated.";
-		await loadDashboard();
-	} catch (e) {
-		teamError.value = apiErr(e);
-	} finally {
-		teamSaving.value = false;
-	}
 }
 
 async function saveProjectTitle() {
@@ -896,7 +968,7 @@ async function submitNewCustomer() {
 						</h2>
 					</div>
 					<p class="mb-3 text-sm text-gray-600">
-						Links this project to a <strong>Customer</strong> record. Customer portal users only see projects for their linked customer.
+						Links this project to a <strong>Customer</strong> record. Client Customer logins only see projects for their linked customer.
 					</p>
 					<div v-if="canManage" class="space-y-3">
 						<template v-if="canLinkCustomer">
@@ -980,7 +1052,7 @@ async function submitNewCustomer() {
 							</Button>
 						</div>
 					</div>
-					<p v-else class="text-sm text-gray-500">You can view the customer link; only project managers can change it.</p>
+					<p v-else class="text-sm text-gray-500">You can view the customer link; only a Super Admin, a Department Admin or the Lead Architect can change it.</p>
 				</div>
 
 				<div
@@ -990,7 +1062,7 @@ async function submitNewCustomer() {
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="user-plus" class="h-4 w-4 text-[color:var(--portal-accent)]" />
-							Customer portal users
+							Client Customer logins
 						</h2>
 						<Button v-if="cpCanInvite" type="button" variant="outline" size="sm" @click="openInviteCustomerUser">
 							Invite new user
@@ -1040,7 +1112,7 @@ async function submitNewCustomer() {
 							v-if="!customerPortalUsers.length"
 							class="py-8 px-4 text-center text-sm text-gray-500"
 						>
-							No customer portal users yet. Search below to add someone, or use Invite new user.
+							No Client Customer logins yet. Search below to add someone, or use Invite new user.
 						</li>
 					</ul>
 
@@ -1076,7 +1148,7 @@ async function submitNewCustomer() {
 						</div>
 					</div>
 					</template>
-					<p v-else class="mb-3 text-xs text-gray-500">Only a System Manager or Projects Manager can add customer portal users.</p>
+					<p v-else class="mb-3 text-xs text-gray-500">Only a Super Admin or a Department Admin can add Client Customer logins.</p>
 					<p v-if="cpSaving" class="mb-2 text-sm text-gray-600">Updating…</p>
 					<p v-if="cpMessage" class="text-sm text-green-700">{{ cpMessage }}</p>
 					<p v-if="cpWarn" class="text-sm font-medium text-amber-700">{{ cpWarn }}</p>
@@ -1091,7 +1163,7 @@ async function submitNewCustomer() {
 						</h2>
 					</div>
 					<p class="mb-3 text-sm text-gray-600">
-						Groups this project under a department on the Gantt Chart page. A Projects Manager can only set this on projects where they are the Portal Project Manager; System Manager can set it on any project.
+						Groups this project under a department on the Gantt Chart page. A Super Admin can set any department; a Department Admin can only use a department they administer; the project's Lead Architect can set it on their own project.
 					</p>
 					<div v-if="canManage" class="space-y-3">
 						<p class="text-sm" style="color:var(--portal-text);">
@@ -1142,7 +1214,7 @@ async function submitNewCustomer() {
 						<p v-if="deptMsg" class="text-sm text-green-700">{{ deptMsg }}</p>
 						<p v-if="deptErr" class="text-sm text-red-600">{{ deptErr }}</p>
 					</div>
-					<p v-else class="text-sm text-gray-500">You can view the team; only project managers can change it.</p>
+					<p v-else class="text-sm text-gray-500">You can view the team; only a Super Admin, a Department Admin or the Lead Architect can change it.</p>
 				</div>
 
 				<div v-if="!isCustomerPortalUser" class="portal-card-strong p-5">
@@ -1150,16 +1222,27 @@ async function submitNewCustomer() {
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
 							<FeatherIcon name="users" class="h-4 w-4 text-[color:var(--portal-accent)]" />
 							Team
+							<span class="text-xs font-normal text-[color:var(--portal-muted)]">{{ teamRows.length }}</span>
 						</h2>
-						<span v-if="!canManage" class="text-xs text-[color:var(--portal-muted)]">View only — ask a project manager to change membership.</span>
+						<button v-if="canPickFromOrgChart" type="button" class="portal-btn portal-btn-ghost" @click="openOrgPicker">
+							<FeatherIcon name="git-branch" class="h-3.5 w-3.5" />
+							Add from org chart
+						</button>
 					</div>
-					<div v-if="canManage" ref="teamPickerRef" class="mb-4 space-y-2">
+					<p v-if="!canAddMembers" class="mb-3 text-xs text-[color:var(--portal-muted)]">
+						View only. A Team Lead, Department Admin or Super Admin adds people to a project.
+					</p>
+					<p v-else-if="!canRemoveMembers" class="mb-3 text-xs text-[color:var(--portal-muted)]">
+						You can add people to this project. Only a Super Admin or a Department Admin can remove them.
+					</p>
+					<div v-if="canAddMembers" ref="teamPickerRef" class="mb-4 space-y-2">
 						<label class="text-xs font-medium text-gray-600">Add user (search by email, username, or full name)</label>
 						<div @focusin="onSearchFocus">
 							<TextInput
 								v-model="searchQ"
 								class="w-full rounded-xl"
-								placeholder="Click to see existing users, type to filter, press Enter to add + save"
+								placeholder="Click to see existing users, type to filter, press Enter to add"
+								:disabled="teamSaving"
 								@keyup.enter="onTeamSearchEnter"
 							/>
 						</div>
@@ -1172,7 +1255,7 @@ async function submitNewCustomer() {
 								:key="h.name"
 								type="button"
 								class="flex w-full items-center justify-between gap-2 border-b border-gray-100 px-3 py-2 text-left last:border-0 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-								:disabled="teamList.includes(h.name)"
+								:disabled="teamSaving || teamList.includes(h.name)"
 								@click="addTeamUser(h.name)"
 							>
 								<span class="min-w-0 flex-1 truncate">
@@ -1180,6 +1263,7 @@ async function submitNewCustomer() {
 									<span class="ml-2 text-xs text-gray-500">{{ h.email || h.name }}</span>
 								</span>
 								<span v-if="teamList.includes(h.name)" class="text-xs text-gray-400">on team</span>
+								<span v-else class="text-xs font-medium text-blue-600">Add</span>
 							</button>
 						</div>
 
@@ -1195,7 +1279,7 @@ async function submitNewCustomer() {
 								<Button
 									variant="subtle"
 									class="rounded-xl"
-									:disabled="!selectedGroup"
+									:disabled="!selectedGroup || teamSaving"
 									:loading="addingGroup"
 									@click="addTeamUserGroup"
 								>
@@ -1205,23 +1289,29 @@ async function submitNewCustomer() {
 						</div>
 					</div>
 					<ul class="divide-y rounded-xl border border-gray-100 text-sm">
-						<li v-for="u in teamList" :key="u" class="flex items-center justify-between gap-2 py-2 px-3">
-							<span>{{ u }}</span>
+						<li v-for="row in teamRows" :key="row.user" class="flex items-center justify-between gap-2 py-2 px-3">
+							<span class="min-w-0">
+								<span class="font-medium text-[color:var(--portal-text)]">{{ row.full_name || row.user }}</span>
+								<span
+									v-if="project.portal_project_manager && project.portal_project_manager === row.user"
+									class="portal-pill portal-pill-muted ml-1.5"
+								>Lead Architect</span>
+								<span class="block truncate text-xs text-gray-500">{{ row.user }}</span>
+							</span>
 							<button
-								v-if="canManage"
+								v-if="canRemoveMembers"
 								type="button"
-								class="text-xs text-red-600 hover:underline"
-								@click="removeTeamUser(u)"
+								class="shrink-0 text-xs text-red-600 hover:underline disabled:opacity-50"
+								:disabled="teamSaving"
+								@click="removeTeamUser(row)"
 							>
 								Remove
 							</button>
 						</li>
-						<li v-if="!teamList.length" class="py-4 px-3 text-gray-500">No users on this project yet.</li>
+						<li v-if="!teamRows.length" class="py-4 px-3 text-gray-500">No users on this project yet.</li>
 					</ul>
-					<div v-if="canManage" class="mt-3 flex flex-wrap items-center gap-3">
-						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="teamSaving" @click="saveTeam">
-							Save team
-						</Button>
+					<div class="mt-3 space-y-1">
+						<p v-if="teamSaving" class="text-sm text-gray-600">Updating…</p>
 						<p v-if="teamMessage" class="text-sm text-green-700">{{ teamMessage }}</p>
 						<p v-if="teamError" class="text-sm text-red-600">{{ teamError }}</p>
 					</div>
@@ -1253,7 +1343,7 @@ async function submitNewCustomer() {
 						@open-share="onOpenShareFromPanel"
 					/>
 					<p v-else class="mb-4 text-sm text-[color:var(--portal-muted)]">
-						You can upload into 06-CLIENT SUBMITTAL from
+						You can upload into 06-CLIENT SUBMITTAL / Outgoing from
 						<button type="button" class="font-medium underline" @click="router.push({ path: '/files', query: { project: project.name } })">the Files hub</button>.
 					</p>
 					<p v-if="fileDeleteError" class="mb-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -1266,7 +1356,8 @@ async function submitNewCustomer() {
 								<FeatherIcon name="file" class="mr-1.5 inline h-3.5 w-3.5 text-[color:var(--portal-muted)]" />
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="portal-pill portal-pill-muted ml-1.5">private</span>
-								<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
+								<span v-if="f.client_direction" class="portal-pill ml-1.5" :class="f.client_direction === 'incoming' ? 'portal-pill-accent' : 'portal-pill-success'">{{ f.client_direction === "incoming" ? "Sent to client" : "From client" }}</span>
+								<span v-else-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 							</span>
 							<div class="flex shrink-0 flex-wrap items-center gap-2">
 								<a
@@ -1327,6 +1418,64 @@ async function submitNewCustomer() {
 				</div>
 			</template>
 		</div>
+
+		<Teleport to="body">
+			<div
+				v-if="showOrgPicker"
+				class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showOrgPicker = false"></div>
+				<div class="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl">
+					<div class="border-b border-gray-100 px-6 py-4">
+						<h3 class="text-lg font-semibold text-gray-900">Add from the org chart</h3>
+						<p class="mt-0.5 text-sm text-gray-600">Tick the people to put on <strong>{{ project?.project_name || props.name }}</strong>.</p>
+					</div>
+					<div class="px-6 pt-4">
+						<TextInput v-model="orgSearch" class="w-full rounded-xl" placeholder="Search people" />
+					</div>
+					<div class="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+						<p v-if="orgLoading" class="py-6 text-center text-sm text-gray-500">Loading…</p>
+						<template v-else>
+							<div v-for="g in orgGroups" :key="g.key" class="mb-4">
+								<p class="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+									{{ g.label }}<span v-if="g.office" class="font-normal normal-case"> · {{ g.office }}</span>
+								</p>
+								<label
+									v-for="m in g.people"
+									:key="g.key + '::' + m.user"
+									class="mb-1.5 flex cursor-pointer items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"
+									:class="teamList.includes(m.user) ? 'opacity-55' : ''"
+								>
+									<input
+										type="checkbox"
+										:disabled="teamList.includes(m.user)"
+										:checked="orgPicked.has(m.user)"
+										@change="toggleOrgPick(m.user)"
+									/>
+									<span class="min-w-0 flex-1">
+										<span class="block truncate text-sm font-medium text-gray-900">{{ m.full_name || m.user }}</span>
+										<span class="block truncate text-xs text-gray-500">{{ m.user }}<span v-if="m.role_label"> · {{ m.role_label }}</span></span>
+									</span>
+									<span v-if="teamList.includes(m.user)" class="shrink-0 text-xs text-gray-400">On team</span>
+								</label>
+							</div>
+							<p v-if="!orgGroups.length && !orgErr" class="py-6 text-center text-sm text-gray-500">No people to show.</p>
+						</template>
+						<p v-if="orgErr" class="text-sm text-red-600">{{ orgErr }}</p>
+					</div>
+					<div class="flex items-center justify-end gap-2 border-t border-gray-100 px-6 py-4">
+						<button type="button" class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" @click="showOrgPicker = false">
+							Cancel
+						</button>
+						<Button variant="solid" class="rounded-xl bg-black text-white" :disabled="!orgPicked.size" :loading="teamSaving" @click="submitOrgPicker">
+							{{ orgPicked.size ? `Add ${orgPicked.size} to the team` : "Add to the team" }}
+						</Button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
 
 		<Teleport to="body">
 			<div
@@ -1396,7 +1545,7 @@ async function submitNewCustomer() {
 					@click="showInviteCustomerUser = false"
 				></div>
 				<div class="relative z-10 w-full max-w-md rounded-2xl border bg-white p-6 shadow-2xl">
-					<h3 class="text-lg font-semibold text-gray-900">Invite customer portal user</h3>
+					<h3 class="text-lg font-semibold text-gray-900">Invite a Client Customer</h3>
 					<p class="mt-1 text-sm text-gray-600">
 						Gives this person a portal login linked to
 						<strong>{{ customerDisplayName || project?.customer }}</strong>. They will see every project of that

@@ -34,6 +34,17 @@ def get_my_profile():
 		{"name": c, "customer_name": frappe.db.get_value("Customer", c, "customer_name") or c}
 		for c in helper.get_portal_linked_customers(frappe.session.user)
 	]
+	# The portal role (Super Admin, Department Admin, Team Lead, Team Member or Client
+	# Customer) and the teams it applies to, for the Profile page.
+	role = helper.get_portal_role(frappe.session.user)
+	out["portal_role"] = role
+	out["portal_role_label"] = helper.ROLE_LABELS.get(role, "")
+
+	def _team_names(names):
+		return [frappe.db.get_value("Department", n, "department_name") or n for n in names]
+
+	out["admin_team_names"] = _team_names(helper.admin_department_names()) if helper.is_dept_admin() else []
+	out["led_team_names"] = _team_names(helper.led_department_names()) if helper.is_team_lead() else []
 	return out
 
 

@@ -218,6 +218,7 @@
 				</div>
 				<!-- New Project button -->
 				<button
+					v-if="canCreateProject"
 					type="button"
 					class="hidden sm:inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition"
 					style="background:#f59e0b;color:#0d1117;box-shadow:0 4px 12px rgba(245,158,11,0.3);"
@@ -265,13 +266,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, inject, onMounted, onBeforeUnmount } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import { Dropdown, FeatherIcon } from "frappe-ui";
 import LogoutModal from "@/component/LogoutModal.vue";
 import { call } from "@/api";
 
 const router = useRouter();
+// Only people who may create projects (Super Admin, Department Admin, or everyone when the
+// portal setting allows it) are offered the button; the server refuses everyone else anyway.
+const portalCapabilities = inject("portalCapabilities", ref({}));
+const canCreateProject = computed(() => !!portalCapabilities.value?.can_create_project);
 const route = useRoute();
 
 // ── Color Themes ────────────────────────────────────────────────────────────

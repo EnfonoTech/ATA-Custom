@@ -106,6 +106,8 @@ PROJ_FOLD_DEFAULT = [
 	"05-SUPERVISION/01-DOCUMENT TRANSMITTAL",
 	"05-SUPERVISION/02-PROJECTS",
 	"06-CLIENT SUBMITTAL",
+	"06-CLIENT SUBMITTAL/Incoming",
+	"06-CLIENT SUBMITTAL/Outgoing",
 ]
 
 
@@ -206,7 +208,21 @@ def get_project_folders_bulk(projects: list) -> dict:
 	return out
 
 
+def _with_client_folders(template: list[str]) -> list[str]:
+	"""The client folder and its Incoming / Outgoing subfolders are part of every project,
+	whatever custom template a site configured: the client features depend on them."""
+	out = list(template)
+	for rel in (_CLIENT_FOLDER, f"{_CLIENT_FOLDER}/{CLIENT_INCOMING}", f"{_CLIENT_FOLDER}/{CLIENT_OUTGOING}"):
+		if rel not in out:
+			out.append(rel)
+	return out
+
+
 def _folder_template_uncached() -> list[str]:
+	return _with_client_folders(_folder_template_source())
+
+
+def _folder_template_source() -> list[str]:
 	if frappe.db.exists("DocType", "Portal Folder Template Row") and frappe.db.exists(
 		"DocType", "Portal Project Settings"
 	):
@@ -513,12 +529,116 @@ def _verify_share_token(token: str) -> dict:
 # ATA decides otherwise.
 _CUSTOMER_VISIBLE_FOLDERS = ("06-CLIENT SUBMITTAL",)
 
+# Inside the client folder:
+#   Incoming  what ATA sends TO the client. "Submit to Client" copies files here.
+#   Outgoing  what the client sends to ATA. The client uploads here, and only here.
+_CLIENT_FOLDER = _CUSTOMER_VISIBLE_FOLDERS[0]
+CLIENT_INCOMING = "Incoming"
+CLIENT_OUTGOING = "Outgoing"
+# What the portal sends as `target_folder` when a client uploads: the server resolves it
+# to the project's real Outgoing folder (creating the folders if a project lacks them).
+CLIENT_OUTGOING_TARGET = "__client_outgoing__"
+
+
+def _attachments_root() -> str:
+	return frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
+
+
+def _client_folder_cache() -> dict:
+	cache = getattr(frappe.local, "_portal_client_folders", None)
+	if cache is None:
+		cache = frappe.local._portal_client_folders = {}
+	return cache
+
+
+def _forget_client_folders() -> None:
+	frappe.local._portal_client_folders = {}
+
+
+def _client_folder_path(project: str) -> str:
+	"""Full File name of this project's client folder.
+
+	That is the canonical "06-CLIENT SUBMITTAL", or the lookalike "06 - CLIENT SUBMITTAL"
+	some older projects carry (it matches on the normalised name only, so a sibling such
+	as "06-CLIENT SUBMITTAL - DRAFTS" never counts). Memoised per request."""
+	cache = _client_folder_cache()
+	if project in cache:
+		return cache[project]
+	base = _attachments_root() + "/" + project
+	canonical = base + "/" + _CLIENT_FOLDER
+	path = canonical
+	names = frappe.get_all("File", filters={"is_folder": 1, "folder": base}, pluck="name")
+	if canonical not in names:
+		target = _normalize_folder_label(_CLIENT_FOLDER)
+		for name in names:
+			if _normalize_folder_label(name.rsplit("/", 1)[-1]) == target:
+				path = name
+				break
+	cache[project] = path
+	return path
+
 
 def _customer_folder_roots(project: str) -> list:
 	"""Full File-folder paths a customer contact may read in this project."""
-	attachments_root = frappe.db.get_value("File", {"is_attachments_folder": 1}, "name") or "Home/Attachments"
-	base = attachments_root + "/" + project
-	return [base + "/" + f for f in _CUSTOMER_VISIBLE_FOLDERS]
+	return [_client_folder_path(project)]
+
+
+def _client_incoming_path(project: str) -> str:
+	return _client_folder_path(project) + "/" + CLIENT_INCOMING
+
+
+def _client_outgoing_path(project: str) -> str:
+	return _client_folder_path(project) + "/" + CLIENT_OUTGOING
+
+
+def _ensure_client_folders(project: str) -> dict:
+	"""Create the project's client folder with its Incoming and Outgoing subfolders if
+	they are missing (idempotent), and return their File names."""
+	project_root = _ensure_folder(_attachments_root(), project)
+	root = _ensure_folder(project_root, _CLIENT_FOLDER)
+	incoming = _ensure_folder(root, CLIENT_INCOMING)
+	outgoing = _ensure_folder(root, CLIENT_OUTGOING)
+	_client_folder_cache()[project] = root
+	return {"root": root, "incoming": incoming, "outgoing": outgoing}
+
+
+def setup_client_folders(project: str) -> dict:
+	"""Make sure the project has its Incoming and Outgoing folders, and file the files that
+	were sitting loose in the client folder: what a client uploaded goes to Outgoing,
+	everything else (what ATA submitted) to Incoming. Idempotent; used by the migration
+	that introduced the two folders. Returns how many files went where."""
+	folders = _ensure_client_folders(project)
+	loose = frappe.get_all(
+		"File",
+		filters={"folder": folders["root"], "is_folder": 0},
+		fields=["name", "owner"],
+		limit_page_length=0,
+	)
+	clients = _client_owners(f["owner"] for f in loose)
+	moved = {"incoming": 0, "outgoing": 0}
+	for f in loose:
+		key = "outgoing" if f["owner"] in clients else "incoming"
+		frappe.db.set_value("File", f["name"], "folder", folders[key], update_modified=False)
+		moved[key] += 1
+	return moved
+
+
+def _in_folder(folder: str, root: str) -> bool:
+	f = cstr(folder).replace("\\", "/")
+	return f == root or f.startswith(root + "/")
+
+
+def _in_client_outgoing(project: str, folder: str) -> bool:
+	return _in_folder(folder, _client_outgoing_path(project))
+
+
+def _client_direction(project: str, folder: str) -> str:
+	"""incoming / outgoing for a file that sits in one of the two client subfolders."""
+	if _in_folder(folder, _client_incoming_path(project)):
+		return "incoming"
+	if _in_folder(folder, _client_outgoing_path(project)):
+		return "outgoing"
+	return ""
 
 
 def _customer_folder_names(projects) -> list:
@@ -581,16 +701,27 @@ def _assert_not_customer_sharer() -> None:
 CLIENT_UPLOAD_TAG = "Client Upload"
 
 
+def _resolve_client_upload_target(project: str, hint: str) -> str:
+	"""A client contact uploads to the project's Outgoing folder. The portal sends the
+	CLIENT_OUTGOING_TARGET marker (or nothing) and the server finds, or creates, the
+	real folder; any other target is passed through for _assert_upload_allowed to judge."""
+	hint = cstr(hint or "").strip()
+	if hint in ("", CLIENT_OUTGOING_TARGET):
+		helper.assert_project_access(project)
+		return _ensure_client_folders(project)["outgoing"]
+	return hint
+
+
 def _assert_upload_allowed(project: str, target_folder: str) -> None:
-	"""Staff: the existing rule. A client contact: only into 06-CLIENT SUBMITTAL (or a
+	"""Staff: the existing rule. A client contact: only into the Outgoing folder (or a
 	folder inside it) of a project of their own customers."""
 	if not helper.is_customer_only():
 		helper.assert_customer_portal_can_upload(project)
 		return
 	helper.assert_project_access(project)
-	if not _in_customer_roots(project, target_folder):
+	if not _in_client_outgoing(project, target_folder):
 		frappe.throw(
-			_("You can upload only into the {0} folder.").format(_CUSTOMER_VISIBLE_FOLDERS[0]),
+			_("You can upload only into the {0} folder.").format(_CLIENT_FOLDER + "/" + CLIENT_OUTGOING),
 			frappe.PermissionError,
 		)
 
@@ -718,6 +849,10 @@ def list_project_files(project):
 		order_by="creation desc",
 	)
 	_flag_client_uploads(files)
+	for f in files:
+		direction = _client_direction(project, f.get("folder"))
+		if direction:
+			f["client_direction"] = direction
 	return {"files": files, "settings": helper.get_public_portal_settings(), "folders": folders}
 
 
@@ -781,6 +916,18 @@ def rename_project_subfolder(project, folder_path, new_folder_name):
 	new_path = f"{parent_path}/{new_segment}"
 	if new_path == fp:
 		return {"old": fp, "new": new_path}
+	# The client folder and its Incoming / Outgoing subfolders are found by name, so they
+	# cannot be renamed away (a lookalike such as "06 - CLIENT SUBMITTAL" may be renamed
+	# TO the standard name).
+	client_root = _client_folder_path(project)
+	canonical_root = _attachments_root() + "/" + project + "/" + _CLIENT_FOLDER
+	if fp in (client_root, client_root + "/" + CLIENT_INCOMING, client_root + "/" + CLIENT_OUTGOING) and not (
+		fp == client_root and new_path == canonical_root
+	):
+		frappe.throw(
+			_("The client folder and its Incoming and Outgoing folders cannot be renamed."),
+			frappe.PermissionError,
+		)
 	if frappe.db.exists("File", new_path):
 		frappe.throw(_("A file or folder with that name already exists"))
 	frappe.rename_doc("File", fp, new_path, force=True, merge=False)
@@ -791,6 +938,7 @@ def rename_project_subfolder(project, folder_path, new_folder_name):
 	# segment against file_name) would silently treat this renamed folder as
 	# if it still had its original name.
 	frappe.db.set_value("File", new_path, "file_name", new_segment, update_modified=False)
+	_forget_client_folders()
 	return {"old": fp, "new": new_path}
 
 
@@ -2096,16 +2244,9 @@ def list_managed_shares():
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return {"projects": []}
-	# Mirrors helper.can_manage_project without calling it per project (it re-reads the
-	# Project table each time — that was a full scan x N here). Staff manage everything
-	# they can see; a Projects User manages only projects they are on the team of.
-	# Staff first — Administrator carries the Portal Customer role too.
-	if helper.has_portal_staff_project_access():
-		manageable = set(allowed)
-	elif helper.user_is_customer_portal_user():
-		manageable = set()
-	else:
-		manageable = set(allowed) & set(helper.project_member_names())
+	# helper.get_manageable_project_names mirrors can_manage_project for the whole list
+	# at once (calling it per project re-read the Project table each time, a full scan x N).
+	manageable = set(helper.get_manageable_project_names(allowed=allowed))
 	if not manageable:
 		# Not a manager on any project — surface an empty payload with a hint flag so
 		# the UI can show a "you are not a project admin" lock screen.
@@ -2580,6 +2721,11 @@ def upload_project_file():
 				"No project selected for this upload. Pick a project on the Files page (or open the project's detail page) and try again."
 			)
 		)
+	if helper.is_customer_only():
+		# A client uploads to the project's Outgoing folder; resolve the portal's marker
+		# (or an empty target) to the real folder and use it for the rest of the request.
+		target_folder_hint = _resolve_client_upload_target(project, target_folder_hint)
+		frappe.form_dict["target_folder"] = target_folder_hint
 	_assert_upload_allowed(project, target_folder_hint)
 
 	upload = frappe.request.files.get("file")
@@ -2961,7 +3107,7 @@ def download_project_file(file_name):
 
 @frappe.whitelist()
 def submit_to_client_submittal(file_name, project):
-	"""Copy a project file into 06-CLIENT SUBMITTAL, renamed with an auto serial
+	"""Copy a project file into 06-CLIENT SUBMITTAL/Incoming, renamed with an auto serial
 	and today's date (NN_YYYY-MM-DD_originalname), for handing off to the client.
 
 	The File Browser's "Submit" button on every file row has always called this
@@ -2987,14 +3133,9 @@ def submit_to_client_submittal(file_name, project):
 	if cstr(src.folder or "").startswith("Home/Contracts/"):
 		frappe.throw(_("Contract files cannot be submitted to the client."), frappe.PermissionError)
 
-	folder_ctx = get_project_folders(project)
-	target_folder = None
-	for row in folder_ctx.get("subfolders", []):
-		if row.get("label") == "06-CLIENT SUBMITTAL":
-			target_folder = row["name"]
-			break
-	if not target_folder:
-		frappe.throw(_("This project has no 06-CLIENT SUBMITTAL folder."))
+	# What ATA submits TO the client lands in the client folder's Incoming subfolder
+	# (created on the spot if this project predates it).
+	target_folder = _ensure_client_folders(project)["incoming"]
 
 	serial = frappe.db.count("File", {"folder": target_folder, "is_folder": 0}) + 1
 	new_filename = f"{serial:02d}_{frappe.utils.today()}_{src.file_name}"

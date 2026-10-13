@@ -9,18 +9,28 @@ const caps = ref({
 	can_edit_folder_template: false,
 	can_grant_super_admin: false,
 	can_assign_team_manager: false,
+	can_assign_team_roles: false,
+	can_reset_passwords: false,
 });
 const loadingCaps = ref(true);
 
 const email = ref("");
 const fullName = ref("");
 const password = ref("");
-const roleProjectsUser = ref(true);
-const roleProjectsManager = ref(false);
-const rolePortalCustomer = ref(false);
-const roleTeamManager = ref(false);
-const roleSuperAdmin = ref(false);
-const teamLeadOf = ref("");
+
+// The five portal roles. Super Admin and Department Admin can only be handed out by a Super Admin.
+const ROLE_CHOICES = [
+	{ key: "super_admin", label: "Super Admin", needsSuper: true, hint: "Sees and changes everything in the portal and the whole ERP. Only a Super Admin can create one." },
+	{ key: "department_admin", label: "Department Admin", needsSuper: true, hint: "Looks after one or more departments: manages their people and projects, assigns and removes team members." },
+	{ key: "team_lead", label: "Team Lead", hint: "Leads a team and assigns its people to projects from the Org Chart." },
+	{ key: "team_member", label: "Team Member", hint: "Sees and works on the projects they are on, and nothing else." },
+	{ key: "client_customer", label: "Client Customer", hint: "An external client contact: sees only the projects of their customer and the client folder." },
+];
+const roleChoices = computed(() => ROLE_CHOICES.filter((r) => !r.needsSuper || caps.value.can_grant_super_admin));
+const role = ref("team_member");
+const roleHint = computed(() => ROLE_CHOICES.find((r) => r.key === role.value)?.hint || "");
+const teamPick = ref(""); // Team Lead (required) / Team Member (optional)
+const deptAdminTeams = ref([]); // Department Admin: one or more departments
 const teamOptions = ref([]);
 const portalLinkedCustomer = ref("");
 const portalLinkedCustomerLabel = ref("");
@@ -33,25 +43,26 @@ const userBusy = ref(false);
 const userMsg = ref("");
 const userErr = ref("");
 
-// A Portal Customer that also holds a staff role is treated as staff everywhere
-// (helper.is_customer_only), so the two are mutually exclusive in this form.
-let sendWelcomeBeforeCustomer = false;
-watch(rolePortalCustomer, (on) => {
-	if (on) {
-		sendWelcomeBeforeCustomer = sendWelcome.value;
-		roleProjectsUser.value = false;
-		roleProjectsManager.value = false;
-		roleTeamManager.value = false;
-		roleSuperAdmin.value = false;
+// A Client Customer is an outside login: always send the welcome mail (they need a link to
+// set a password) and never put them in a team. Switching away undoes that.
+let sendWelcomeBeforeClient = false;
+watch(role, (now, before) => {
+	if (now === "client_customer") {
+		sendWelcomeBeforeClient = sendWelcome.value;
 		sendWelcome.value = true;
-	} else {
+		teamPick.value = "";
+		deptAdminTeams.value = [];
+	} else if (before === "client_customer") {
 		clearLinkedCustomer();
-		sendWelcome.value = sendWelcomeBeforeCustomer;
+		sendWelcome.value = sendWelcomeBeforeClient;
 	}
 });
-watch([roleProjectsUser, roleProjectsManager, roleTeamManager, roleSuperAdmin], (vals) => {
-	if (vals.some(Boolean) && rolePortalCustomer.value) rolePortalCustomer.value = false;
-});
+
+function toggleDeptAdminTeam(name) {
+	deptAdminTeams.value = deptAdminTeams.value.includes(name)
+		? deptAdminTeams.value.filter((x) => x !== name)
+		: [...deptAdminTeams.value, name];
+}
 
 async function runCustomerSearch() {
 	customerSearchBusy.value = true;
@@ -179,7 +190,13 @@ const newRunOpts = ref({
 const cleanupBusyName = ref("");
 const clearAllBusy = ref(false);
 
-const canShow = computed(() => caps.value.can_create_users || caps.value.can_run_demo_seed || caps.value.can_edit_folder_template);
+const canShow = computed(
+	() =>
+		caps.value.can_create_users ||
+		caps.value.can_run_demo_seed ||
+		caps.value.can_edit_folder_template ||
+		caps.value.can_reset_passwords,
+);
 
 // Folder template ZIP upload
 const tplZipInput    = ref(null);
@@ -270,7 +287,7 @@ onMounted(async () => {
 	if (caps.value.can_run_demo_seed) {
 		await loadSeedRuns();
 	}
-	if (caps.value.can_assign_team_manager) {
+	if (caps.value.can_assign_team_roles || caps.value.can_assign_team_manager) {
 		await loadTeamOptions();
 	}
 });
@@ -291,20 +308,20 @@ function apiErr(e) {
 async function createUser() {
 	userMsg.value = "";
 	userErr.value = "";
-	const roles = [];
-	if (roleProjectsUser.value) roles.push("Projects User");
-	if (roleProjectsManager.value) roles.push("Projects Manager");
-	if (rolePortalCustomer.value) roles.push("Portal Customer");
-	if (!roles.length) {
-		userErr.value = "Select at least one role.";
+	if (!email.value.trim() || !fullName.value.trim()) {
+		userErr.value = "Email and full name are required.";
 		return;
 	}
-	if (rolePortalCustomer.value && !portalLinkedCustomer.value) {
-		userErr.value = "Pick the customer this portal user belongs to.";
+	if (role.value === "client_customer" && !portalLinkedCustomer.value) {
+		userErr.value = "Pick the customer this Client Customer belongs to.";
 		return;
 	}
-	if (roleTeamManager.value && !teamLeadOf.value) {
-		userErr.value = "Team Manager requires picking which team they lead.";
+	if (role.value === "team_lead" && !teamPick.value) {
+		userErr.value = "Pick the team this Team Lead will lead.";
+		return;
+	}
+	if (role.value === "department_admin" && !deptAdminTeams.value.length) {
+		userErr.value = "Pick at least one department for this Department Admin.";
 		return;
 	}
 	if (!sendWelcome.value && !password.value) {
@@ -324,11 +341,11 @@ async function createUser() {
 				email: email.value.trim(),
 				full_name: fullName.value.trim(),
 				password: password.value || undefined,
-				roles_json: JSON.stringify(roles),
+				role: role.value,
 				send_welcome_email: sendWelcome.value ? 1 : 0,
-				portal_linked_customer: rolePortalCustomer.value ? portalLinkedCustomer.value : undefined,
-				is_super_admin: roleSuperAdmin.value ? 1 : 0,
-				team_lead_of: roleTeamManager.value ? teamLeadOf.value : undefined,
+				portal_linked_customer: role.value === "client_customer" ? portalLinkedCustomer.value : undefined,
+				team: role.value === "team_lead" || role.value === "team_member" ? teamPick.value || undefined : undefined,
+				teams_json: role.value === "department_admin" ? JSON.stringify(deptAdminTeams.value) : undefined,
 			},
 		});
 		const who = res?.email || email.value.trim();
@@ -341,17 +358,78 @@ async function createUser() {
 		fullName.value = "";
 		password.value = "";
 		clearLinkedCustomer();
-		rolePortalCustomer.value = false;
-		roleProjectsUser.value = true;
-		roleProjectsManager.value = false;
+		role.value = "team_member";
 		sendWelcome.value = false;
-		roleTeamManager.value = false;
-		roleSuperAdmin.value = false;
-		teamLeadOf.value = "";
+		teamPick.value = "";
+		deptAdminTeams.value = [];
 	} catch (e) {
 		userErr.value = apiErr(e);
 	} finally {
 		userBusy.value = false;
+	}
+}
+
+// ── Reset a password ─────────────────────────────────────────────────────────
+const rpQ = ref("");
+const rpHits = ref([]);
+const rpTarget = ref(null);
+const rpMode = ref("email");
+const rpPassword = ref("");
+const rpBusy = ref(false);
+const rpMsg = ref("");
+const rpErr = ref("");
+let rpTimer;
+
+async function runResetSearch() {
+	try {
+		rpHits.value =
+			(await call({ method: "portal_app.api.portal_admin.search_resettable_users", args: { txt: rpQ.value.trim() } })) || [];
+	} catch (e) {
+		rpHits.value = [];
+		rpErr.value = apiErr(e);
+	}
+}
+watch(rpQ, () => {
+	clearTimeout(rpTimer);
+	rpTimer = setTimeout(runResetSearch, 250);
+});
+function pickResetTarget(u) {
+	rpTarget.value = u;
+	rpQ.value = "";
+	rpHits.value = [];
+	rpMode.value = "email";
+	rpPassword.value = "";
+	rpMsg.value = "";
+	rpErr.value = "";
+}
+async function submitAdminReset() {
+	if (!rpTarget.value) return;
+	if (rpMode.value === "set" && rpPassword.value.length < 8) {
+		rpErr.value = "Use at least 8 characters.";
+		return;
+	}
+	rpBusy.value = true;
+	rpMsg.value = "";
+	rpErr.value = "";
+	try {
+		await call({
+			method: "portal_app.api.portal_admin.reset_user_password",
+			type: "POST",
+			args: {
+				user: rpTarget.value.name,
+				mode: rpMode.value,
+				new_password: rpMode.value === "set" ? rpPassword.value : undefined,
+			},
+		});
+		rpMsg.value =
+			rpMode.value === "email"
+				? `A reset link is on its way to ${rpTarget.value.name}.`
+				: `The password for ${rpTarget.value.name} was changed and they were signed out everywhere.`;
+		rpPassword.value = "";
+	} catch (e) {
+		rpErr.value = apiErr(e);
+	} finally {
+		rpBusy.value = false;
 	}
 }
 
@@ -501,7 +579,7 @@ const totalCreated = computed(() =>
 						Portal administration
 					</h1>
 					<p class="mt-1 max-w-2xl text-sm text-[color:var(--portal-muted)]">
-						Onboard new portal users and manage the demo dataset (Auditor / System Manager only).
+						Create logins, reset passwords and manage the demo dataset.
 					</p>
 				</div>
 			</div>
@@ -523,7 +601,7 @@ const totalCreated = computed(() =>
 				</div>
 				<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Restricted page</h2>
 				<p class="mt-1 text-sm text-[color:var(--portal-muted)]">
-					Available to users who can create Users in ERPNext, or System Managers who may run the demo seed (when enabled).
+					Available to Super Admins and Department Admins, and to anyone who can create Users in ERPNext.
 				</p>
 			</div>
 
@@ -540,8 +618,8 @@ const totalCreated = computed(() =>
 						<div>
 							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Create portal user</h2>
 							<p class="text-xs text-[color:var(--portal-muted)]">
-								Staff roles create an internal login; Portal Customer creates a client login that only sees its
-								customer’s projects. For full HR setup, use Desk → User.
+								Pick one role. Staff roles create an internal login; Client Customer creates an outside login that only
+								sees its customer’s projects. For full HR setup, use Desk → User.
 							</p>
 						</div>
 					</div>
@@ -567,35 +645,24 @@ const totalCreated = computed(() =>
 							<Password v-model="password" class="w-full rounded-xl" autocomplete="new-password" />
 						</div>
 					</div>
-					<div class="flex flex-wrap gap-2">
-						<label class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm">
-							<input v-model="roleProjectsUser" type="checkbox" class="rounded border-gray-300" />
-							Projects User
-						</label>
-						<label class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm">
-							<input v-model="roleProjectsManager" type="checkbox" class="rounded border-gray-300" />
-							Projects Manager
-						</label>
-						<label class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm">
-							<input v-model="rolePortalCustomer" type="checkbox" class="rounded border-gray-300" />
-							Portal Customer
-						</label>
-						<label
-							v-if="caps.can_assign_team_manager"
-							class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
-						>
-							<input v-model="roleTeamManager" type="checkbox" class="rounded border-gray-300" />
-							Team Manager
-						</label>
-						<label
-							v-if="caps.can_grant_super_admin"
-							class="flex items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
-						>
-							<input v-model="roleSuperAdmin" type="checkbox" class="rounded border-gray-300" />
-							Super Admin
-						</label>
+					<div>
+						<label class="portal-section-title mb-1 block">Role</label>
+						<div class="flex flex-wrap gap-2">
+							<label
+								v-for="r in roleChoices"
+								:key="r.key"
+								class="flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-1.5 text-sm"
+								:style="role === r.key
+									? 'border-color:var(--portal-accent);background:var(--portal-accent-soft);'
+									: 'border-color:var(--portal-border);background:var(--portal-bg);'"
+							>
+								<input v-model="role" type="radio" name="portal-role" :value="r.key" />
+								{{ r.label }}
+							</label>
+						</div>
+						<p class="mt-1.5 text-xs text-[color:var(--portal-muted)]">{{ roleHint }}</p>
 					</div>
-					<div v-if="rolePortalCustomer" class="space-y-2">
+					<div v-if="role === 'client_customer'" class="space-y-2">
 						<label class="portal-section-title mb-1 block">Customer</label>
 						<div
 							v-if="portalLinkedCustomer"
@@ -636,21 +703,37 @@ const totalCreated = computed(() =>
 							</p>
 						</div>
 						<p class="text-xs text-[color:var(--portal-muted)]">
-							They will see every project whose Customer is this one — nothing else.
+							They will see every project whose Customer is this one, and its client folder: nothing else.
 						</p>
 					</div>
-					<div v-if="roleTeamManager">
-						<label class="portal-section-title mb-1 block">Team they lead</label>
-						<select v-model="teamLeadOf" class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
-							<option value="" disabled>Select a team…</option>
+					<div v-if="role === 'team_lead' || role === 'team_member'">
+						<label class="portal-section-title mb-1 block">
+							{{ role === "team_lead" ? "Team they lead" : "Team (optional)" }}
+						</label>
+						<select v-model="teamPick" class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
+							<option value="">{{ role === "team_lead" ? "Select a team…" : "— No team yet —" }}</option>
 							<option v-for="t in teamOptions" :key="t.name" :value="t.name">{{ t.department_name }}</option>
 						</select>
 					</div>
-					<p v-if="roleSuperAdmin" class="text-xs text-amber-700">
+					<div v-if="role === 'department_admin'">
+						<label class="portal-section-title mb-1 block">Departments they look after</label>
+						<div class="flex flex-wrap gap-2">
+							<label
+								v-for="t in teamOptions"
+								:key="t.name"
+								class="flex cursor-pointer items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
+							>
+								<input type="checkbox" :checked="deptAdminTeams.includes(t.name)" @change="toggleDeptAdminTeam(t.name)" />
+								{{ t.department_name }}
+							</label>
+							<span v-if="!teamOptions.length" class="text-xs text-[color:var(--portal-muted)]">No departments yet. Create a team in the Org Chart first.</span>
+						</div>
+					</div>
+					<p v-if="role === 'super_admin'" class="text-xs text-amber-700">
 						Super Admin gives full access to the entire system (HR, Accounts, Stock — everything), not just the project portal.
 					</p>
 					<label class="flex items-center gap-2 text-sm text-[color:var(--portal-text)]">
-						<input v-model="sendWelcome" type="checkbox" class="rounded border-gray-300" />
+						<input v-model="sendWelcome" type="checkbox" class="rounded border-gray-300" :disabled="role === 'client_customer'" />
 						Send welcome email with a link to set their own password
 					</label>
 					<p v-if="userMsg" class="text-sm text-green-700">{{ userMsg }}</p>
@@ -664,6 +747,75 @@ const totalCreated = computed(() =>
 					>
 						Create user
 					</Button>
+				</div>
+
+				<!-- Reset a password -->
+				<div v-if="caps.can_reset_passwords" class="portal-card-strong space-y-4 p-5">
+					<div class="flex items-center gap-2">
+						<div
+							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
+							style="background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);"
+						>
+							<FeatherIcon name="key" class="h-4 w-4" />
+						</div>
+						<div>
+							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Reset a password</h2>
+							<p class="text-xs text-[color:var(--portal-muted)]">
+								Email someone a reset link{{ caps.can_grant_super_admin ? ", or set a new password for them" : "" }}.
+								You can also do it from a person in the Org Chart. Your own password is changed from Profile.
+							</p>
+						</div>
+					</div>
+					<div v-if="!rpTarget" class="space-y-2" @focusin="runResetSearch">
+						<TextInput v-model="rpQ" class="w-full rounded-xl" placeholder="Search a person by name or email…" autocomplete="off" />
+						<div
+							v-if="rpHits.length"
+							class="max-h-48 overflow-auto rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] text-sm"
+						>
+							<button
+								v-for="u in rpHits"
+								:key="u.name"
+								type="button"
+								class="flex w-full items-center justify-between gap-2 border-b border-[color:var(--portal-border)] px-3 py-2 text-left last:border-0 hover:bg-white"
+								@click="pickResetTarget(u)"
+							>
+								<span class="min-w-0">
+									<span class="font-medium text-[color:var(--portal-text)]">{{ u.full_name }}</span>
+									<span class="mt-0.5 block truncate text-xs text-[color:var(--portal-muted)]">{{ u.name }}</span>
+								</span>
+								<span v-if="u.role_label" class="portal-pill portal-pill-muted shrink-0">{{ u.role_label }}</span>
+							</button>
+						</div>
+					</div>
+					<div v-else class="space-y-3">
+						<div class="flex items-center justify-between gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
+							<span class="min-w-0">
+								<span class="font-medium text-[color:var(--portal-text)]">{{ rpTarget.full_name }}</span>
+								<span class="ml-2 text-xs text-[color:var(--portal-muted)]">{{ rpTarget.name }}</span>
+							</span>
+							<button type="button" class="text-xs font-medium text-red-700 hover:underline" @click="rpTarget = null">Change</button>
+						</div>
+						<label class="flex items-start gap-2 text-sm text-[color:var(--portal-text)]">
+							<input v-model="rpMode" type="radio" value="email" class="mt-1" />
+							<span>
+								<strong>Email a reset link</strong>
+								<span class="block text-xs text-[color:var(--portal-muted)]">They choose their own new password.</span>
+							</span>
+						</label>
+						<label v-if="caps.can_grant_super_admin" class="flex items-start gap-2 text-sm text-[color:var(--portal-text)]">
+							<input v-model="rpMode" type="radio" value="set" class="mt-1" />
+							<span>
+								<strong>Set a password now</strong>
+								<span class="block text-xs text-[color:var(--portal-muted)]">They are signed out everywhere and must use the new password.</span>
+							</span>
+						</label>
+						<Password v-if="rpMode === 'set'" v-model="rpPassword" class="w-full rounded-xl" autocomplete="new-password" />
+						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="rpBusy" @click="submitAdminReset">
+							{{ rpMode === "email" ? "Send reset link" : "Set password" }}
+						</Button>
+					</div>
+					<p v-if="rpMsg" class="text-sm text-green-700">{{ rpMsg }}</p>
+					<p v-if="rpErr" class="text-sm text-red-600">{{ rpErr }}</p>
 				</div>
 
 				<!-- Demo seed runs -->

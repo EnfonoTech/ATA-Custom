@@ -38,10 +38,11 @@ onMounted(async () => {
 });
 
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
-// True for staff AND for a team's own portal_team_lead (see teams.get_teams /
-// helper.can_manage_team) — lets a lead reach the Teams page without exposing
-// the other manager-only views (Dashboard, Org Chart, Contracts) to them.
+// True for a Super Admin or a Department Admin (see helper.can_manage_teams): the Teams
+// page edits teams, which a Team Lead does not do.
 const canManageTeams = computed(() => !!portalCapabilities.value?.can_manage_teams);
+// The org chart is also for Team Leads (they assign people from it to projects).
+const canViewOrgChart = computed(() => !!portalCapabilities.value?.can_view_org_chart);
 
 const groups = computed(() => {
 	const a      = portalAdmin.value;
@@ -59,8 +60,8 @@ const groups = computed(() => {
 		{ name: "Calendar",  path: "/calendar",   icon: "calendar"     },
 		{ name: "Contracts", path: "/contracts",  icon: "lock"         },
 	];
-	// Management-level views — only System Manager / Projects Manager. Teams is the
-	// one exception: a team's own lead needs it too, just to manage that one team.
+	// Management-level views are for Super Admins and Department Admins. The Org Chart is
+	// the exception: a Team Lead opens it too, to assign their team's people to projects.
 	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
 	// Hidden from client contacts. These are internal working tools, not things a
 	// client is here to do:
@@ -79,7 +80,10 @@ const groups = computed(() => {
 		title: "Project Management",
 				items: workspaceItems.filter(
 			(i) =>
-				(isManager.value || !managerOnlyPaths.has(i.path) || (i.path === "/teams" && canManageTeams.value)) &&
+				(isManager.value ||
+					!managerOnlyPaths.has(i.path) ||
+					(i.path === "/teams" && canManageTeams.value) ||
+					(i.path === "/org-chart" && canViewOrgChart.value)) &&
 				(!isCust || !staffOnlyPaths.has(i.path))
 		),
 
@@ -106,12 +110,10 @@ const groups = computed(() => {
 	];
 	if (!isCust && (portalCapabilities.value?.manageable_project_names || []).length) {
 		filesItems.push({ name: "Shares", path: "/manage-shares", icon: "shield" });
-		// Routing rules only needs manage-rights on at least one project (same
-		// gate as Shares, and the same gate the /folder-rules route guard and
-		// its save/delete APIs actually enforce) — it was previously bundled
-		// with File tools' Auditor-only check, which hid it from every
-		// Projects Manager who wasn't also made an Auditor, even though they
-		// already had full permission to use it.
+	}
+	// Routing rules can only be saved by a Super Admin or Department Admin (the server
+	// refuses everyone else), so only they are shown the page.
+	if (!isCust && isManager.value) {
 		filesItems.push({ name: "Routing rules", path: "/folder-rules", icon: "git-merge" });
 	}
 	if (!isCust && portalCapabilities.value?.can_edit_portal_folder_template) {
@@ -120,7 +122,7 @@ const groups = computed(() => {
 	const files = { title: "Files", items: filesItems };
 
 	const accountItems = [{ name: "Profile", path: "/profile", icon: "user" }];
-	if (a?.can_create_users || a?.can_run_demo_seed) {
+	if (a?.can_create_users || a?.can_run_demo_seed || a?.can_edit_folder_template || a?.can_reset_passwords) {
 		accountItems.push({ name: "Admin", path: "/admin", icon: "settings" });
 	}
 	const account = { title: "Account", items: accountItems };

@@ -45,7 +45,7 @@ const routes = [
 		children: [
 			{ path: "", redirect: "/dashboard" },
 			{ path: "dashboard", name: "Dashboard", component: Dashboard, meta: { requiresManager: true } },
-			{ path: "org-chart", name: "OrgChart", component: OrgChartPage, meta: { requiresManager: true } },
+			{ path: "org-chart", name: "OrgChart", component: OrgChartPage, meta: { requiresOrgChart: true } },
 			{ path: "teams", name: "Teams", component: TeamsPage, meta: { requiresManager: true } },
 			{ path: "gantt", name: "GanttChart", component: GanttChart, meta: { staffOnly: true } },
 			{ path: "daily-task", name: "DailyTask", component: DailyTask, meta: { staffOnly: true } },
@@ -74,7 +74,8 @@ const routes = [
 				path: "folder-rules",
 				name: "FolderRules",
 				component: FolderRules,
-				meta: { requiresProjectAdmin: true },
+				// Saving a rule is for Super Admins / Department Admins (the server refuses the rest).
+				meta: { requiresManager: true },
 			},
 			{ path: "profile", name: "Profile", component: Profile },
 			{
@@ -144,13 +145,21 @@ router.beforeEach(async (to) => {
 			const caps = await call({
 				method: "portal_app.api.projects.get_capabilities",
 			});
-			// Teams is the one requiresManager route a team's own lead may also reach
-			// (see Sidebar.vue's matching canManageTeams exception) — Dashboard,
-			// Org Chart and Contracts stay strictly staff-only.
+			// Dashboard, Teams and Contracts are for Super Admins and Department Admins.
 			const allowed = to.path === "/teams" ? caps?.is_manager || caps?.can_manage_teams : caps?.is_manager;
 			if (!allowed) {
 				return "/projects";
 			}
+		} catch {
+			return "/projects";
+		}
+	}
+
+	// The organisation chart: admins run it, Team Leads assign people to projects from it.
+	if (to.meta.requiresOrgChart && isAuthenticated) {
+		try {
+			const caps = await call({ method: "portal_app.api.projects.get_capabilities" });
+			if (!caps?.can_view_org_chart) return "/projects";
 		} catch {
 			return "/projects";
 		}
@@ -167,7 +176,8 @@ router.beforeEach(async (to) => {
 			if (
 				!caps?.can_create_users &&
 				!caps?.can_run_demo_seed &&
-				!caps?.can_edit_folder_template
+				!caps?.can_edit_folder_template &&
+				!caps?.can_reset_passwords
 			) {
 				return "/dashboard";
 			}

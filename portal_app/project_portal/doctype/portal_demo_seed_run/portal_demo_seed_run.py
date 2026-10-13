@@ -43,7 +43,7 @@ DEMO_USERS: list[dict] = [
 		"email": "portal.manager@demo.local",
 		"first_name": "Demo",
 		"last_name": "Manager",
-		"roles": ["Projects Manager", "Projects User"],
+		"roles": ["Department Admin", "Projects Manager", "Projects User"],
 	},
 	{
 		"email": "portal.pm@demo.local",
@@ -67,7 +67,7 @@ DEMO_USERS: list[dict] = [
 		"email": "portal.client@demo.local",
 		"first_name": "Demo",
 		"last_name": "Client",
-		"roles": ["Portal Customer"],
+		"roles": ["Client Customer"],
 	},
 ]
 
@@ -347,11 +347,12 @@ class PortalDemoSeedRun(Document):
 		)
 
 	def _seed_users(self, summary):
-		# Make sure the Portal Customer role exists before granting it.
+		# Make sure the Client Customer role exists before granting it.
 		try:
 			from portal_app.api import helper
 
 			helper.ensure_portal_customer_role()
+			helper.ensure_portal_roles()
 		except Exception:
 			pass
 

@@ -12,6 +12,7 @@ from portal_app.api import portal_admin
 from portal_app.api import projects
 
 TEST_PASSWORD = "Prt-" + "4c1e9b7a2d6f" + "#Aa1"
+CLIENT = helper.PORTAL_CUSTOMER_ROLE  # "Client Customer" (was "Portal Customer")
 
 
 def _make_customer(name: str) -> str:
@@ -70,14 +71,16 @@ class TestCustomerPortalAccess(FrappeTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		helper.ensure_portal_customer_role()
+		helper.ensure_portal_roles()
 		helper.ensure_user_portal_linked_customer_field()
 		cls.cust_a = _make_customer("Portal Test Customer A")
 		cls.cust_b = _make_customer("Portal Test Customer B")
-		cls.contact_a = _make_user("portal.test.contact.a@example.com", ["Portal Customer"], cls.cust_a)
-		cls.contact_b = _make_user("portal.test.contact.b@example.com", ["Portal Customer"], cls.cust_b)
-		cls.staff = _make_user("portal.test.staff@example.com", ["Projects Manager"])
+		cls.contact_a = _make_user("portal.test.contact.a@example.com", [CLIENT], cls.cust_a)
+		cls.contact_b = _make_user("portal.test.contact.b@example.com", [CLIENT], cls.cust_b)
+		# "staff" = the admin tier (a Department Admin).
+		cls.staff = _make_user("portal.test.staff@example.com", [helper.DEPT_ADMIN_ROLE])
 		cls.staff_with_link = _make_user(
-			"portal.test.staff.linked@example.com", ["Projects Manager", "Portal Customer"], cls.cust_a
+			"portal.test.staff.linked@example.com", [helper.DEPT_ADMIN_ROLE, CLIENT], cls.cust_a
 		)
 
 	def tearDown(self):
@@ -105,17 +108,18 @@ class TestCustomerPortalAccess(FrappeTestCase):
 		with self.assertRaises(frappe.DoesNotExistError):
 			projects._assert_resettable_customer_contact("Administrator", self.cust_a)
 
-	def test_only_system_manager_may_reset(self):
+	def test_only_super_admin_may_reset(self):
 		self.assertTrue(projects._can_reset_customer_portal_passwords("Administrator"))
 		self.assertFalse(projects._can_reset_customer_portal_passwords(self.staff))
 
-	def test_admin_page_refuses_customer_with_staff_role(self):
+	def test_admin_page_refuses_a_client_customer_in_a_team(self):
 		with self.assertRaises(frappe.ValidationError):
 			portal_admin.create_portal_user(
 				email="portal.test.mixed@example.com",
 				full_name="Mixed Role",
 				password=TEST_PASSWORD,
-				roles_json='["Portal Customer", "Projects User"]',
+				role="client_customer",
+				team="Any Team",
 				portal_linked_customer=self.cust_a,
 			)
 		self.assertFalse(frappe.db.exists("User", "portal.test.mixed@example.com"))
@@ -126,7 +130,7 @@ class TestCustomerPortalAccess(FrappeTestCase):
 				email="portal.test.nopass@example.com",
 				full_name="No Password",
 				password="",
-				roles_json='["Portal Customer"]',
+				role="client_customer",
 				send_welcome_email=0,
 				portal_linked_customer=self.cust_a,
 			)
@@ -138,16 +142,18 @@ class TestCustomerPortalAccess(FrappeTestCase):
 			frappe.delete_doc("User", email, force=1, ignore_permissions=True)
 		portal_admin.create_portal_user(
 			email=email,
-			full_name="New Contact",
+			# Not "New Contact": Frappe reserves names starting with "New <doctype>", and the
+			# User's auto-created Contact would fail to save.
+			full_name="Redirect Contact",
 			password=TEST_PASSWORD,
-			roles_json='["Portal Customer"]',
+			role="client_customer",
 			send_welcome_email=0,
 			portal_linked_customer=self.cust_a,
 		)
 		user = frappe.get_doc("User", email)
 		self.assertEqual(user.redirect_url, helper.PORTAL_HOME)
 		self.assertEqual(user.portal_linked_customer, self.cust_a)
-		self.assertEqual({r.role for r in user.roles}, {"Portal Customer"})
+		self.assertEqual({r.role for r in user.roles}, {CLIENT})
 
 
 class TestMultiCustomerLogin(FrappeTestCase):
@@ -158,7 +164,7 @@ class TestMultiCustomerLogin(FrappeTestCase):
 		helper.ensure_user_portal_linked_customer_field()
 		cls.cust_a = _make_customer("Portal Test Customer A")
 		cls.cust_b = _make_customer("Portal Test Customer B")
-		cls.contact = _make_user("portal.test.multi@example.com", ["Portal Customer"], cls.cust_a)
+		cls.contact = _make_user("portal.test.multi@example.com", [CLIENT], cls.cust_a)
 		cls.project_a = _make_project("Portal Test Project A", cls.cust_a)
 		cls.project_b = _make_project("Portal Test Project B", cls.cust_b)
 
@@ -167,8 +173,8 @@ class TestMultiCustomerLogin(FrappeTestCase):
 		frappe.set_user("Administrator")
 		frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": self.contact})
 		user = frappe.get_doc("User", self.contact)
-		if not any(r.role == "Portal Customer" for r in user.roles):
-			user.append("roles", {"role": "Portal Customer"})
+		if not any(r.role == CLIENT for r in user.roles):
+			user.append("roles", {"role": CLIENT})
 			user.save(ignore_permissions=True)
 		frappe.db.set_value("User", self.contact, "portal_linked_customer", self.cust_a)
 		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": self.contact, "customer": self.cust_a}).insert(
@@ -200,7 +206,7 @@ class TestMultiCustomerLogin(FrappeTestCase):
 	def test_removing_the_role_in_desk_drops_every_customer(self):
 		user = frappe.get_doc("User", self.contact)
 		for row in list(user.roles):
-			if row.role == "Portal Customer":
+			if row.role == CLIENT:
 				user.remove(row)
 		user.save(ignore_permissions=True)
 		self.assertEqual(frappe.get_all(helper.PORTAL_USER_CUSTOMER, filters={"user": self.contact}), [])
@@ -229,21 +235,24 @@ class TestMultiCustomerLogin(FrappeTestCase):
 		files._assert_valid_share_recipient(self.contact, self.project_a)
 		with self.assertRaises(frappe.PermissionError):
 			files._assert_valid_share_recipient(self.contact, self.project_b)
-		# A Portal Customer with no customers passes for nothing.
+		# A Client Customer with no customers passes for nothing.
 		frappe.db.delete(helper.PORTAL_USER_CUSTOMER, {"user": self.contact})
 		with self.assertRaises(frappe.PermissionError):
 			files._assert_valid_share_recipient(self.contact, self.project_a)
 
-	def test_customer_cannot_share_or_upload_outside_client_submittal(self):
+	def test_customer_cannot_share_or_upload_outside_the_outgoing_folder(self):
 		from portal_app.api import files
 
+		frappe.set_user("Administrator")
+		client_folders = files._ensure_client_folders(self.project_a)
 		frappe.set_user(self.contact)
 		with self.assertRaises(frappe.PermissionError):
 			files._assert_not_customer_sharer()
 		root = files.get_project_folders(self.project_a)["project_root"]
-		with self.assertRaises(frappe.PermissionError):
-			files._assert_upload_allowed(self.project_a, root)
-		files._assert_upload_allowed(self.project_a, files._customer_folder_roots(self.project_a)[0])
+		for refused in (root, client_folders["root"], client_folders["incoming"]):
+			with self.assertRaises(frappe.PermissionError):
+				files._assert_upload_allowed(self.project_a, refused)
+		files._assert_upload_allowed(self.project_a, client_folders["outgoing"])
 
 	def test_one_login_can_hold_several_customers(self):
 		projects._attach_portal_customer_user(self.contact, self.cust_b)
@@ -256,10 +265,10 @@ class TestMultiCustomerLogin(FrappeTestCase):
 		projects._detach_portal_customer_user(self.contact, self.cust_a)
 		self.assertEqual(helper.get_portal_linked_customers(self.contact), [self.cust_b])
 		self.assertEqual(frappe.db.get_value("User", self.contact, "portal_linked_customer"), self.cust_b)
-		self.assertIn("Portal Customer", frappe.get_roles(self.contact))
+		self.assertIn(CLIENT, frappe.get_roles(self.contact))
 
 	def test_removing_the_last_customer_drops_the_role(self):
 		for cust in list(helper.get_portal_linked_customers(self.contact)):
 			projects._detach_portal_customer_user(self.contact, cust)
 		self.assertEqual(helper.get_portal_linked_customers(self.contact), [])
-		self.assertNotIn("Portal Customer", frappe.get_roles(self.contact))
+		self.assertNotIn(CLIENT, frappe.get_roles(self.contact))

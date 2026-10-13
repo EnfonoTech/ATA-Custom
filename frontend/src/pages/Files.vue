@@ -429,17 +429,38 @@ const folderFilter = ref("");
 const fileSearch = ref("");
 const folderView = ref("grid");
 
-// Client contacts upload into 06-CLIENT SUBMITTAL only (the server enforces the same
-// rule); the target is the folder they are looking at when it sits inside it.
-const clientUploadRoot = computed(
-	() => (folders.value || []).find((f) => /(^|\/)06-CLIENT SUBMITTAL$/.test(String(f.name || "")))?.name || "",
-);
-const clientUploadTarget = computed(() => {
-	const root = clientUploadRoot.value;
-	const cur = folderFilter.value;
-	if (root && cur && (cur === root || cur.startsWith(root + "/"))) return cur;
-	return root;
-});
+// A client contact uploads into 06-CLIENT SUBMITTAL / Outgoing and nowhere else. The server
+// enforces that rule and finds (or creates) the project's real Outgoing folder when it
+// sees this marker, so the page does not need to know the folder's name.
+const CLIENT_OUTGOING_TARGET = "__client_outgoing__";
+
+// The client folder's two subfolders, in plain words for whoever is looking:
+//   Incoming  what ATA sends to the client ("Submit to Client" copies files here)
+//   Outgoing  what the client sends to ATA (the only place a client can upload)
+const CLIENT_FOLDER_RE = /(^|\/)06[\s-]*CLIENT SUBMITTAL(\/(Incoming|Outgoing))?$/i;
+function clientFolderInfo(label) {
+	const m = CLIENT_FOLDER_RE.exec(String(label || ""));
+	if (!m) return null;
+	const customer = isCustomerPortalUser.value;
+	if (!m[3]) return null; // the client folder itself needs no pill, only its two subfolders
+	if (m[3].toLowerCase() === "incoming") return { text: customer ? "From ATA" : "Sent to client", tone: "in" };
+	return { text: customer ? "Your uploads" : "From client", tone: "out" };
+}
+function clientFolderPillClass(tone) {
+	return tone === "in" ? "portal-pill-accent" : tone === "out" ? "portal-pill-success" : "portal-pill-muted";
+}
+/** Direction pill for a file that sits in Incoming or Outgoing. */
+function fileDirectionInfo(f) {
+	if (!f?.client_direction) return null;
+	const customer = isCustomerPortalUser.value;
+	return f.client_direction === "incoming"
+		? { text: customer ? "From ATA" : "Sent to client", tone: "in" }
+		: { text: customer ? "Your upload" : "From client", tone: "out" };
+}
+/** The three client folders are found by name, so the server refuses to rename them. */
+function isClientFolderLabel(label) {
+	return CLIENT_FOLDER_RE.test(String(label || ""));
+}
 const clientUploadBusy = ref(false);
 const clientUploadMsg = ref("");
 const clientUploadErr = ref("");
@@ -554,6 +575,7 @@ const folderEntries = computed(() => {
 			parentPath,
 			depth,
 			isRoot: false,
+			client: clientFolderInfo(label),
 			fileCount: (files.value || []).filter((x) => x.folder === f.name).length,
 		});
 	}
@@ -631,6 +653,7 @@ const folderTreeView = computed(() => {
 					parentPath,
 					depth,
 					isRoot: false,
+					client: clientFolderInfo(child.label),
 					hasChildren: child.children.size > 0,
 					fileCount: child.name ? fileCountFor(child.name) : 0,
 					expanded,
@@ -886,7 +909,7 @@ watch(
 async function onClientFilesPicked(ev) {
 	const input = ev?.target;
 	const picked = Array.from(input?.files || []);
-	if (!picked.length || !clientUploadTarget.value || !project.value) return;
+	if (!picked.length || !project.value) return;
 	clientUploadBusy.value = true;
 	clientUploadMsg.value = "";
 	clientUploadErr.value = "";
@@ -896,13 +919,13 @@ async function onClientFilesPicked(ev) {
 			clientUploadMsg.value = `Uploading ${done + 1} of ${picked.length}…`;
 			await uploadFile("portal_app.api.files.upload_project_file", file, {
 				project: project.value,
-				target_folder: clientUploadTarget.value,
+				target_folder: CLIENT_OUTGOING_TARGET,
 				destination: "erpnext",
 				is_private: "1",
 			});
 			done++;
 		}
-		clientUploadMsg.value = `Uploaded ${done} file${done === 1 ? "" : "s"}. The ATA team sees ${done === 1 ? "it" : "them"} marked as a client upload.`;
+		clientUploadMsg.value = `Uploaded ${done} file${done === 1 ? "" : "s"} to Outgoing. The ATA team ${done === 1 ? "sees it" : "sees them"} marked as from you.`;
 		await loadFiles();
 	} catch (e) {
 		clientUploadMsg.value = done ? `Uploaded ${done} of ${picked.length}.` : "";
@@ -1325,7 +1348,7 @@ async function createShareLinkForFolder(folderPath) {
 	if (!project.value || !folderPath) return;
 	if (!canShareFolder.value) {
 		shareError.value =
-			"You need project manager access on this project to create share links (portal project manager, Projects Manager, or System Manager).";
+			"You need manage access on this project to create share links (you must be on its team, or be its Team Lead, a Department Admin or a Super Admin).";
 		shareInfo.value = "";
 		await nextTick();
 		document.getElementById("portal-share-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1754,7 +1777,7 @@ async function deleteProjectFile(f) {
 				<ul class="mt-2 list-inside list-disc space-y-1.5 text-xs leading-relaxed text-emerald-900/90">
 					<li>
 						You can delete any file <strong>you</strong> uploaded — look for Delete at the end of its row.
-						A project manager can delete anything on the project.
+						Anyone with manage access to the project (its team, a Team Lead, a Department Admin or a Super Admin) can delete anything on it.
 					</li>
 					<li>
 						New files are <strong>private</strong> by default, which means only people on this project can
@@ -1857,6 +1880,7 @@ async function deleteProjectFile(f) {
 										:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
 									/>
 									<span class="truncate">{{ f.leafLabel || f.label }}</span>
+									<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
 								</p>
 								<p class="mt-1 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</p>
 							</button>
@@ -1866,7 +1890,7 @@ async function deleteProjectFile(f) {
 							class="flex flex-wrap justify-end gap-1 border-t border-[color:var(--portal-border)] px-2 py-1.5" style="background:var(--portal-surface-alt)"
 						>
 							<button
-								v-if="canManageProject && !f.isRoot"
+								v-if="canManageProject && !f.isRoot && !isClientFolderLabel(f.label)"
 								type="button"
 								class="rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50"
 								style="color:var(--portal-muted)"
@@ -1927,6 +1951,7 @@ async function deleteProjectFile(f) {
 									:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
 								/>
 								<span class="truncate">{{ f.leafLabel || f.label }}</span>
+								<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
 							</span>
 							<span class="ml-5 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</span>
 						</button>
@@ -1935,7 +1960,7 @@ async function deleteProjectFile(f) {
 							class="flex shrink-0 items-stretch divide-x divide-[color:var(--portal-border)] border-l border-[color:var(--portal-border)]"
 						>
 							<button
-								v-if="canManageProject && !f.isRoot"
+								v-if="canManageProject && !f.isRoot && !isClientFolderLabel(f.label)"
 								type="button"
 								class="px-2 py-2 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50"
 								style="color:var(--portal-muted)"
@@ -2213,22 +2238,20 @@ async function deleteProjectFile(f) {
 				<p v-if="zipMsg" class="text-sm text-green-700">{{ zipMsg }}</p>
 			</div>
 			<div v-if="project && isCustomerPortalUser" class="portal-card-strong space-y-2 p-5">
-				<p class="text-sm font-semibold text-[color:var(--portal-text)]">Upload to 06-CLIENT SUBMITTAL</p>
-				<template v-if="clientUploadTarget">
-					<p class="text-xs text-[color:var(--portal-muted)]">
-						Files go into <strong>{{ subfolderLabel(clientUploadTarget) || "06-CLIENT SUBMITTAL" }}</strong> and are marked as uploaded by you.
-					</p>
-					<label
-						class="inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white"
-						:class="clientUploadBusy ? 'pointer-events-none opacity-60' : ''"
-						style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
-					>
-						<FeatherIcon name="upload" class="h-4 w-4" />
-						{{ clientUploadBusy ? "Uploading…" : "Choose files" }}
-						<input type="file" multiple class="hidden" :disabled="clientUploadBusy" @change="onClientFilesPicked" />
-					</label>
-				</template>
-				<p v-else class="text-xs text-[color:var(--portal-muted)]">This project has no 06-CLIENT SUBMITTAL folder yet.</p>
+				<p class="text-sm font-semibold text-[color:var(--portal-text)]">Send files to ATA</p>
+				<p class="text-xs text-[color:var(--portal-muted)]">
+					Files you upload here go into <strong>06-CLIENT SUBMITTAL / Outgoing</strong> and the ATA team sees them marked as from you.
+					What ATA sends to you is in <strong>Incoming</strong>.
+				</p>
+				<label
+					class="inline-flex cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-white"
+					:class="clientUploadBusy ? 'pointer-events-none opacity-60' : ''"
+					style="background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);"
+				>
+					<FeatherIcon name="upload" class="h-4 w-4" />
+					{{ clientUploadBusy ? "Uploading…" : "Choose files" }}
+					<input type="file" multiple class="hidden" :disabled="clientUploadBusy" @change="onClientFilesPicked" />
+				</label>
 				<p v-if="clientUploadMsg" class="text-sm text-green-700">{{ clientUploadMsg }}</p>
 				<p v-if="clientUploadErr" class="text-sm text-red-600">{{ clientUploadErr }}</p>
 			</div>
@@ -2355,7 +2378,8 @@ async function deleteProjectFile(f) {
 							<td class="px-4 py-3">
 								{{ f.file_name }}
 								<span v-if="f.is_private" class="ml-1 text-xs text-[color:var(--portal-subtle)]">(private)</span>
-								<span v-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
+								<span v-if="fileDirectionInfo(f)" class="portal-pill ml-1.5" :class="clientFolderPillClass(fileDirectionInfo(f).tone)" :title="f.uploaded_by_client ? `Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}` : ''">{{ fileDirectionInfo(f).text }}</span>
+								<span v-else-if="f.uploaded_by_client" class="ml-1.5 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800" :title="`Uploaded by the client: ${f.uploaded_by_name || f.owner || ''}`">Client upload</span>
 							</td>
 							<td class="px-4 py-3">{{ fmtFileSize(f.file_size) }}</td>
 							<td class="px-4 py-3">{{ subfolderLabel(f.folder) }}</td>

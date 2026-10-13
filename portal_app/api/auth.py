@@ -1,5 +1,7 @@
 import frappe
 from frappe import _
+from frappe.rate_limiter import rate_limit
+from frappe.utils import cstr
 
 from portal_app.api import helper
 
@@ -38,8 +40,8 @@ def check_portal_access():
 		frappe.throw(
 			_(
 				"You do not have access to the project portal. Ask an administrator to add you to a "
-				"project team, assign Projects User / Projects Manager (or System Manager), or give you "
-				"the Portal Customer role."
+				"team or a project, or to give you a portal role (Super Admin, Department Admin, "
+				"Team Lead, Team Member or Client Customer)."
 			),
 			frappe.PermissionError,
 		)
@@ -58,3 +60,43 @@ def get_csrf_token():
 	from frappe.sessions import get_csrf_token as _session_csrf_token
 
 	return _session_csrf_token()
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@rate_limit(limit=5, seconds=60 * 60)
+def request_password_reset(email=None):
+	"""The "Forgot password?" form on the portal sign-in screen.
+
+	Guest-callable on purpose: the person asking cannot sign in. It always answers the
+	same way, whether or not the address belongs to a portal login, so it cannot be used to
+	find out who has an account, and it is rate limited per IP. The link mail is queued
+	(never sent inside the request) and, for a client, lands the person back on the portal
+	once they have chosen a password."""
+	answer = {
+		"ok": True,
+		"message": _("If that address belongs to a portal login, a reset link is on its way."),
+	}
+	email = cstr(email).strip().lower()
+	if not email or "@" not in email or len(email) > 140:
+		return answer
+	user = frappe.db.get_value("User", {"name": email, "enabled": 1}, "name") or frappe.db.get_value(
+		"User", {"email": email, "enabled": 1}, "name"
+	)
+	if not user or user in ("Administrator", "Guest") or not helper.user_can_use_portal(user):
+		return answer
+	try:
+		doc = frappe.get_doc("User", user)
+		if helper.is_customer_only(user):
+			doc.db_set("redirect_url", helper.PORTAL_HOME)
+		link = doc.reset_password(send_email=False)
+		doc.send_login_mail(
+			_("Password Reset"),
+			"password_reset",
+			{"link": link},
+			now=False,
+			custom_template=frappe.db.get_system_setting("reset_password_template"),
+		)
+	except Exception:
+		# Never tell a stranger what went wrong; the administrator sees it in the Error Log.
+		frappe.log_error(frappe.get_traceback(), "Portal: forgot-password mail")
+	return answer
