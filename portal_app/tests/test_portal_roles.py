@@ -106,6 +106,7 @@ class PortalRoleTestBase(FrappeTestCase):
 		cls.m2 = _user("member2")
 		cls.m3 = _user("member3")
 		cls.outsider = _user("outsider")
+		cls.consultant = _user("consultant")  # on a project, but on no department's team
 		cls.cust = _customer("Roles Test Customer")
 		cls.client = _user("client", (helper.PORTAL_CUSTOMER_ROLE,), "Website User")
 		frappe.get_doc({"doctype": helper.PORTAL_USER_CUSTOMER, "user": cls.client, "customer": cls.cust}).insert(
@@ -122,6 +123,8 @@ class PortalRoleTestBase(FrappeTestCase):
 		cls.pb = _project("Roles Test PB", [cls.m3], lead=cls.m3)
 		cls.pc = _project("Roles Test PC orphan")
 		cls.pd = _project("Roles Test PD team", team=cls.d1)
+		# staffed by somebody outside every department and under no team: it belongs to nobody yet
+		cls.pe = _project("Roles Test PE staffed outside", [cls.consultant])
 
 	def setUp(self):
 		frappe.set_user("Administrator")
@@ -130,7 +133,7 @@ class PortalRoleTestBase(FrappeTestCase):
 	def names(self, user):
 		return {
 			k
-			for k, p in {"pa": self.pa, "pb": self.pb, "pc": self.pc, "pd": self.pd}.items()
+			for k, p in {"pa": self.pa, "pb": self.pb, "pc": self.pc, "pd": self.pd, "pe": self.pe}.items()
 			if p in helper.get_allowed_project_names(user)
 		}
 
@@ -149,33 +152,39 @@ class TestRoleVisibility(PortalRoleTestBase):
 		self.assertNotIn(helper.TEAM_LEAD_ROLE, frappe.get_roles(self.m1))
 
 	def test_super_admin_sees_everything(self):
-		self.assertEqual(self.names(self.super_admin), {"pa", "pb", "pc", "pd"})
+		self.assertEqual(self.names(self.super_admin), {"pa", "pb", "pc", "pd", "pe"})
 
 	def test_team_member_sees_only_their_projects(self):
 		self.assertEqual(self.names(self.m1), {"pa"})
 		self.assertEqual(self.names(self.m3), {"pb"})
 		self.assertEqual(self.names(self.m2), set())
 		self.assertEqual(self.names(self.outsider), set())
+		self.assertEqual(self.names(self.consultant), {"pe"})
 
 	def test_team_lead_sees_the_projects_of_their_team(self):
 		# PA: their member m1 is on it. PD: it belongs to their team. Not PB (other team), not the orphan.
 		self.assertEqual(self.names(self.lead), {"pa", "pd"})
 
-	def test_department_admin_sees_their_department_and_unassigned_projects(self):
-		self.assertEqual(self.names(self.admin), {"pa", "pc", "pd"})
+	def test_department_admin_sees_their_department_and_the_projects_nobody_owns(self):
+		# PA, PD: theirs. PC and PE belong to no department (PE has a consultant on it, but no
+		# department's team and no team), so a Department Admin can triage them. Not PB: that is
+		# another department's.
+		self.assertEqual(self.names(self.admin), {"pa", "pc", "pd", "pe"})
+		# a Team Lead looks after their own team only, never the projects nobody owns
+		self.assertTrue({"pc", "pe"}.isdisjoint(self.names(self.lead)))
 
 	def test_client_sees_only_their_customers_projects(self):
 		self.assertEqual(self.names(self.client), {"pa"})
 
 	def test_manageable_projects(self):
-		mine = {self.pa, self.pb, self.pc, self.pd}  # ignore any other projects on the site
+		mine = {self.pa, self.pb, self.pc, self.pd, self.pe}  # ignore any other projects on the site
 
 		def manageable(user):
 			return set(helper.get_manageable_project_names(user)) & mine
 
 		self.assertEqual(manageable(self.m1), {self.pa})
 		self.assertEqual(manageable(self.lead), {self.pa, self.pd})
-		self.assertEqual(manageable(self.admin), {self.pa, self.pc, self.pd})
+		self.assertEqual(manageable(self.admin), {self.pa, self.pc, self.pd, self.pe})
 		self.assertEqual(helper.get_manageable_project_names(self.client), [])
 
 	def test_value_is_seen_only_by_super_admin_and_the_project_lead_of_an_admin(self):
@@ -534,8 +543,9 @@ class TestMigrationPatches(PortalRoleTestBase):
 		self.assertEqual(set(helper.admin_department_names(legacy)), first)
 		self.assertFalse(helper.admin_department_names(self.super_admin))
 		self.assertTrue(helper.has_portal_staff_project_access(legacy))
-		# the legacy manager sees the whole portfolio as before: their departments' projects plus unassigned ones
-		self.assertTrue({self.pc} <= set(helper.get_allowed_project_names(legacy)))
+		# the legacy manager sees the whole portfolio as before: every department's projects plus the
+		# ones that belong to no department (a manager of every department has nothing hidden)
+		self.assertEqual(set(helper.get_allowed_project_names(legacy)), set(frappe.get_all("Project", pluck="name")))
 
 	def test_folder_patch_sorts_loose_files_and_is_idempotent(self):
 		from frappe.utils.file_manager import save_file

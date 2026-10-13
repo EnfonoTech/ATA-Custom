@@ -275,8 +275,9 @@ def get_allowed_project_names(user=None) -> list[str]:
 
 	  Super Admin       the whole portfolio.
 	  Department Admin  their departments' projects (portal_team, or anyone in the
-	                    department on the team or as Lead Architect), plus projects with no
-	                    team at all, which somebody has to triage, plus their own.
+	                    department on the team or as Lead Architect), plus the projects
+	                    that belong to no department yet, which somebody has to triage,
+	                    plus their own.
 	  Team Lead         the same for the teams they lead, plus their own.
 	  Team Member       only the projects they are on the team of or lead.
 	  Client Customer   only the projects of their customers.
@@ -369,11 +370,20 @@ def department_member_users(dept_names) -> set[str]:
 	return {u for u in users if u}
 
 
-def get_scope_project_names(user=None) -> set[str]:
-	"""Projects connected to the departments this admin / lead looks after: the project
-	belongs to the department (portal_team), or somebody from the department is on its
-	team or is its Lead Architect."""
-	depts = scope_department_names(user)
+def portal_department_names() -> list[str]:
+	"""The departments the portal calls teams: direct children of "All Departments" that
+	carry an office tag."""
+	if not frappe.get_meta("Department").has_field("portal_office"):
+		return []
+	return frappe.get_all(
+		"Department", filters={"parent_department": "All Departments", "portal_office": ["!=", ""]}, pluck="name"
+	)
+
+
+def _projects_tied_to_departments(depts) -> set[str]:
+	"""Projects that belong to one of these departments: the project's portal_team is one of
+	them, or somebody from the department is on its team or is its Lead Architect."""
+	depts = list(depts or [])
 	if not depts:
 		return set()
 	people = department_member_users(depts)
@@ -397,21 +407,21 @@ def get_scope_project_names(user=None) -> set[str]:
 	return out
 
 
+def get_scope_project_names(user=None) -> set[str]:
+	"""Projects connected to the departments this admin / lead looks after: the project
+	belongs to the department (portal_team), or somebody from the department is on its
+	team or is its Lead Architect."""
+	return _projects_tied_to_departments(scope_department_names(user))
+
+
 def get_unassigned_project_names() -> list[str]:
-	"""Projects nobody is on and that belong to no team. Department Admins see them so
-	someone can staff them; plain members never do."""
-	p = frappe.qb.DocType("Project")
-	pu = frappe.qb.DocType("Project User")
-	query = (
-		frappe.qb.from_(p)
-		.left_join(pu)
-		.on((pu.parent == p.name) & (pu.parenttype == "Project"))
-		.select(p.name)
-		.where(pu.name.isnull())
-	)
-	if frappe.get_meta("Project").has_field("portal_team"):
-		query = query.where(p.portal_team.isnull() | (p.portal_team == ""))
-	return query.run(pluck=True)
+	"""Projects that belong to no department at all: no portal_team, and nobody from any
+	department is on the team or is the Lead Architect. Department Admins see them so
+	somebody can put them under a department (Project page, Portal Team); plain members and
+	Team Leads never do. This is also what keeps a manager who administers every department
+	(the conversion of the old Projects Manager role) seeing the whole portfolio."""
+	tied = _projects_tied_to_departments(portal_department_names())
+	return [name for name in frappe.get_all("Project", pluck="name") if name not in tied]
 
 
 def assert_portal_user(user=None) -> None:
