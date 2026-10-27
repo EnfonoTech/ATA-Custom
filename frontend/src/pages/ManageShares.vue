@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
+import { viewerFolderPath } from "@/utils/clientFolders";
 
 const router = useRouter();
 const loading = ref(false);
@@ -585,7 +586,7 @@ function openFolderInFiles(project, folderPath) {
 									:class="f.is_file_share ? 'text-[color:var(--portal-warning)]' : 'text-[color:var(--portal-accent)]'"
 								/>
 								<span class="min-w-0 flex-1 truncate font-medium text-[color:var(--portal-text)]">
-									{{ f.folder_label }}
+									{{ viewerFolderPath(f.folder_label, false) }}
 								</span>
 								<span v-if="(f.files || []).length" class="portal-pill portal-pill-muted">
 									{{ (f.files || []).length }} file{{ (f.files || []).length === 1 ? "" : "s" }}
@@ -807,7 +808,7 @@ function openFolderInFiles(project, folderPath) {
 								<p class="truncate text-sm font-medium text-[color:var(--portal-text)]">
 									{{ r.project_name }}
 									<span class="text-[color:var(--portal-muted)]"> · </span>
-									<span class="text-[color:var(--portal-muted)]">{{ r.folder_label }}</span>
+									<span class="text-[color:var(--portal-muted)]">{{ viewerFolderPath(r.folder_label, false) }}</span>
 								</p>
 								<p class="truncate text-xs text-[color:var(--portal-muted)]">
 									<a

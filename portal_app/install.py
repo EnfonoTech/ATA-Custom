@@ -85,7 +85,7 @@ def ensure_project_portal_custom_fields():
 					"fieldname": "portal_phase",
 					"label": "Portal Phase",
 					"fieldtype": "Select",
-					"options": "\nSchematic Design\nCD\nCD+\nDD\nTD\nFC\nConstruction",
+					"options": "\nSchematic Design\nCD\nCD+\nDD\nTD\nIFC\nConstruction",
 					"insert_after": "portal_office",
 					"description": "Architectural phase of this project",
 				},

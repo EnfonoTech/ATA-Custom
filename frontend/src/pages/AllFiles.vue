@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch, reactive, inject } from "vue";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
+import { viewerFolderLeaf, viewerFolderPath } from "@/utils/clientFolders";
 
 // Submit / Share match the server rules: never for client contacts; Submit also
 // needs manage rights on the project (team member or manager).
@@ -178,7 +179,7 @@ const treeNodes = computed(() => {
 			if (nodes.has(key)) continue;
 			const match = sorted.find(x => x.label === key);
 			nodes.set(key, {
-				key, label: parts[i - 1], name: match?.name || "",
+				key, label: viewerFolderLeaf(key, isCustomerPortalUser.value) || parts[i - 1], name: match?.name || "",
 				depth: i, isRoot: false, parentKey: parts.slice(0, i - 1).join("/"),
 			});
 		}
@@ -271,7 +272,8 @@ function sortIcon(key) {
 
 const folderLabel = computed(() => {
 	if (!activeFolder.value || activeFolder.value === projectRoot.value) return "";
-	return allFolders.value.find(f => f.name === activeFolder.value)?.label || "";
+	const label = allFolders.value.find(f => f.name === activeFolder.value)?.label || "";
+	return viewerFolderPath(label, isCustomerPortalUser.value);
 });
 
 // ── Submit to Client Submittal ───────────────────────────────────────────────
@@ -321,7 +323,7 @@ async function confirmSubmitToClient() {
 			type: "POST",
 			args: { file_name: f.name, project: proj },
 		});
-		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to the client's Incoming folder.`;
+		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to the client folder (your Outgoing, the client's Incoming).`;
 		if (projCache[proj]) delete projCache[proj];
 		setTimeout(() => { submitOk.value = ""; closeSubmitModal(); }, 3000);
 	} catch (e) {
@@ -897,7 +899,7 @@ watch(activeFolder, (newFolder) => {
 										type="button"
 										class="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold shadow-sm transition active:scale-95"
 										style="border-color:rgba(245,158,11,0.35);background:var(--portal-accent-soft);color:var(--portal-accent)"
-										title="Submit to 06-CLIENT SUBMITTAL / Incoming with SL.NO + date naming"
+										title="Submit to 06-CLIENT SUBMITTAL / Outgoing (the client's Incoming) with SL.NO + date naming"
 										@click.stop="openSubmitModal(f)"
 									>
 										<FeatherIcon name="send" class="h-3 w-3" />
@@ -944,7 +946,7 @@ watch(activeFolder, (newFolder) => {
 							</div>
 							<div>
 								<h2 class="text-base font-bold" style="color:var(--portal-text)">Submit to Client</h2>
-								<p class="text-xs" style="color:var(--portal-muted)">Copies to <strong>06-CLIENT SUBMITTAL / Incoming</strong> with serial + date naming</p>
+								<p class="text-xs" style="color:var(--portal-muted)">Copies to <strong>06-CLIENT SUBMITTAL / Outgoing</strong> (the client sees it in Incoming) with serial + date naming</p>
 							</div>
 						</div>
 						<button type="button" class="rounded-lg p-1.5 transition" style="color:var(--portal-subtle)" :disabled="submitBusy" @click="closeSubmitModal">

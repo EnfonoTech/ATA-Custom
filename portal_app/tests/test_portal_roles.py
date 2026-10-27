@@ -83,8 +83,8 @@ def _customer(name):
 			{
 				"doctype": "Customer",
 				"customer_name": name,
-				"customer_group": frappe.db.get_value("Customer Group", {}, "name", order_by="lft asc"),
-				"territory": frappe.db.get_value("Territory", {}, "name", order_by="lft asc"),
+				"customer_group": frappe.db.get_value("Customer Group", {"is_group": 0}, "name", order_by="lft asc"),
+				"territory": frappe.db.get_value("Territory", {"is_group": 0}, "name", order_by="lft asc"),
 			}
 		).insert(ignore_permissions=True)
 	return name

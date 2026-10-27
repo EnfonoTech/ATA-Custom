@@ -65,6 +65,24 @@ async function loadPortalAdmin() {
 	}
 }
 
+// Offices span Riyadh, Cairo, Lisbon and Manila: tell the server this browser's time
+// zone once per tab, and it decides whether the user's Time Zone should follow it.
+async function syncBrowserTimeZone() {
+	let tz = "";
+	try {
+		tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+		if (!tz || sessionStorage.getItem("portal_tz_synced") === tz) return;
+	} catch {
+		return;
+	}
+	try {
+		await call({ method: "portal_app.api.profile.sync_browser_time_zone", type: "POST", args: { time_zone: tz } });
+		sessionStorage.setItem("portal_tz_synced", tz);
+	} catch (e) {
+		console.error(e);
+	}
+}
+
 provide("sidebarCollapsed", sidebarCollapsed);
 provide("toggleSidebar", toggleSidebar);
 provide("portalSettings", portalSettings);
@@ -105,6 +123,7 @@ onMounted(async () => {
 	}
 	await loadPortalCapabilities();
 	await loadPortalAdmin();
+	syncBrowserTimeZone();
 
 	const onKey = (e) => {
 		if (!(e.ctrlKey || e.metaKey) || e.key !== "b") return;

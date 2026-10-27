@@ -378,6 +378,26 @@ def get_offices():
 
 
 @frappe.whitelist()
+def get_team_options():
+	"""Teams for the Team picker on Create / Edit project: [{name, department_name, office}].
+
+	The picker sets Project.portal_team, and the office follows from it. A Department
+	Admin is offered only the teams they administer, which is what the server allows
+	them to set (projects._assert_may_set_team); everyone else who can open the form
+	sees every team and the server refuses a team they may not use. No people, only
+	names and office tags, which get_offices already hands to every portal user."""
+	helper.assert_portal_user()
+	helper.assert_not_customer_only()
+	only = None
+	if not helper.is_super_admin() and helper.is_dept_admin():
+		only = helper.admin_department_names()
+	return [
+		{"name": d.name, "department_name": d.department_name, "office": d.portal_office or ""}
+		for d in _portal_departments(only)
+	]
+
+
+@frappe.whitelist()
 def update_team(team, department_name=None, office=None):
 	"""Update editable team (Department) fields from the portal Teams edit modal."""
 	helper.assert_manage_team(team)
@@ -509,7 +529,7 @@ def _assert_org_person(user: str) -> None:
 def _assign_users_to_team(team: str, users: list) -> None:
 	"""Team membership = assigning the Department doc to Users via Frappe's standard Assign To."""
 	import frappe.share as _share
-	from frappe.desk.form.assign_to import add as assign_add
+	from portal_app.utils import assign_add_unchecked as assign_add
 
 	# assign_add() auto-shares the doc with an assignee who lacks read access to it,
 	# and that auto-share checks the CALLING user's own "share" DocPerm on Department
@@ -519,7 +539,7 @@ def _assign_users_to_team(team: str, users: list) -> None:
 	for u in users:
 		_share.add_docshare("Department", team, user=u, read=1, flags={"ignore_share_permission": True})
 
-	assign_add({"doctype": "Department", "name": team, "assign_to": users}, ignore_permissions=True)
+	assign_add({"doctype": "Department", "name": team, "assign_to": users})
 
 
 @frappe.whitelist()
@@ -559,9 +579,9 @@ def remove_team_member(team, user):
 	if admin_rows and not helper.is_super_admin():
 		frappe.throw(_("Only a Super Admin can remove a Department Admin."), frappe.PermissionError)
 
-	from frappe.desk.form.assign_to import remove as assign_remove
+	from portal_app.utils import assign_remove_unchecked as assign_remove
 
-	assign_remove("Department", team, user, ignore_permissions=True)
+	assign_remove("Department", team, user)
 
 	changed = False
 	if dept.get("portal_team_lead") == user:

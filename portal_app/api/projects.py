@@ -91,6 +91,19 @@ def refuse_client_project_users(doc, method=None):
 			)
 
 
+def sync_office_from_team(doc, method=None):
+	"""doc_events Project.validate: the office is the team's office.
+
+	ATA treats office and team as one choice, so `portal_office` is no longer typed in;
+	it follows `portal_team` (Department.portal_office) on every save — portal, Desk
+	or import. A project with no team has no office."""
+	meta = frappe.get_meta("Project")
+	if not (meta.has_field("portal_team") and meta.has_field("portal_office")):
+		return
+	team = doc.get("portal_team")
+	doc.portal_office = frappe.db.get_value("Department", team, "portal_office") if team else None
+
+
 def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
 	"""Re-sending the current Lead Architect is not a change; neither is a blank from a
 	caller who is never shown the field (list_projects strips it for non-staff).
@@ -158,6 +171,22 @@ def _assert_may_set_team(project: str, payload: dict) -> None:
 			_("Only a Super Admin, a Department Admin, or the project's own Lead Architect can set its team."),
 			frappe.PermissionError,
 		)
+
+
+def _assert_may_set_team_on_create(team: str) -> None:
+	"""A new project has no Lead Architect yet, so only the department rule of
+	_assert_may_set_team applies: a Super Admin may pick any team, a Department Admin
+	one they administer. The team also decides who can see the project."""
+	if not frappe.db.exists("Department", team):
+		frappe.throw(_("Unknown team: {0}").format(team))
+	if helper.is_super_admin():
+		return
+	if helper.is_dept_admin() and team in helper.admin_department_names():
+		return
+	frappe.throw(
+		_("Only a Super Admin, or a Department Admin of that team, can create a project under it."),
+		frappe.PermissionError,
+	)
 
 
 def _manageable_project_names(allowed_names: list) -> list:
@@ -461,7 +490,6 @@ def update_project(project, **kwargs):
 		"portal_project_manager",
 		"portal_team",
 		"portal_kanban_stage",
-		"portal_office",
 		"portal_phase",
 		"portal_server_t",
 		"portal_server_a",
@@ -931,7 +959,6 @@ def create_project(project_name, company=None, **kwargs):
 		"portal_project_manager",
 		"portal_kanban_stage",
 		"portal_phase",
-		"portal_office",
 	):
 		if meta.has_field(k):
 			v = kwargs.get(k)
@@ -939,6 +966,11 @@ def create_project(project_name, company=None, **kwargs):
 				doc.set(k, v)
 			elif k == "portal_kanban_stage":
 				doc.set(k, "Planning")
+
+	team = cstr(kwargs.get("portal_team")).strip()
+	if team and meta.has_field("portal_team"):
+		_assert_may_set_team_on_create(team)
+		doc.set("portal_team", team)
 
 	for k in ("expected_start_date", "expected_end_date"):
 		if doc.get(k):
@@ -1105,8 +1137,8 @@ def _sync_project_assignment(project, users):
 	portal's Team list and ERP's native "Assigned To" sidebar show the same people.
 	Does not touch the Project Users table or any portal access-control logic."""
 	import frappe.share as _share
-	from frappe.desk.form.assign_to import add as assign_add
-	from frappe.desk.form.assign_to import remove as assign_remove
+	from portal_app.utils import assign_add_unchecked as assign_add
+	from portal_app.utils import assign_remove_unchecked as assign_remove
 
 	current = set(
 		frappe.get_all(
@@ -1149,9 +1181,9 @@ def _sync_project_assignment(project, users):
 		)
 
 	if to_add:
-		assign_add({"doctype": "Project", "name": project, "assign_to": to_add}, ignore_permissions=True)
+		assign_add({"doctype": "Project", "name": project, "assign_to": to_add})
 	for u in to_remove:
-		assign_remove("Project", project, u, ignore_permissions=True)
+		assign_remove("Project", project, u)
 
 
 def sync_project_access_from_todo(doc, method=None):
@@ -2009,7 +2041,7 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 	doc.insert(ignore_permissions=True)
 	if assignee:
 		import frappe.share as _share
-		from frappe.desk.form.assign_to import add as assign_add
+		from portal_app.utils import assign_add_unchecked as assign_add
 
 		# assign_to.add() shares the Task with an assignee who cannot read it, and that
 		# share step checks the CALLER's own Task share permission (Projects Manager-only
@@ -2019,7 +2051,7 @@ def create_task(project, subject, status="Open", priority="Medium", exp_end_date
 			_share.add_docshare(
 				"Task", doc.name, user=assignee, read=1, flags={"ignore_share_permission": True}, notify=0
 			)
-		assign_add({"assign_to": [assignee], "doctype": "Task", "name": doc.name}, ignore_permissions=True)
+		assign_add({"assign_to": [assignee], "doctype": "Task", "name": doc.name})
 	frappe.db.commit()
 	return {
 		"ok": True,

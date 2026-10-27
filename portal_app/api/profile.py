@@ -206,3 +206,43 @@ def update_my_profile(full_name=None, mobile_no=None, language=None, time_zone=N
 
 	doc.save(ignore_permissions=True)
 	return get_my_profile()
+
+
+def _should_follow_browser_time_zone(current: str | None, browser_tz: str, system_tz: str) -> bool:
+	"""Whether the user's saved Time Zone should be replaced by the browser's.
+
+	current     the User's time_zone now (None/"" when never set)
+	browser_tz  what the browser reports; already checked to be a known zone
+	system_tz   System Settings time zone (Asia/Riyadh on ATA)
+	"""
+	# Empty, or still the system default, means nobody chose it: follow the browser.
+	# Any other value was picked on Profile and is kept.
+	return not current or current == system_tz
+
+
+@frappe.whitelist(methods=["POST"])
+def sync_browser_time_zone(time_zone=None):
+	"""Called once per browser tab by the portal layout with the browser's IANA zone.
+
+	ATA works from Riyadh, Cairo, Lisbon and Manila, and Frappe shows every date-time in
+	the user's Time Zone (or the system one when that is empty). The rule for when the
+	browser overrides a saved value is _should_follow_browser_time_zone. POST, because a
+	GET request is rolled back."""
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	from frappe.utils import get_system_timezone
+	from frappe.utils.momentjs import get_all_timezones
+
+	tz = cstr(time_zone).strip()
+	if tz not in get_all_timezones():
+		return {"changed": False, "time_zone": None}
+
+	current = frappe.db.get_value("User", frappe.session.user, "time_zone")
+	if current == tz or not _should_follow_browser_time_zone(current, tz, get_system_timezone()):
+		return {"changed": False, "time_zone": current}
+
+	doc = frappe.get_doc("User", frappe.session.user)
+	doc.time_zone = tz
+	doc.save(ignore_permissions=True)
+	return {"changed": True, "time_zone": tz}

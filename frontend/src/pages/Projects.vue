@@ -116,7 +116,7 @@ async function openEdit(p, e) {
 		name:                   p.name,
 		project_name:           p.project_name || "",
 		status:                 p.status || "Open",
-		portal_office:          p.portal_office || "",
+		portal_team:            "",
 		portal_phase:           p.portal_phase || "",
 		portal_project_manager: p.portal_project_manager || "",
 		estimated_costing:      p.estimated_costing || "",
@@ -135,6 +135,7 @@ async function openEdit(p, e) {
 		if (seq !== editSeq) return; // a newer Edit click took over
 		editForm.value.notes = htmlToText(full.notes);
 		if (full.portal_project_manager) editForm.value.portal_project_manager = full.portal_project_manager;
+		editForm.value.portal_team = full.portal_team || "";
 	} catch {
 		if (seq !== editSeq) return;
 	}
@@ -261,13 +262,27 @@ async function load() {
 	}
 }
 
-const officeOptions = ref([]);
+// Office = team: the forms pick a team (Department) and the server sets the office from it.
+const teamOptions = ref([]);
+function teamOptionLabel(t) {
+	return t.office ? `${t.department_name} (${t.office})` : t.department_name;
+}
+// Only a Super Admin or a Department Admin may file a new project under a team.
+const canPickTeamOnCreate = computed(() =>
+	["super_admin", "department_admin"].includes(portalCapabilities.value?.portal_role),
+);
+// Keep a project's current team selectable even when it is not one this user may pick.
+const editTeamOptions = computed(() => {
+	const current = editForm.value?.portal_team;
+	if (!current || teamOptions.value.some((t) => t.name === current)) return teamOptions.value;
+	return [{ name: current, department_name: current, office: "" }, ...teamOptions.value];
+});
 
 onMounted(async () => {
 	load();
 	try {
-		const offices = await call({ method: "portal_app.api.teams.get_offices" });
-		if (Array.isArray(offices)) officeOptions.value = offices;
+		const teams = await call({ method: "portal_app.api.teams.get_team_options" });
+		if (Array.isArray(teams)) teamOptions.value = teams;
 	} catch {}
 });
 
@@ -305,6 +320,7 @@ async function openNew() {
 		customer: "",
 		portal_phase: "",
 		portal_project_manager: "",
+		portal_team: "",
 	};
 	newCustomerSearchQ.value = "";
 	newCustomerHits.value = [];
@@ -352,6 +368,7 @@ async function submitCreate() {
 		if (newForm.value.expected_end_date) args.expected_end_date = newForm.value.expected_end_date;
 		if (newForm.value.customer?.trim()) args.customer = newForm.value.customer.trim();
 		if (newForm.value.portal_phase) args.portal_phase = newForm.value.portal_phase;
+		if (newForm.value.portal_team) args.portal_team = newForm.value.portal_team;
 		if (newForm.value.portal_project_manager) args.portal_project_manager = newForm.value.portal_project_manager;
 
 		const res = await call({
@@ -899,7 +916,7 @@ function printProjects() {
 									<option>CD+</option>
 									<option>DD</option>
 									<option>TD</option>
-									<option>FC</option>
+									<option>IFC</option>
 									<option>Construction</option>
 								</select>
 							</div>
@@ -910,6 +927,13 @@ function printProjects() {
 									<option v-for="u in portalUsers" :key="u.name" :value="u.name">{{ u.full_name || u.name }}</option>
 								</select>
 							</div>
+						</div>
+						<div v-if="canPickTeamOnCreate">
+							<label class="portal-section-title mb-1 block">Team (office)</label>
+							<select v-model="newForm.portal_team" class="portal-input">
+								<option value="">— Select —</option>
+								<option v-for="t in teamOptions" :key="t.name" :value="t.name">{{ teamOptionLabel(t) }}</option>
+							</select>
 						</div>
 						<div>
 							<label class="portal-section-title mb-1 block">Customer</label>
@@ -1040,10 +1064,10 @@ function printProjects() {
 						<!-- Office + Phase -->
 						<div class="grid grid-cols-2 gap-3">
 							<div>
-								<label class="block text-xs font-semibold text-gray-600 mb-1.5">Office</label>
-								<select v-model="editForm.portal_office" class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400">
+								<label class="block text-xs font-semibold text-gray-600 mb-1.5">Team (office)</label>
+								<select v-model="editForm.portal_team" class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400">
 									<option value="">— Select —</option>
-									<option v-for="o in officeOptions" :key="o" :value="o">{{ o }}</option>
+									<option v-for="t in editTeamOptions" :key="t.name" :value="t.name">{{ teamOptionLabel(t) }}</option>
 								</select>
 							</div>
 							<div>
@@ -1055,7 +1079,7 @@ function printProjects() {
 									<option>CD+</option>
 									<option>DD</option>
 									<option>TD</option>
-									<option>FC</option>
+									<option>IFC</option>
 									<option>Construction</option>
 								</select>
 							</div>

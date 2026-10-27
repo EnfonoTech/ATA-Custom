@@ -423,7 +423,7 @@ def run(commit=False):
 
 	# ── 3. Team membership = Frappe "Assign To" (ToDo) on the Department ────
 	# This is what teams.py reads; Employee.department is NOT used by the portal.
-	from frappe.desk.form.assign_to import add as assign_add
+	from portal_app.utils import assign_add_unchecked as assign_add
 
 	for g in GROUPS:
 		dept = dept_names.get(g["department"])
@@ -444,8 +444,7 @@ def run(commit=False):
 			if commit:
 				try:
 					assign_add({"doctype": "Department", "name": dept,
-					            "assign_to": [email], "description": f"Portal team: {g['department']}"},
-					           ignore_permissions=True)
+					            "assign_to": [email], "description": f"Portal team: {g['department']}"})
 				except Exception:
 					frappe.log_error(frappe.get_traceback(), f"ATA import: assign {email}")
 

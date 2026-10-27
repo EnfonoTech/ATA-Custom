@@ -3,6 +3,7 @@ import { ref, onMounted, watch, inject, computed, nextTick } from "vue";
 import { call, uploadFile, ensureCsrfReady } from "@/api";
 import { useRoute } from "vue-router";
 import { FeatherIcon } from "frappe-ui";
+import { viewerFolderLeaf, viewerFolderPath } from "@/utils/clientFolders";
 
 const route = useRoute();
 const portalCapabilities = inject("portalCapabilities", ref({}));
@@ -526,6 +527,20 @@ const folderLabelByName = computed(() => {
 	for (const f of folders.value) map[f.name] = f.label;
 	return map;
 });
+// The same labels as this viewer reads them (staff see the client folder's Incoming and
+// Outgoing swapped). Display only — numbering and paths keep using folderLabelByName.
+const shownFolderLabelByName = computed(() => {
+	const map = {};
+	for (const [name, label] of Object.entries(folderLabelByName.value)) {
+		map[name] = viewerFolderPath(label, isCustomerPortalUser.value);
+	}
+	return map;
+});
+/** A folder row's own name, as this viewer reads it. */
+function shownLeaf(f) {
+	if (f.isRoot) return f.leafLabel || f.label;
+	return viewerFolderLeaf(f.label, isCustomerPortalUser.value) || f.leafLabel || f.label;
+}
 const visibleFiles = computed(() => {
 	const q = fileSearch.value.trim().toLowerCase();
 	const root = projectRootPath.value;
@@ -679,13 +694,13 @@ function toggleFolderTreeNode(key) {
 function subfolderLabel(folderPath) {
 	const path = String(folderPath || "");
 	if (!path) return "—";
-	if (folderLabelByName.value[path]) return folderLabelByName.value[path];
+	if (shownFolderLabelByName.value[path]) return shownFolderLabelByName.value[path];
 	const parts = path.split("/");
 	return parts[parts.length - 1] || path;
 }
 
 function folderOptionLabel(label) {
-	const path = String(label || "");
+	const path = viewerFolderPath(label, isCustomerPortalUser.value);
 	if (!path) return "";
 	const parts = path.split("/");
 	if (parts.length <= 1) return path;
@@ -696,8 +711,7 @@ const targetFolderEntry = computed(() => folders.value.find((f) => f.name === ta
 const targetFolderLeafLabel = computed(() => {
 	const entry = targetFolderEntry.value;
 	if (!entry) return "";
-	const parts = String(entry.label || "").split("/");
-	return parts[parts.length - 1] || entry.label;
+	return viewerFolderLeaf(entry.label, isCustomerPortalUser.value) || entry.label;
 });
 const targetFolderParentLabel = computed(() => {
 	const entry = targetFolderEntry.value;
@@ -1319,7 +1333,7 @@ async function onZipInput(e) {
 		uploadError.value = "Select a destination subfolder first.";
 		return;
 	}
-	const destLabel = folderLabelByName.value[targetFolder.value] || targetFolder.value;
+	const destLabel = shownFolderLabelByName.value[targetFolder.value] || targetFolder.value;
 	if (!confirm(`Upload and extract "${file.name}" into:\n  ${destLabel}\n\nAll files inside the ZIP will be created there, preserving the folder structure.`)) return;
 	zipBusy.value = true;
 	uploadError.value = "";
@@ -1879,7 +1893,7 @@ async function deleteProjectFile(f) {
 										class="h-4 w-4 shrink-0"
 										:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
 									/>
-									<span class="truncate">{{ f.leafLabel || f.label }}</span>
+									<span class="truncate">{{ shownLeaf(f) }}</span>
 									<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
 								</p>
 								<p class="mt-1 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</p>
@@ -1950,7 +1964,7 @@ async function deleteProjectFile(f) {
 									class="h-3.5 w-3.5 shrink-0"
 									:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
 								/>
-								<span class="truncate">{{ f.leafLabel || f.label }}</span>
+								<span class="truncate">{{ shownLeaf(f) }}</span>
 								<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
 							</span>
 							<span class="ml-5 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</span>
@@ -1996,7 +2010,7 @@ async function deleteProjectFile(f) {
 					<FeatherIcon name="filter" class="h-3.5 w-3.5 text-[color:var(--portal-accent)]" />
 					<span class="text-[color:var(--portal-muted)]">Showing files in:</span>
 					<span class="flex flex-wrap items-center gap-1 font-medium text-[color:var(--portal-text)]">
-						<template v-for="(seg, i) in (folderLabelByName[folderFilter] || folderFilter).split('/')" :key="`crumb-${i}`">
+						<template v-for="(seg, i) in (shownFolderLabelByName[folderFilter] || folderFilter).split('/')" :key="`crumb-${i}`">
 							<span v-if="i > 0" class="text-[color:var(--portal-subtle)]">/</span>
 							<span>{{ seg }}</span>
 						</template>
@@ -2131,7 +2145,7 @@ async function deleteProjectFile(f) {
 						<button
 							v-if="canShareFolder && targetFolder"
 							class="portal-btn"
-							:title="'Share \'' + (folderLabelByName[targetFolder] || targetFolder) + '\''"
+							:title="'Share \'' + (shownFolderLabelByName[targetFolder] || targetFolder) + '\''"
 							@click="openShareModal(targetFolder)"
 						>
 							<FeatherIcon name="share-2" class="h-4 w-4" />
@@ -2186,7 +2200,7 @@ async function deleteProjectFile(f) {
 					</div>
 					<p class="font-medium text-[color:var(--portal-text)]">Drop files or a folder here, or click to upload files</p>
 					<p class="text-xs text-[color:var(--portal-muted)]">
-						Goes into <strong class="text-[color:var(--portal-text)]">{{ folderLabelByName[targetFolder] || targetFolder || "—" }}</strong>
+						Goes into <strong class="text-[color:var(--portal-text)]">{{ shownFolderLabelByName[targetFolder] || targetFolder || "—" }}</strong>
 					</p>
 					<p class="text-[11px] text-[color:var(--portal-subtle)]">To upload a whole folder, use <strong>Upload folder</strong> button above or drag-and-drop the folder here</p>
 					<input ref="fileInput" type="file" class="hidden" multiple @change="onFileInput" />
@@ -2798,7 +2812,7 @@ async function deleteProjectFile(f) {
 						<div v-if="!isFolderMode" class="flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--portal-accent)]/40 bg-[color:var(--portal-accent-soft)] px-3 py-2 text-xs text-[color:var(--portal-accent-strong)]">
 							<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0" />
 							<span class="font-semibold">Destination:</span>
-							<span class="truncate">{{ folderLabelByName[targetFolder] || targetFolder || "—" }}</span>
+							<span class="truncate">{{ shownFolderLabelByName[targetFolder] || targetFolder || "—" }}</span>
 							<span class="text-[color:var(--portal-subtle)]">/</span>
 							<span class="truncate font-mono font-semibold">NN_{{ buildWrapperName(targetFolder, todayIso()) }}</span>
 							<span class="ml-auto text-[10px] font-medium uppercase tracking-wide text-[color:var(--portal-muted)]">NN = auto series (01, 02…)</span>
@@ -2827,7 +2841,7 @@ async function deleteProjectFile(f) {
 										<option v-for="f in folders" :key="`ff-${f.name}`" :value="f.name">{{ folderOptionLabel(f.label) }}</option>
 									</select>
 									<p class="mt-1 text-[11px] text-[color:var(--portal-muted)]">
-										Will create <strong class="font-mono">{{ pendingFolder.wrapperName }}</strong> inside <strong>{{ folderLabelByName[pendingFolder.targetFolder] || "selected subfolder" }}</strong>
+										Will create <strong class="font-mono">{{ pendingFolder.wrapperName }}</strong> inside <strong>{{ shownFolderLabelByName[pendingFolder.targetFolder] || "selected subfolder" }}</strong>
 									</p>
 								</div>
 							</div>
