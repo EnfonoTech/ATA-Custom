@@ -1,10 +1,13 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, computed } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, inject } from "vue";
 import { useRouter } from "vue-router";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
+import { viewerFolderPath } from "@/utils/clientFolders";
 
 const router = useRouter();
+const portalCapabilities = inject("portalCapabilities", ref({}));
+const isCustomerPortalUser = computed(() => !!portalCapabilities.value?.is_customer_portal_user);
 const loading = ref(true);
 const projects = ref([]);
 const error = ref("");
@@ -319,7 +322,7 @@ function openFolderInFiles(project, folderPath) {
 									:class="entryIconClass(f)"
 								/>
 								<span class="min-w-0 flex-1 truncate font-medium text-[color:var(--portal-text)]">
-									{{ f.folder_label }}
+									{{ viewerFolderPath(f.folder_label, isCustomerPortalUser) }}
 								</span>
 								<span v-if="f.entry_type === 'membership'" class="portal-pill portal-pill-success">
 									Team access

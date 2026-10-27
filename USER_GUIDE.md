@@ -614,7 +614,7 @@ At most 500 projects are shown.
 |---|---|
 | **Project** | Name and code. |
 | **Assignee** | Shows the project's **Office** (despite the heading). |
-| **Phase** | Schematic Design, CD, CD+, DD, TD, FC or Construction. |
+| **Phase** | Schematic Design, CD, CD+, DD, TD, IFC or Construction. |
 | **Status** | ERPNext status. |
 | **Lead Architect** | Super Admins and Department Admins only. |
 | **Servers** | Badges **T**, **A** and **erp** (below). |

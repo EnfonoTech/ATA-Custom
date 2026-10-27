@@ -315,7 +315,7 @@ Custom fields are created with `create_custom_fields(..., update=True)`.
 | Project | `portal_project_manager` | Link User | "Lead Architect" (Desk label "Portal Project Manager"). The project counts as that person's own project: they see it and manage it (`helper.own_project_names`). Controls money visibility for a Department Admin, who may add people to the team, and who may set the Gantt team. |
 | Project | `portal_kanban_stage` | Select: Planning / Active / On Hold / Review / Done (default Planning) | Kanban column. Shown in list view. Independent of the ERPNext `status`: moving a card to Done does not complete the Project, and completing it does not move the card. |
 | Project | `portal_office` | Data | Office label (shown as "Assignee" in the Projects table header). |
-| Project | `portal_phase` | Select: blank / Schematic Design / CD / CD+ / DD / TD / FC / Construction | Design phase. |
+| Project | `portal_phase` | Select: blank / Schematic Design / CD / CD+ / DD / TD / IFC / Construction | Design phase. |
 | Project | `portal_project_server` | Data | Server note. |
 | Project | `portal_upcoming_milestone`, `portal_milestone_date` | Data, Date | Summary of the next milestone. Recalculated only by the portal's milestone endpoints (see 4.5). |
 | Project | `portal_milestones` | Table → Portal Project Milestone | Any number of dated milestones. |

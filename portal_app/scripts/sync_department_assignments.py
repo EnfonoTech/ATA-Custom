@@ -1,5 +1,5 @@
 import frappe
-from frappe.desk.form.assign_to import add as assign_add
+from portal_app.utils import assign_add_unchecked as assign_add
 
 
 def run():
@@ -47,7 +47,6 @@ def run():
 				continue
 			assign_add(
 				{"doctype": "Department", "name": dept_name, "assign_to": [emp.user_id]},
-				ignore_permissions=True,
 			)
 			already_assigned.add(emp.user_id)
 			assigned += 1
