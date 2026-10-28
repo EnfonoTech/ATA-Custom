@@ -4,6 +4,7 @@ import { call, uploadFile, ensureCsrfReady } from "@/api";
 import { useRoute } from "vue-router";
 import { FeatherIcon } from "frappe-ui";
 import { viewerFolderLeaf, viewerFolderPath } from "@/utils/clientFolders";
+import SubmitToClientModal from "@/component/SubmitToClientModal.vue";
 
 const route = useRoute();
 const portalCapabilities = inject("portalCapabilities", ref({}));
@@ -292,9 +293,6 @@ function scrollFilesPage(where) {
 const folderPickerOpen = ref(false);
 const folderPickerSearch = ref("");
 const folderPickerExpanded = ref(new Set());
-// Separate expansion state for the main "Tree" view on the page (independent of the picker dialog).
-// Keys: subfolder labels (e.g. "Drawings/Plans") plus a sentinel `__root__:<projectRootPath>` for the project root row.
-const folderTreeExpanded = ref(new Set());
 
 // Bulk-select state for the file list
 const selectedFileNames = ref([]);
@@ -541,22 +539,28 @@ function shownLeaf(f) {
 	if (f.isRoot) return f.leafLabel || f.label;
 	return viewerFolderLeaf(f.label, isCustomerPortalUser.value) || f.leafLabel || f.label;
 }
+// Explorer-style browsing: the open folder is `folderFilter` ("" = the project root), so
+// deep links (?folder=), the Subfolder filter and share-on-load keep working unchanged.
+const currentFolder = computed(() => folderFilter.value || projectRootPath.value);
+const atRootFolder = computed(() => !folderFilter.value || folderFilter.value === projectRootPath.value);
+// "Show all files": every file of the project at once (the old root view), until a folder is opened.
+const showAllFiles = ref(false);
+function parentFolderPath(name) {
+	const s = String(name || "");
+	const i = s.lastIndexOf("/");
+	return i > 0 ? s.slice(0, i) : "";
+}
 const visibleFiles = computed(() => {
 	const q = fileSearch.value.trim().toLowerCase();
-	const root = projectRootPath.value;
 	return (files.value || []).filter((f) => {
-		if (folderFilter.value) {
-			if (root && folderFilter.value === root) {
-				const fp = String(f.folder || "");
-				if (!(fp === root || fp.startsWith(`${root}/`))) return false;
-			} else if (f.folder !== folderFilter.value) {
-				return false;
-			}
-		}
+		if (!showAllFiles.value && String(f.folder || "") !== currentFolder.value) return false;
 		if (q && !String(f.file_name || "").toLowerCase().includes(q)) return false;
 		return true;
 	});
 });
+const currentFolderFileCount = computed(
+	() => (files.value || []).filter((f) => String(f.folder || "") === currentFolder.value).length,
+);
 const folderEntries = computed(() => {
 	const rows = [];
 	const root = projectRootPath.value;
@@ -597,98 +601,84 @@ const folderEntries = computed(() => {
 	return rows;
 });
 
-/**
- * Tree-shaped projection of `folders` for the on-page "Tree" view. Unlike `folderEntries`
- * (which always emits every folder), this only emits a node's descendants when that node is
- * expanded — so the user explores one branch at a time instead of seeing the entire hierarchy
- * up front.
- */
-const folderTreeView = computed(() => {
+/** The subfolders directly inside the open folder (the root row is the first breadcrumb). */
+const childFolders = computed(() => {
+	const cur = currentFolder.value;
+	if (!cur) return [];
+	const all = folders.value || [];
 	const rows = [];
-	const root = projectRootPath.value;
-	const rootKey = root ? `__root__:${root}` : "";
-	const rootExpanded = !root || folderTreeExpanded.value.has(rootKey);
-
-	const treeRoot = { children: new Map() };
-	for (const f of folders.value) {
-		const segments = String(f.label || "").split("/").filter(Boolean);
-		let cursor = treeRoot;
-		const accumulated = [];
-		for (let i = 0; i < segments.length; i++) {
-			const seg = segments[i];
-			accumulated.push(seg);
-			if (!cursor.children.has(seg)) {
-				cursor.children.set(seg, {
-					children: new Map(),
-					name: i === segments.length - 1 ? f.name : "",
-					label: accumulated.join("/"),
-					seg,
-				});
-			} else if (i === segments.length - 1) {
-				const node = cursor.children.get(seg);
-				node.name = f.name;
-			}
-			cursor = cursor.children.get(seg);
-		}
-	}
-
-	const fileCountFor = (folderName) =>
-		(files.value || []).filter((x) => x.folder === folderName).length;
-
-	if (root) {
-		const rootCount = (files.value || []).filter((x) => {
-			const fp = String(x.folder || "");
-			return fp === root || fp.startsWith(`${root}/`);
-		}).length;
+	for (const f of all) {
+		if (parentFolderPath(f.name) !== cur) continue;
+		const label = String(f.label || "");
+		const parts = label.split("/");
 		rows.push({
-			name: root,
-			label: "Project folder (all files)",
-			leafLabel: "Project folder (all files)",
-			parentPath: "",
-			depth: 0,
-			isRoot: true,
-			hasChildren: treeRoot.children.size > 0,
-			fileCount: rootCount,
-			expanded: rootExpanded,
-			expandKey: rootKey,
+			name: f.name,
+			label,
+			leafLabel: parts[parts.length - 1] || label,
+			isRoot: false,
+			client: clientFolderInfo(label),
+			fileCount: (files.value || []).filter((x) => x.folder === f.name).length,
+			folderCount: all.filter((x) => parentFolderPath(x.name) === f.name).length,
 		});
 	}
-
-	if (rootExpanded) {
-		const walk = (node, depth, parentPath) => {
-			const sorted = [...node.children.values()].sort((a, b) =>
-				String(a.seg || "").localeCompare(String(b.seg || ""), undefined, { numeric: true }),
-			);
-			for (const child of sorted) {
-				const expanded = folderTreeExpanded.value.has(child.label);
-				rows.push({
-					name: child.name,
-					label: child.label,
-					leafLabel: child.seg,
-					parentPath,
-					depth,
-					isRoot: false,
-					client: clientFolderInfo(child.label),
-					hasChildren: child.children.size > 0,
-					fileCount: child.name ? fileCountFor(child.name) : 0,
-					expanded,
-					expandKey: child.label,
-				});
-				if (expanded && child.children.size > 0) {
-					walk(child, depth + 1, parentPath ? `${parentPath} / ${child.seg}` : child.seg);
-				}
-			}
-		};
-		walk(treeRoot, 1, "");
-	}
+	rows.sort((a, b) => String(a.leafLabel).localeCompare(String(b.leafLabel), undefined, { numeric: true }));
 	return rows;
 });
 
-function toggleFolderTreeNode(key) {
-	if (!key) return;
-	const next = new Set(folderTreeExpanded.value);
-	next.has(key) ? next.delete(key) : next.add(key);
-	folderTreeExpanded.value = next;
+/** "Project folder" › seg › seg — each crumb opens that level. */
+const folderCrumbs = computed(() => {
+	const root = projectRootPath.value;
+	if (!root) return [];
+	const crumbs = [];
+	let p = currentFolder.value;
+	while (p && p !== root && p.startsWith(`${root}/`)) {
+		const label = folderLabelByName.value[p] || p;
+		crumbs.unshift({
+			name: p,
+			label: viewerFolderLeaf(label, isCustomerPortalUser.value) || p.split("/").pop(),
+		});
+		p = parentFolderPath(p);
+	}
+	crumbs.unshift({ name: "", label: "Project folder" });
+	return crumbs;
+});
+
+function openFolder(name) {
+	folderFilter.value = name === projectRootPath.value ? "" : name || "";
+	showAllFiles.value = false;
+}
+function goUpFolder() {
+	if (atRootFolder.value) return;
+	openFolder(parentFolderPath(currentFolder.value));
+}
+
+/** The client folder and everything in it (nothing in there is submitted onward). */
+function isInsideClientFolder(name) {
+	const label = folderLabelByName.value[name] || "";
+	return /(^|\/)06[\s-]*CLIENT SUBMITTAL(\/|$)/i.test(label);
+}
+
+// ── Submit to client (one numbered submission folder in the client's Incoming) ──
+const submitOpen = ref(false);
+const submitFiles = ref([]);
+const submitFolder = ref(null);
+function openSubmitSelected() {
+	const byName = new Map((files.value || []).map((f) => [f.name, f]));
+	submitFiles.value = selectedFileNames.value
+		.map((n) => byName.get(n))
+		.filter(Boolean)
+		.map((f) => ({ name: f.name, file_name: f.file_name }));
+	submitFolder.value = null;
+	submitOpen.value = true;
+}
+function openSubmitFolder(f) {
+	submitFiles.value = [];
+	submitFolder.value = { name: f.name, label: shownLeaf(f) };
+	submitOpen.value = true;
+}
+async function onSubmittedToClient() {
+	clearFileSelection();
+	await loadFiles();
 }
 
 function subfolderLabel(folderPath) {
@@ -846,7 +836,7 @@ const loadFiles = async () => {
 				openShareModal(deepLinkFolder);
 			}
 		} else {
-			folderFilter.value = "";
+			if (!folders.value.some((f) => f.name === folderFilter.value)) folderFilter.value = "";
 			if (!targetFolder.value || !folders.value.some((f) => f.name === targetFolder.value)) {
 				targetFolder.value = folders.value[0]?.name || "";
 			}
@@ -893,12 +883,11 @@ watch([project, targetFolder, folderFilter], () => {
 });
 watch(project, () => clearFileSelection());
 
-// Reset main-tree expansion when switching projects, then auto-open the new project root so
-// top-level subfolders are immediately visible (a fully-collapsed root would feel empty).
-watch(projectRootPath, (root) => {
-	const next = new Set();
-	if (root) next.add(`__root__:${root}`);
-	folderTreeExpanded.value = next;
+// Opening another folder leaves "Show all files" and drops a selection the user can no longer see.
+watch(folderFilter, (newPath, oldPath) => {
+	if (newPath === oldPath) return;
+	showAllFiles.value = false;
+	clearFileSelection();
 });
 
 watch(folderFilter, async (newPath, oldPath) => {
@@ -1826,7 +1815,7 @@ async function deleteProjectFile(f) {
 							Project folder &amp; subfolders
 						</h2>
 						<p class="mt-1 text-xs text-[color:var(--portal-muted)]">
-							Pick the project root for all files, or a specific subfolder. Share links and renames match your selection.
+							Open a folder to see what is inside it; use Back or the path to go up. Share links and renames match your selection.
 						</p>
 					</div>
 					<div class="inline-flex rounded-xl border border-[color:var(--portal-border)] p-0.5" style="background: var(--portal-bg-dim);">
@@ -1846,20 +1835,57 @@ async function deleteProjectFile(f) {
 							:style="folderView === 'list' ? 'background: linear-gradient(135deg, var(--portal-accent) 0%, var(--portal-accent-strong) 100%);' : ''"
 							@click="folderView = 'list'"
 						>
-							<FeatherIcon name="list" class="h-3 w-3" /> Tree
+							<FeatherIcon name="list" class="h-3 w-3" /> List
 						</button>
 					</div>
 				</div>
-				<div v-if="folderView === 'grid'" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+				<!-- Back + path (Explorer-style) -->
+				<div class="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-2 py-1.5 text-xs">
+					<button
+						type="button"
+						class="flex items-center gap-1 rounded-lg px-2 py-1 font-medium text-[color:var(--portal-text)] transition hover:bg-white/5 disabled:opacity-40"
+						:disabled="atRootFolder"
+						title="Up one folder"
+						@click="goUpFolder"
+					>
+						<FeatherIcon name="chevron-left" class="h-3.5 w-3.5" /> Back
+					</button>
+					<span class="h-4 w-px bg-[color:var(--portal-border)]"></span>
+					<nav class="flex min-w-0 flex-wrap items-center gap-1" aria-label="Folder path">
+						<template v-for="(c, i) in folderCrumbs" :key="`crumb-${c.name || 'root'}`">
+							<FeatherIcon v-if="i > 0" name="chevron-right" class="h-3 w-3 text-[color:var(--portal-subtle)]" />
+							<button
+								type="button"
+								class="truncate rounded px-1 py-0.5 transition hover:underline"
+								:class="i === folderCrumbs.length - 1 ? 'font-semibold text-[color:var(--portal-text)]' : 'text-[color:var(--portal-muted)]'"
+								@click="openFolder(c.name)"
+							>{{ c.label }}</button>
+						</template>
+					</nav>
+					<button
+						v-if="canShareFolder && !atRootFolder"
+						type="button"
+						class="ml-auto flex items-center gap-1 rounded-lg px-2 py-1 font-semibold text-[color:var(--portal-accent-strong)] transition hover:bg-[color:var(--portal-accent-soft)]"
+						title="Manage who can access this folder"
+						@click="openShareModal(currentFolder)"
+					>
+						<FeatherIcon name="share-2" class="h-3 w-3" /> Share this folder
+					</button>
+				</div>
+				<p
+					v-if="!childFolders.length && !currentFolderFileCount"
+					class="rounded-xl border border-dashed border-[color:var(--portal-border)] px-4 py-6 text-center text-sm text-[color:var(--portal-muted)]"
+				>
+					This folder is empty.
+				</p>
+				<div v-if="folderView === 'grid' && childFolders.length" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 					<div
-						v-for="f in folderTreeView"
-						:key="`nav-grid-${f.expandKey || f.name}`"
+						v-for="f in childFolders"
+						:key="`nav-grid-${f.name}`"
 						class="flex flex-col overflow-hidden rounded-xl border text-sm transition"
 						style="background:var(--portal-surface)"
 						:class="[
-							folderFilter === f.name
-								? 'portal-selected-ring bg-[color:var(--portal-accent-soft)]'
-								: 'border-[color:var(--portal-border)] hover:border-[color:var(--portal-border-strong)] hover:shadow-md',
+							'border-[color:var(--portal-border)] hover:border-[color:var(--portal-border-strong)] hover:shadow-md',
 							dropTargetFolder === f.name ? 'ring-2 ring-[color:var(--portal-accent)] bg-[color:var(--portal-accent-soft)]' : '',
 						]"
 						:data-folder="f.name"
@@ -1867,44 +1893,40 @@ async function deleteProjectFile(f) {
 						@dragleave="onFolderDragLeave($event, f)"
 						@drop.prevent="onFolderDrop($event, f)"
 					>
-						<div class="flex items-stretch">
-							<button
-								v-if="f.hasChildren"
-								type="button"
-								class="flex w-9 shrink-0 items-center justify-center text-[color:var(--portal-muted)] transition hover:bg-[color:var(--portal-bg)] hover:text-[color:var(--portal-text)]"
-								:title="f.expanded ? 'Collapse' : 'Expand'"
-								@click.stop="toggleFolderTreeNode(f.expandKey)"
-							>
+						<button
+							type="button"
+							class="flex-1 px-3 py-3 text-left transition"
+							:title="'Open ' + shownLeaf(f)"
+							@click="openFolder(f.name)"
+						>
+							<p class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
 								<FeatherIcon
-									:name="f.expanded ? 'chevron-down' : 'chevron-right'"
-									class="h-4 w-4"
+									:name="f.fileCount > 0 || f.folderCount > 0 ? 'folder' : 'folder-minus'"
+									class="h-4 w-4 shrink-0 text-[color:var(--portal-muted)]"
 								/>
-							</button>
-							<span v-else class="w-9 shrink-0"></span>
-							<button
-								type="button"
-								class="flex-1 px-1 py-3 text-left transition"
-								:style="{ paddingLeft: `${Math.max(0, (f.depth || 0) - 1) * 0.6}rem` }"
-								@click="folderFilter = f.name"
-							>
-								<p class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
-									<FeatherIcon
-										:name="f.isRoot ? 'folder' : (f.fileCount > 0 ? 'folder' : 'folder-minus')"
-										class="h-4 w-4 shrink-0"
-										:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
-									/>
-									<span class="truncate">{{ shownLeaf(f) }}</span>
-									<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
-								</p>
-								<p class="mt-1 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</p>
-							</button>
-						</div>
+								<span class="truncate">{{ shownLeaf(f) }}</span>
+								<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
+							</p>
+							<p class="mt-1 text-xs text-[color:var(--portal-muted)]">
+								<template v-if="f.folderCount">{{ f.folderCount }} {{ f.folderCount === 1 ? "folder" : "folders" }} · </template>{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}
+							</p>
+						</button>
 						<div
 							v-if="!isCustomerPortalUser"
 							class="flex flex-wrap justify-end gap-1 border-t border-[color:var(--portal-border)] px-2 py-1.5" style="background:var(--portal-surface-alt)"
 						>
 							<button
-								v-if="canManageProject && !f.isRoot && !isClientFolderLabel(f.label)"
+								v-if="canManageProject && !isCustomerPortalUser && !f.isRoot && !isInsideClientFolder(f.name)"
+								type="button"
+								class="flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-white/5"
+								style="color:var(--portal-muted)"
+								title="Submit this folder to the client (one numbered submission)"
+								@click.stop="openSubmitFolder(f)"
+							>
+								<FeatherIcon name="send" class="h-3 w-3" /> Submit
+							</button>
+							<button
+								v-if="canManageProject && !isClientFolderLabel(f.label)"
 								type="button"
 								class="rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50"
 								style="color:var(--portal-muted)"
@@ -1928,53 +1950,48 @@ async function deleteProjectFile(f) {
 						</div>
 					</div>
 				</div>
-				<div v-else class="overflow-hidden rounded-xl border border-[color:var(--portal-border)]">
+				<div v-else-if="childFolders.length" class="overflow-hidden rounded-xl border border-[color:var(--portal-border)]">
 					<div
-						v-for="f in folderTreeView"
-						:key="`nav-list-${f.expandKey || f.name}`"
-						class="flex w-full items-stretch border-b border-[color:var(--portal-border)] text-sm last:border-b-0 transition"
-						:class="folderFilter === f.name ? 'bg-[color:var(--portal-accent-soft)]' : 'hover:bg-white/5'"
+						v-for="f in childFolders"
+						:key="`nav-list-${f.name}`"
+						class="flex w-full items-stretch border-b border-[color:var(--portal-border)] text-sm last:border-b-0 transition hover:bg-white/5"
+						:class="dropTargetFolder === f.name ? 'bg-[color:var(--portal-accent-soft)]' : ''"
+						:data-folder="f.name"
+						@dragover.prevent="onFolderDragOver($event, f)"
+						@dragleave="onFolderDragLeave($event, f)"
+						@drop.prevent="onFolderDrop($event, f)"
 					>
-						<div
-							class="flex shrink-0 items-center"
-							:style="{ paddingLeft: `${0.5 + (f.depth || 0) * 1.1}rem` }"
-						>
-							<button
-								v-if="f.hasChildren"
-								type="button"
-								class="flex h-7 w-7 items-center justify-center rounded text-[color:var(--portal-muted)] transition hover:bg-white/5 hover:text-[color:var(--portal-text)]"
-								:title="f.expanded ? 'Collapse' : 'Expand'"
-								@click.stop="toggleFolderTreeNode(f.expandKey)"
-							>
-								<FeatherIcon
-									:name="f.expanded ? 'chevron-down' : 'chevron-right'"
-									class="h-3.5 w-3.5"
-								/>
-							</button>
-							<span v-else class="h-7 w-7"></span>
-						</div>
 						<button
 							type="button"
-							class="min-w-0 flex-1 px-1 py-2.5 text-left"
-							@click="folderFilter = f.name"
+							class="min-w-0 flex-1 px-3 py-2.5 text-left"
+							:title="'Open ' + shownLeaf(f)"
+							@click="openFolder(f.name)"
 						>
 							<span class="flex items-center gap-1.5 truncate font-medium text-[color:var(--portal-text)]">
-								<FeatherIcon
-									name="folder"
-									class="h-3.5 w-3.5 shrink-0"
-									:class="folderFilter === f.name ? 'text-[color:var(--portal-accent)]' : 'text-[color:var(--portal-muted)]'"
-								/>
+								<FeatherIcon name="folder" class="h-3.5 w-3.5 shrink-0 text-[color:var(--portal-muted)]" />
 								<span class="truncate">{{ shownLeaf(f) }}</span>
 								<span v-if="f.client" class="portal-pill shrink-0" :class="clientFolderPillClass(f.client.tone)">{{ f.client.text }}</span>
 							</span>
-							<span class="ml-5 text-xs text-[color:var(--portal-muted)]">{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}</span>
+							<span class="ml-5 text-xs text-[color:var(--portal-muted)]">
+								<template v-if="f.folderCount">{{ f.folderCount }} {{ f.folderCount === 1 ? "folder" : "folders" }} · </template>{{ f.fileCount }} {{ f.fileCount === 1 ? "file" : "files" }}
+							</span>
 						</button>
 						<div
 							v-if="canShareFolder && !isCustomerPortalUser"
 							class="flex shrink-0 items-stretch divide-x divide-[color:var(--portal-border)] border-l border-[color:var(--portal-border)]"
 						>
 							<button
-								v-if="canManageProject && !f.isRoot && !isClientFolderLabel(f.label)"
+								v-if="canManageProject && !isCustomerPortalUser && !f.isRoot && !isInsideClientFolder(f.name)"
+								type="button"
+								class="flex items-center gap-1 px-2 py-2 text-xs font-medium transition hover:bg-white/5"
+								style="color:var(--portal-muted)"
+								title="Submit this folder to the client (one numbered submission)"
+								@click.stop="openSubmitFolder(f)"
+							>
+								<FeatherIcon name="send" class="h-3 w-3" /> Submit
+							</button>
+							<button
+								v-if="canManageProject && !isClientFolderLabel(f.label)"
 								type="button"
 								class="px-2 py-2 text-xs font-medium transition hover:bg-white/5 disabled:opacity-50"
 								style="color:var(--portal-muted)"
@@ -2004,33 +2021,27 @@ async function deleteProjectFile(f) {
 					</div>
 				</div>
 				<div
-					v-if="folderFilter"
+					v-if="showAllFiles"
 					class="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-xs"
 				>
-					<FeatherIcon name="filter" class="h-3.5 w-3.5 text-[color:var(--portal-accent)]" />
-					<span class="text-[color:var(--portal-muted)]">Showing files in:</span>
-					<span class="flex flex-wrap items-center gap-1 font-medium text-[color:var(--portal-text)]">
-						<template v-for="(seg, i) in (shownFolderLabelByName[folderFilter] || folderFilter).split('/')" :key="`crumb-${i}`">
-							<span v-if="i > 0" class="text-[color:var(--portal-subtle)]">/</span>
-							<span>{{ seg }}</span>
-						</template>
-					</span>
+					<FeatherIcon name="layers" class="h-3.5 w-3.5 text-[color:var(--portal-accent)]" />
+					<span class="font-medium text-[color:var(--portal-text)]">Showing all files of the project</span>
 					<button
 						type="button"
 						class="ml-auto flex items-center gap-1 rounded-lg px-2 py-1 text-[color:var(--portal-muted)] transition hover:bg-white/5 hover:text-[color:var(--portal-text)]"
-						@click="folderFilter = ''"
+						@click="showAllFiles = false"
 					>
-						<FeatherIcon name="x" class="h-3 w-3" /> Clear filter
+						<FeatherIcon name="x" class="h-3 w-3" /> Back to folder
 					</button>
 				</div>
 				<div class="mt-3 flex flex-wrap gap-2">
-					<button class="portal-btn portal-btn-ghost text-xs" @click="folderFilter = ''">
+					<button class="portal-btn portal-btn-ghost text-xs" @click="showAllFiles = true">
 						<FeatherIcon name="layers" class="h-3.5 w-3.5" />
 						Show all files
 					</button>
 					<button
 						class="portal-btn portal-btn-ghost text-xs"
-						@click="targetFolder = folderFilter || targetFolder"
+						@click="targetFolder = atRootFolder ? targetFolder : currentFolder"
 					>
 						<FeatherIcon name="upload" class="h-3.5 w-3.5" />
 						Use this folder for upload
@@ -2092,8 +2103,7 @@ async function deleteProjectFile(f) {
 					<div>
 						<label class="mb-1 block text-xs font-medium uppercase text-[color:var(--portal-muted)]">Subfolder filter</label>
 						<select v-model="folderFilter" class="w-full rounded-xl border border-[color:var(--portal-border)] px-3 py-2 text-sm" style="background:var(--portal-bg);color:var(--portal-text)">
-							<option value="">All locations</option>
-							<option v-if="projectRootPath" :value="projectRootPath">Project folder (all files)</option>
+							<option value="">Project folder (root)</option>
 							<option v-for="f in folders" :key="`filter-${f.name}`" :value="f.name">
 								{{ folderOptionLabel(f.label) }}
 							</option>
@@ -2348,6 +2358,15 @@ async function deleteProjectFile(f) {
 						<button class="portal-btn portal-btn-primary text-xs" @click="downloadSelectedZip">
 							<FeatherIcon name="download" class="h-3.5 w-3.5" />
 							Download as ZIP
+						</button>
+						<button
+							v-if="!isCustomerPortalUser && canManageProject"
+							class="portal-btn portal-btn-ghost text-xs"
+							title="Copy the selected files into one numbered submission in the client's Incoming"
+							@click="openSubmitSelected"
+						>
+							<FeatherIcon name="send" class="h-3.5 w-3.5" />
+							Submit to client
 						</button>
 						<button class="portal-btn portal-btn-ghost text-xs" @click="clearFileSelection">Clear</button>
 					</div>
@@ -2938,5 +2957,14 @@ async function deleteProjectFile(f) {
 				</div>
 			</div>
 		</Teleport>
+
+		<SubmitToClientModal
+			:open="submitOpen"
+			:project="project"
+			:files="submitFiles"
+			:folder="submitFolder"
+			@close="submitOpen = false"
+			@submitted="onSubmittedToClient"
+		/>
 	</div>
 </template>

@@ -27,6 +27,7 @@ const Profile       = () => import("@/pages/Profile.vue");
 const Admin         = () => import("@/pages/Admin.vue");
 const ComingSoon    = () => import("@/pages/ComingSoon.vue");
 const AIChat        = () => import("@/pages/AIChat.vue");
+const ClientTransmittals = () => import("@/pages/ClientTransmittals.vue");
 
 const routes = [
 	{
@@ -38,6 +39,13 @@ const routes = [
 		path: "/shared-folder",
 		name: "SharedFolder",
 		component: SharedFolder,
+	},
+	// The client contact's landing page: Incoming / Outgoing only, Arabic first.
+	// Outside Layout (no sidebar). Data is scoped by the server like everywhere else.
+	{
+		path: "/client",
+		name: "ClientTransmittals",
+		component: ClientTransmittals,
 	},
 	{
 		path: "/",
@@ -129,6 +137,17 @@ router.beforeEach(async (to) => {
 		return "/dashboard";
 	}
 
+	// A client contact lands on the clean client page instead of Dashboard / Projects.
+	// Other pages still open by URL exactly as before (the server decides access).
+	if (isAuthenticated && ["/", "/dashboard", "/projects"].includes(to.path)) {
+		try {
+			const caps = await call({ method: "portal_app.api.projects.get_capabilities" });
+			if (caps?.is_customer_portal_user) return "/client";
+		} catch {
+			/* fall through to the normal guards */
+		}
+	}
+
 	// Internal working tools. The sidebar hides them from client contacts and the
 	// APIs refuse them (helper.assert_not_customer_only); send a typed URL home.
 	if (to.meta.staffOnly && isAuthenticated) {
@@ -177,7 +196,8 @@ router.beforeEach(async (to) => {
 				!caps?.can_create_users &&
 				!caps?.can_run_demo_seed &&
 				!caps?.can_edit_folder_template &&
-				!caps?.can_reset_passwords
+				!caps?.can_reset_passwords &&
+				!caps?.can_manage_submission_types
 			) {
 				return "/dashboard";
 			}

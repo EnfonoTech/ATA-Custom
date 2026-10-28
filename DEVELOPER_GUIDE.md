@@ -385,6 +385,7 @@ Custom fields are created with `create_custom_fields(..., update=True)`.
 | `remove_client_project_docshares` | For every User that holds the Client Customer role and is a client contact (`helper.is_customer_only`, so staff are skipped), deletes every DocShare on a **Project** held by that user, Desk shares included. File DocShares are kept. | Added in the October 2026 bug-fix release. Older folder/file shares and team saves gave recipients a read share on the Project, which opened the whole Project record to a client. Shared files do not need it. Safe to run twice. |
 | `setup_portal_role_model` | Carries today's staff over to the five roles (PR #22). **1.** Does nothing on a site without the Department DocType. **2.** Calls `install.ensure_department_portal_custom_fields`, `helper.ensure_portal_customer_role` and `helper.ensure_portal_roles`, because patches run before `after_migrate`, which normally does that. **3.** Finds every enabled User who holds Projects Manager, is not Administrator and does **not** hold System Manager. **4.** For every portal team (a Department directly under "All Departments" with a Portal Office) it adds a `portal_department_admins` row for each of those managers who is not there yet, then saves the Department. The Department hook (3.3) gives them the Department Admin role. **5.** On a site with no teams yet, it gives those managers the Department Admin role directly. **6.** For everyone already named in `Department.portal_team_lead` it runs `helper.sync_portal_role_markers`, so they get the Team Lead role. | Each Projects Manager becomes a **Department Admin of every team**. That is what keeps what they could see and manage before. A Super Admin narrows it from the Org Chart afterwards. The Projects Manager role is not removed from anybody. Idempotent: rows and roles are added only when missing, so a second run changes nothing. **Do not re-run it after a Super Admin has narrowed someone's departments:** it puts that person back on every team. |
 | `create_client_incoming_outgoing_folders` | Gives every existing project the client folder's `Incoming` and `Outgoing` subfolders, and files what is loose in the client folder (PR #22). For each folder row directly under the Attachments root that is named after an existing Project **and already has at least one subfolder**, it calls `files.setup_client_folders(project)` (6.4): it makes the client folder, `Incoming` and `Outgoing` if missing, then moves each file that sits directly in the client folder: a file owned by a client contact goes to `Outgoing`, every other file (what ATA submitted) goes to `Incoming`. | A project whose folder tree was never built is **skipped**. It gets the whole template, both folders included, the first time its folders are built (9.2). Making just this branch for it would make the portal think its tree already exists. Idempotent: a second run finds nothing loose. A project whose folder is spelled `06 - CLIENT SUBMITTAL` is found by its normalised name (5.8), and the two subfolders are made inside it. |
+| `seed_portal_submission_types` | Inserts the default Portal Submission Types (`Concept Submittal`, `Technical Submittal`) that are missing (`install.seed_default_submission_types`). Insert-only: never edits or re-enables a row. | Batch B. Fresh sites get the same rows from `after_install`; it is **not** in `after_migrate`, so a type an admin deleted in Desk stays deleted. Safe to run twice. |
 
 Frappe records each patch in **Patch Log**, so it runs at most once per site. On a fresh `install-app`, every existing patch is marked as done without running; only patches added later run on that site. (So on a new site `backfill_portal_user_customer` and the three role and folder patches never run; `after_install` and `after_migrate` do the setup work, and the default folder template already holds `Incoming` and `Outgoing`.) To add a patch: create `portal_app/patches/<name>.py` with an `execute()` function, add its dotted path to the end of the right section of `patches.txt` (`[pre_model_sync]` only when the patch must run before the new schema exists, like the role rename), and make it safe to run on any site (check before you change).
 
@@ -599,6 +600,19 @@ Portal Demo Seed Item (child): `record_doctype`, `record_name`, `record_label`, 
 - On every save of the Department, `helper.sync_department_role_markers` (3.3) gives or takes away the Department Admin role, so Desk edits and portal edits end up the same.
 - One login can be a Department Admin of several Departments, and one Department can have several Department Admins.
 
+### 4.11 Portal Submission Type
+
+**Purpose:** the kinds of submission ATA sends to a client. The type goes into the submission folder name (`NN_YYYY-MM-DD_<Type>[ - <description>]`, 5.8).
+
+| Field | Type | Notes |
+|---|---|---|
+| `type_name` | Data (60), required, unique, in list view | Also the record name (`autoname: field:type_name`, no rename). |
+| `enabled` | Check, default 1 | Disabled types are not offered and are refused by `submit_to_client`. |
+
+- Controller (`portal_submission_type.py`): trims and collapses spaces (`files._clean_name_part`, also in `before_naming` so the name matches); **refuses** a name with `/ \ : * ? " < > |` or control characters (it is not stripped, so a stored type is always safe in a file name); refuses an empty name, more than 60 characters, and a case-insensitive duplicate.
+- Desk permissions: System Manager full, Department Admin read/write/create, Projects User read. The portal endpoints (6.16) do their own gate and write with `ignore_permissions`.
+- Seeded by the patch `seed_portal_submission_types` and by `after_install` (3.4). In the portal, Super Admins and Department Admins add, disable and re-enable types on the Admin page; nothing deletes them there.
+
 ---
 
 ## 5. Access and security model
@@ -800,7 +814,7 @@ The client folder is the one place where ATA and a client exchange files. Since 
 
 | Folder | Holds | Who writes to it |
 |---|---|---|
-| `06-CLIENT SUBMITTAL/Incoming` | What ATA sends **to** the client. | Staff, with "Submit to Client" (`submit_to_client_submittal`). |
+| `06-CLIENT SUBMITTAL/Incoming` | What ATA sends **to** the client: one numbered submission folder per send. | Staff, with "Submit to Client" (`submissions.submit_to_client`; the older `submit_to_client_submittal` still works). |
 | `06-CLIENT SUBMITTAL/Outgoing` | What the client sends **to** ATA. | The client, and only here. |
 
 The client reads **both**. Everything else in the project stays internal.
@@ -812,7 +826,8 @@ The client reads **both**. Everything else in the project stays internal.
   - `upload_project_file`, for a client (`is_customer_only`), first calls `_resolve_client_upload_target(project, hint)`. An empty hint, or the marker, becomes the project's real `Outgoing` folder (after `assert_project_access`). `_ensure_client_folders` creates the folders if the project lacks them. Any other hint is passed through unchanged, to be judged next.
   - `_assert_upload_allowed(project, target_folder)` is the one gate. For an internal user it is `assert_customer_portal_can_upload` (project access). For a client it checks project access, then that the target is `Outgoing` or a folder inside it (`_in_client_outgoing`). Anything else is refused: "You can upload only into the 06-CLIENT SUBMITTAL/Outgoing folder." It is called by `upload_project_file`, `upload_project_files_zip` and `prepare_folder_upload`.
   - A client's upload is always private, is never sent to an external webhook, and gets the Desk tag "Client Upload" (6.4).
-- **What ATA sends: `submit_to_client_submittal`.** It copies the file into `Incoming` (`_ensure_client_folders(project)["incoming"]`, created if the project predates it) as `NN_<today>_<original name>`. NN is the number of files directly in `Incoming` + 1, so a client's uploads in `Outgoing` no longer change it.
+- **What ATA sends: `submissions.submit_to_client` (batch B).** It creates **one** submission folder in `Incoming` named `NN_<today>_<Type>[ - <description>]` and copies the chosen files, or one chosen folder, into it. Loose files are renamed `<stem><ext>`, `<stem>-2<ext>` … in the order picked; a folder keeps its sub-structure and original file names. Details in 6.16.
+- **Numbering: `files._next_submission_number(folder)`, the only place the rule lives.** `max(number of direct children, highest leading NN_) + 1`, where children are subfolders **and** loose files (so legacy `NN_date_name` files stay in the sequence) and a deleted submission's number is never reused. Both submit endpoints first lock the `Incoming` File row (`files._lock_folder`, `SELECT … FOR UPDATE` until the request commits), so two simultaneous submits get consecutive numbers; `submit_to_client` also retries the next number (up to 5 times) if the folder name already exists or the insert hits the File primary key. The legacy `submit_to_client_submittal` keeps its `NN_<today>_<original name>` file name but uses the same lock and counter.
 - **`_ensure_client_folders(project)`** makes the project root, the client folder, `Incoming` and `Outgoing` if they are missing, and returns `{root, incoming, outgoing}` as File names. It is idempotent. It uses `_ensure_folder`, which also matches a lookalike sibling by normalised name, so a project with `06 - CLIENT SUBMITTAL` gets its `Incoming` and `Outgoing` inside that folder.
 - **`setup_client_folders(project)`** is `_ensure_client_folders` plus a clean-up. It files every file that sits directly in the client folder: a file owned by a client contact (`_client_owners`) goes to `Outgoing`, every other file to `Incoming`. It returns how many went where. It is not an endpoint. The migration patch `create_client_incoming_outgoing_folders` calls it for every project that already has a folder tree (3.4).
 - **`_client_direction(project, folder)`** says `incoming`, `outgoing` or nothing for a folder. `list_project_files` adds `client_direction` to every file that sits in or below `Incoming` or `Outgoing` (other files have no such key). The screens turn it into a pill (8.7).
@@ -1085,7 +1100,7 @@ Blocked extensions (`_BLOCKED_UPLOAD_EXTENSIONS`): `.html .htm .xhtml .shtml .xh
 |---|---|---|
 | `download_project_file(file_name)` — SPA sends GET | Project access + client folder rule; Contracts needs manage rights | Streams one file inline (5.7). |
 | `download_files_zip(project, file_names \| folder_path)` — SPA sends POST form data | Project access; clients only readable files; contract files only with manage rights | In-memory ZIP `<project>-files.zip`, max 500 files / 500 MB. Files the caller may not read, contract files named by a caller without manage rights, and files that belong to another project are skipped silently. A file whose content cannot be read is skipped and logged ("Portal: zip include ..."). With `folder_path`, at most 1000 file rows are read before the 500-file cap. If the real bytes pass 500 MB (because `file_size` in the database was too low), the remaining files are left out with no message, and each is logged as "Portal: zip include …". Check the Error Log when a user reports a short ZIP. |
-| `submit_to_client_submittal(file_name, project)` | Manage rights, not a client; never a contract file ("Contract files cannot be submitted to the client.") | Copies a file into `06-CLIENT SUBMITTAL/Incoming` (the folder is created if the project predates it) as `NN_<today>_<original name>` (private). The File Browser shows **Submit** only on projects in `manageable_project_names`, and never to client contacts. Makes it visible to the project's client contacts. NN = the number of files directly in `Incoming` + 1, so a client's uploads no longer change it. NN is still not a submission counter: it can repeat after a file there is deleted. |
+| `submit_to_client_submittal(file_name, project)` | Manage rights, not a client; never a contract file ("Contract files cannot be submitted to the client.") | Copies a file into `06-CLIENT SUBMITTAL/Incoming` (the folder is created if the project predates it) as `NN_<today>_<original name>` (private). The File Browser shows **Submit** only on projects in `manageable_project_names`, and never to client contacts. Makes it visible to the project's client contacts. NN comes from `_next_submission_number` under `_lock_folder`, shared with `submissions.submit_to_client` (5.8). No screen calls it any more; kept for open tabs and scripts. |
 
 **Sharing**
 
@@ -1364,6 +1379,24 @@ Contracts are private Files attached to the Project, stored under `Home/Contract
 
 ---
 
+### 6.16 `portal_app.api.submissions` — submission types, Submit to client, the client page
+
+Reuses the access helpers of `files.py` / `helper.py` and always calls them as `files.<name>` (tests patch them there). `files` does not import this module.
+
+| Endpoint | Who | What it does |
+|---|---|---|
+| `list_submission_types(include_disabled=0)` GET | Portal staff (`assert_portal_user`, `assert_not_customer_only`) | `[{name, type_name, enabled}]` sorted by name. Disabled rows only with `include_disabled` **and** the admin tier. |
+| `add_submission_type(type_name)` POST | Super Admin, Department Admin (`_can_manage_submission_types`) | Inserts a type; re-adding a disabled one (any letter case) enables it; an enabled duplicate is refused. |
+| `set_submission_type_enabled(type_name, enabled)` POST | Same | Enables / disables. Unknown type → "Unknown submission type." |
+| `submit_to_client(project, submission_type, description=None, file_names=None, folder_path=None)` POST | Manage rights, not a client | Exactly one of `file_names` (JSON list) or `folder_path`. Files must be attached to this project and not contracts; a folder must be strictly inside the project root and outside the client folder. All checks (incl. the 500-file / 500 MB caps and the 255-character path limit) run before the first write and before the lock. Description is cleaned (`files._clean_name_part`) and trimmed so the folder name is ≤ 120 characters. Returns `{folder, folder_name, number, files}`. Every copy adds an "Attachment" line on the Project timeline (3.6), so a 200-file folder adds 200 lines. |
+| `list_client_projects()` GET | Portal users | `name`, `project_name` (and `portal_project_code`) of `get_allowed_project_names()`. |
+| `list_client_transmittals(project)` GET, read-only | `assert_portal_user` + `assert_project_access` | Incoming / Outgoing as numbered submissions (oldest = 1, `is_latest` on the newest): each direct subfolder is one submission with every file below it (`relative_path`), each loose file is one too. Never creates folders (GET is rolled back). Returns no `owner` and no `file_url`; `can_upload` is true for a client contact. |
+
+Notes on `submit_to_client`:
+
+- **Folder copies keep the exact names.** The sub-folders of a submitted folder are rebuilt with `_ensure_exact_folder_path`, which matches each segment by its exact `file_name`. It does not use `files._ensure_folder_path`: that helper's normalised-label fallback (`_normalize_folder_label`) would merge siblings such as `Sub - A` and `sub-A` into one folder.
+- **The lock is held for the whole copy.** The `FOR UPDATE` lock on the project's `Incoming` folder is taken before numbering and kept until the request ends, so it covers copying up to 500 files / 500 MB synchronously (plus one timeline line per file). A second submit to the **same project** (including the legacy `files.submit_to_client_submittal`) waits for it, up to `innodb_lock_wait_timeout`. A very large submit can also hit the web request timeout: the transaction rolls back, but the bytes already written to `private/files` stay on disk as orphans. If this becomes a problem, use a lower cap for folder submits or move the copy to a background job (`frappe.enqueue(queue="long")`).
+
 ## 7. Emails
 
 ### 7.1 Which emails the portal sends
@@ -1421,7 +1454,7 @@ What this means for you:
 - Icons: frappe-ui `FeatherIcon` (the Feather icon set) everywhere. `unplugin-icons` (Lucide) is set up in `vite.config.mjs` but not used yet. `lodash` is listed in `package.json` but not imported anywhere.
 - Vite 6. Node **22** (`frontend/.nvmrc`). Yarn 1.22.
 - No state library. Shared state is passed with Vue `provide` / `inject` from `Layout.vue`.
-- **No translations.** Screen text is hard-coded English in the `.vue` files. There is no `__()` / i18n layer and no right-to-left layout. Server messages (`frappe.throw(_(...))`) follow the user's Language (Profile → Language), so a user who sets Arabic sees English screens with translated error messages where Frappe has translations. Adding Arabic means adding an i18n layer and RTL styles to the SPA.
+- **No translations — one exception.** Screen text is hard-coded English in the `.vue` files. There is no `__()` / i18n layer and no right-to-left layout, except the client landing page `/client` (`ClientTransmittals.vue`): Arabic by default (RTL), switchable to English, strings in `src/i18n/clientPortal.js`, choice kept in `localStorage["portal_client_lang"]`, `dir`/`lang` set on the page root only, dates Gregorian with Latin digits (`ar-u-ca-gregory-nu-latn`). Server messages (`frappe.throw(_(...))`) follow the user's Language (Profile → Language), so a user who sets Arabic sees English screens with translated error messages where Frappe has translations. Adding Arabic means adding an i18n layer and RTL styles to the SPA.
 
 ### 8.2 Folder structure (`frontend/`)
 
@@ -1456,6 +1489,7 @@ The router uses `createWebHistory("/portal-app/")`, so `/projects` in the code m
 |---|---|---|---|
 | `/login` | `Login.vue` | public | — |
 | `/shared-folder?token=` | `SharedFolder.vue` | public | — |
+| `/client` | `ClientTransmittals.vue` | authenticated, outside `Layout` (no sidebar) | Client contacts land here: the guard sends a client opening `/`, `/dashboard` or `/projects` to `/client`. Staff may open it as a preview. |
 | `/` | redirect → `/dashboard` | | |
 | `/dashboard` | `Dashboard.vue` | `requiresManager` | Staff |
 | `/org-chart` | `OrgChartPage.vue` | `requiresOrgChart` | Super Admin, Department Admin, Team Lead |

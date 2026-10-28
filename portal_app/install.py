@@ -277,6 +277,24 @@ def seed_default_portal_file_types():
 		doc.insert(ignore_permissions=True)
 
 
+DEFAULT_SUBMISSION_TYPES = ["Concept Submittal", "Technical Submittal"]
+
+
+def seed_default_submission_types():
+	"""Seed the default submission types. Insert-only: never edits (or re-enables) a row.
+
+	Run from after_install and from a patch, never from after_migrate, so a default an
+	admin deleted in Desk does not come back on every migrate."""
+	if not frappe.db.exists("DocType", "Portal Submission Type"):
+		return
+	for type_name in DEFAULT_SUBMISSION_TYPES:
+		if frappe.db.exists("Portal Submission Type", type_name):
+			continue
+		frappe.get_doc(
+			{"doctype": "Portal Submission Type", "type_name": type_name, "enabled": 1}
+		).insert(ignore_permissions=True)
+
+
 def ensure_daily_task_custom_fields():
 	"""Event fields backing the Daily Task board.
 
@@ -327,6 +345,7 @@ def after_install():
 	ensure_daily_task_custom_fields()
 	ensure_portal_file_type_field()
 	seed_default_portal_file_types()
+	seed_default_submission_types()
 
 
 def after_migrate():

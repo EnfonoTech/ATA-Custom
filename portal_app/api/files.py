@@ -3105,6 +3105,41 @@ def download_project_file(file_name):
 	frappe.local.response.display_content_as = "inline"
 
 
+# Characters that may never appear in a submission folder / file name segment.
+SUBMISSION_NAME_ILLEGAL = re.compile(r'[\/\\:*?"<>|\x00-\x1f]')
+
+
+def _clean_name_part(text, max_len=100) -> str:
+	"""Make free text (a description, a type name) safe as ONE name segment: illegal
+	characters become spaces, ".." sequences go, whitespace collapses, and spaces / dots
+	are stripped at both ends. Never longer than max_len."""
+	s = SUBMISSION_NAME_ILLEGAL.sub(" ", cstr(text))
+	while ".." in s:
+		s = s.replace("..", "")
+	s = s.strip(" .")[: max(cint(max_len), 0)]
+	return re.sub(r"\s+", " ", s).strip(" .")
+
+
+def _lock_folder(folder_name: str) -> None:
+	"""SELECT ... FOR UPDATE on the folder's File row, held until the request commits, so
+	two simultaneous submissions into it are numbered one after the other."""
+	frappe.db.get_value("File", folder_name, "name", for_update=True)
+
+
+def _next_submission_number(target_folder: str) -> int:
+	"""The next submission number (NN) in a folder. The only place this rule lives.
+
+	Counts the direct children (submission folders and legacy loose files) and also
+	looks at the highest leading NN_, so a deleted submission's number is never reused."""
+	names = frappe.get_all("File", filters={"folder": target_folder}, pluck="file_name")
+	highest = 0
+	for n in names:
+		m = re.match(r"^(\d+)_", cstr(n))
+		if m:
+			highest = max(highest, cint(m.group(1)))
+	return max(len(names), highest) + 1
+
+
 @frappe.whitelist()
 def submit_to_client_submittal(file_name, project):
 	"""Copy a project file into 06-CLIENT SUBMITTAL/Incoming, renamed with an auto serial
@@ -3137,7 +3172,9 @@ def submit_to_client_submittal(file_name, project):
 	# (created on the spot if this project predates it).
 	target_folder = _ensure_client_folders(project)["incoming"]
 
-	serial = frappe.db.count("File", {"folder": target_folder, "is_folder": 0}) + 1
+	# Same lock and counter as api.submissions.submit_to_client: one sequence per folder.
+	_lock_folder(target_folder)
+	serial = _next_submission_number(target_folder)
 	new_filename = f"{serial:02d}_{frappe.utils.today()}_{src.file_name}"
 
 	content = src.get_content()

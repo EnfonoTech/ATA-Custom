@@ -11,6 +11,7 @@ const caps = ref({
 	can_assign_team_manager: false,
 	can_assign_team_roles: false,
 	can_reset_passwords: false,
+	can_manage_submission_types: false,
 });
 const loadingCaps = ref(true);
 
@@ -195,8 +196,65 @@ const canShow = computed(
 		caps.value.can_create_users ||
 		caps.value.can_run_demo_seed ||
 		caps.value.can_edit_folder_template ||
-		caps.value.can_reset_passwords,
+		caps.value.can_reset_passwords ||
+		caps.value.can_manage_submission_types,
 );
+
+// ── Submission types (the "Submit to client" master) ────────────────────────
+const subTypes = ref([]);
+const subTypesBusy = ref(false);
+const subTypeNew = ref("");
+const subTypeMsg = ref("");
+const subTypeErr = ref("");
+
+async function loadSubmissionTypes() {
+	try {
+		subTypes.value =
+			(await call({ method: "portal_app.api.submissions.list_submission_types", args: { include_disabled: 1 } })) || [];
+	} catch (e) {
+		subTypeErr.value = apiErr(e);
+	}
+}
+
+async function addSubmissionType() {
+	const name = subTypeNew.value.trim();
+	if (!name) return;
+	subTypesBusy.value = true;
+	subTypeMsg.value = "";
+	subTypeErr.value = "";
+	try {
+		const row = await call({
+			method: "portal_app.api.submissions.add_submission_type",
+			type: "POST",
+			args: { type_name: name },
+		});
+		subTypeNew.value = "";
+		subTypeMsg.value = `"${row?.type_name || name}" is available in Submit to client.`;
+		await loadSubmissionTypes();
+	} catch (e) {
+		subTypeErr.value = apiErr(e);
+	} finally {
+		subTypesBusy.value = false;
+	}
+}
+
+async function toggleSubmissionType(t) {
+	subTypesBusy.value = true;
+	subTypeMsg.value = "";
+	subTypeErr.value = "";
+	try {
+		await call({
+			method: "portal_app.api.submissions.set_submission_type_enabled",
+			type: "POST",
+			args: { type_name: t.name, enabled: t.enabled ? 0 : 1 },
+		});
+		await loadSubmissionTypes();
+	} catch (e) {
+		subTypeErr.value = apiErr(e);
+	} finally {
+		subTypesBusy.value = false;
+	}
+}
 
 // Folder template ZIP upload
 const tplZipInput    = ref(null);
@@ -289,6 +347,9 @@ onMounted(async () => {
 	}
 	if (caps.value.can_assign_team_roles || caps.value.can_assign_team_manager) {
 		await loadTeamOptions();
+	}
+	if (caps.value.can_manage_submission_types) {
+		await loadSubmissionTypes();
 	}
 });
 
@@ -816,6 +877,52 @@ const totalCreated = computed(() =>
 					</div>
 					<p v-if="rpMsg" class="text-sm text-green-700">{{ rpMsg }}</p>
 					<p v-if="rpErr" class="text-sm text-red-600">{{ rpErr }}</p>
+				</div>
+
+				<!-- Submission types -->
+				<div v-if="caps.can_manage_submission_types" class="portal-card-strong space-y-4 p-5">
+					<div class="flex items-center gap-2">
+						<div
+							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
+							style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);"
+						>
+							<FeatherIcon name="send" class="h-4 w-4" />
+						</div>
+						<div>
+							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Submission types</h2>
+							<p class="text-xs text-[color:var(--portal-muted)]">
+								The types offered in Submit to client, used in the submission folder name
+								(NN_date_Type). Disable a type to stop offering it; existing submissions keep their names.
+							</p>
+						</div>
+					</div>
+					<div class="divide-y divide-[color:var(--portal-border)] rounded-xl border border-[color:var(--portal-border)] text-sm">
+						<label
+							v-for="t in subTypes"
+							:key="t.name"
+							class="flex items-center justify-between gap-2 px-3 py-2"
+						>
+							<span :class="t.enabled ? 'text-[color:var(--portal-text)]' : 'text-[color:var(--portal-muted)] line-through'">{{ t.type_name }}</span>
+							<span class="flex items-center gap-2 text-xs text-[color:var(--portal-muted)]">
+								Enabled
+								<input type="checkbox" :checked="!!t.enabled" :disabled="subTypesBusy" @change="toggleSubmissionType(t)" />
+							</span>
+						</label>
+						<p v-if="!subTypes.length" class="px-3 py-2 text-xs text-[color:var(--portal-muted)]">No submission types yet.</p>
+					</div>
+					<div class="flex flex-wrap items-center gap-2">
+						<input
+							v-model="subTypeNew"
+							type="text"
+							maxlength="60"
+							class="portal-input min-w-0 flex-1 rounded-xl px-3 py-2 text-sm"
+							placeholder="Add type, e.g. Presentation"
+							@keyup.enter="addSubmissionType"
+						/>
+						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="subTypesBusy" @click="addSubmissionType">Add type</Button>
+					</div>
+					<p v-if="subTypeMsg" class="text-sm text-green-700">{{ subTypeMsg }}</p>
+					<p v-if="subTypeErr" class="text-sm text-red-600">{{ subTypeErr }}</p>
 				</div>
 
 				<!-- Demo seed runs -->

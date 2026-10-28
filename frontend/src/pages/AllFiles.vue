@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch, reactive, inject } from "vue";
 import { call } from "@/api";
 import { FeatherIcon } from "frappe-ui";
 import { viewerFolderLeaf, viewerFolderPath } from "@/utils/clientFolders";
+import SubmitToClientModal from "@/component/SubmitToClientModal.vue";
 
 // Submit / Share match the server rules: never for client contacts; Submit also
 // needs manage rights on the project (team member or manager).
@@ -276,64 +277,26 @@ const folderLabel = computed(() => {
 	return viewerFolderPath(label, isCustomerPortalUser.value);
 });
 
-// ── Submit to Client Submittal ───────────────────────────────────────────────
+// ── Submit to Client (SubmitToClientModal) ───────────────────────────────────
 const submitModalOpen = ref(false);
 const submitFile      = ref(null);
-const submitBusy      = ref(false);
-const submitError     = ref("");
-const submitOk        = ref("");
 
-function todayIso() {
-	const d  = new Date();
-	const mm = String(d.getMonth() + 1).padStart(2, "0");
-	const dd = String(d.getDate()).padStart(2, "0");
-	return `${d.getFullYear()}-${mm}-${dd}`;
-}
 /** Pill text for a file in the client folder: Incoming = what ATA sent, Outgoing = what the client sent. */
 function clientDirectionText(direction) {
 	if (isCustomerPortalUser.value) return direction === "incoming" ? "From ATA" : "Your upload";
 	return direction === "incoming" ? "Sent to client" : "From client";
 }
 function openSubmitModal(f) {
-	submitFile.value  = f;
-	submitError.value = "";
-	submitOk.value    = "";
+	submitFile.value = f;
 	submitModalOpen.value = true;
 }
 function closeSubmitModal() {
-	if (submitBusy.value) return;
 	submitModalOpen.value = false;
 	submitFile.value = null;
 }
-function previewSubmitName() {
-	const f = submitFile.value;
-	if (!f) return "";
-	return `NN_${todayIso()}_${f.file_name || ""}`;
-}
-async function confirmSubmitToClient() {
-	const f    = submitFile.value;
+function onSubmitted() {
 	const proj = activeProj.value?.name;
-	if (!f || !proj) return;
-	submitBusy.value  = true;
-	submitError.value = "";
-	submitOk.value    = "";
-	try {
-		const res = await call({
-			method: "portal_app.api.files.submit_to_client_submittal",
-			type: "POST",
-			args: { file_name: f.name, project: proj },
-		});
-		submitOk.value = `Submitted as "${res.file_name}" (SL ${res.sl_no}) to the client folder (your Outgoing, the client's Incoming).`;
-		if (projCache[proj]) delete projCache[proj];
-		setTimeout(() => { submitOk.value = ""; closeSubmitModal(); }, 3000);
-	} catch (e) {
-		const body = e?.responseBody;
-		submitError.value = body?._server_messages
-			? (() => { try { return JSON.parse(JSON.parse(body._server_messages)[0]).message; } catch { return body._server_messages; } })()
-			: body?.message || e?.message || "Submission failed.";
-	} finally {
-		submitBusy.value = false;
-	}
+	if (proj && projCache[proj]) delete projCache[proj];
 }
 
 // ── Share file with users ─────────────────────────────────────────────────────
@@ -927,93 +890,13 @@ watch(activeFolder, (newFolder) => {
 		</main>
 
 		<!-- ══ SUBMIT MODAL ══════════════════════════════════════════════════ -->
-		<Teleport to="body">
-			<div
-				v-if="submitModalOpen"
-				class="fixed inset-0 z-[70] flex items-center justify-center px-4"
-				role="dialog"
-				aria-modal="true"
-				@click.self="closeSubmitModal"
-			>
-				<div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"></div>
-				<div class="relative z-10 w-full max-w-lg rounded-2xl shadow-2xl" style="background:var(--portal-surface);border:1px solid var(--portal-border)" @click.stop>
-					<!-- Header -->
-					<div class="flex items-center justify-between gap-3 border-b px-5 py-4" style="border-color:var(--portal-border)">
-						<div class="flex items-center gap-3">
-							<div class="flex h-10 w-10 items-center justify-center rounded-2xl text-white shadow-md"
-								style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);">
-								<FeatherIcon name="send" class="h-5 w-5" />
-							</div>
-							<div>
-								<h2 class="text-base font-bold" style="color:var(--portal-text)">Submit to Client</h2>
-								<p class="text-xs" style="color:var(--portal-muted)">Copies to <strong>06-CLIENT SUBMITTAL / Outgoing</strong> (the client sees it in Incoming) with serial + date naming</p>
-							</div>
-						</div>
-						<button type="button" class="rounded-lg p-1.5 transition" style="color:var(--portal-subtle)" :disabled="submitBusy" @click="closeSubmitModal">
-							<FeatherIcon name="x" class="h-4 w-4" />
-						</button>
-					</div>
-
-					<!-- Body -->
-					<div class="space-y-4 px-5 py-5">
-						<!-- Source file -->
-						<div class="flex items-center gap-3 rounded-xl px-4 py-3" style="background:var(--portal-surface-alt);border:1px solid var(--portal-border)">
-							<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style="background:var(--portal-surface)">
-								<FeatherIcon :name="extIcon(submitFile?.file_name || '')" class="h-5 w-5" style="color:var(--portal-accent)" />
-							</span>
-							<div class="min-w-0">
-								<p class="truncate text-sm font-semibold" style="color:var(--portal-text)">{{ submitFile?.file_name }}</p>
-								<p class="text-[11px]" style="color:var(--portal-muted)">{{ relFolder(submitFile) || activeProj?.project_name || "Project root" }}</p>
-							</div>
-						</div>
-
-						<!-- Generated name preview -->
-						<div class="rounded-xl border px-4 py-3" style="border-color:rgba(245,158,11,0.25);background:rgba(245,158,11,0.06)">
-							<p class="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider" style="color:var(--portal-accent)">
-								<FeatherIcon name="tag" class="h-3 w-3" />
-								Will be saved as
-							</p>
-							<p class="font-mono text-sm font-bold break-all" style="color:var(--portal-text)">{{ previewSubmitName() }}</p>
-							<div class="mt-2 flex flex-wrap gap-3 text-[11px]" style="color:var(--portal-muted)">
-								<span class="flex items-center gap-1"><span class="font-bold" style="color:var(--portal-accent)">NN</span> = auto serial (01, 02…)</span>
-								<span class="flex items-center gap-1"><span class="font-bold" style="color:var(--portal-accent)">Date</span> = today ({{ todayIso() }})</span>
-							</div>
-						</div>
-
-						<p v-if="submitError" class="rounded-xl px-3 py-2 text-sm" style="background:var(--portal-danger-soft);color:var(--portal-danger);border:1px solid rgba(239,68,68,0.2)">{{ submitError }}</p>
-						<p v-if="submitOk" class="rounded-xl px-3 py-2 text-sm font-medium" style="background:var(--portal-success-soft);color:var(--portal-success);border:1px solid rgba(34,197,94,0.2)">
-							<FeatherIcon name="check-circle" class="mr-1 inline h-4 w-4" />{{ submitOk }}
-						</p>
-					</div>
-
-					<!-- Footer -->
-					<div class="flex items-center justify-end gap-2 border-t px-5 py-4" style="border-color:var(--portal-border);background:rgba(0,0,0,0.15)">
-						<button
-							type="button"
-							class="portal-btn rounded-xl px-4 py-2 text-sm font-medium"
-							:disabled="submitBusy"
-							@click="closeSubmitModal"
-						>Cancel</button>
-						<button
-							type="button"
-							class="flex items-center gap-2 rounded-xl px-5 py-2 text-sm font-bold text-white shadow-md transition hover:opacity-90 disabled:opacity-50"
-							style="background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);"
-							:disabled="submitBusy || !!submitOk"
-							@click="confirmSubmitToClient"
-						>
-							<span v-if="submitBusy" class="flex items-center gap-2">
-								<span class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
-								Submitting…
-							</span>
-							<span v-else class="flex items-center gap-2">
-								<FeatherIcon name="send" class="h-4 w-4" />
-								Confirm &amp; Submit to Client
-							</span>
-						</button>
-					</div>
-				</div>
-			</div>
-		</Teleport>
+		<SubmitToClientModal
+			:open="submitModalOpen"
+			:project="activeProj?.name || ''"
+			:files="submitFile ? [submitFile] : []"
+			@close="closeSubmitModal"
+			@submitted="onSubmitted"
+		/>
 
 		<!-- ══ SHARE MODAL ═══════════════════════════════════════════════════ -->
 		<Teleport to="body">
