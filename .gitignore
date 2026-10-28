@@ -15,3 +15,4 @@ frontend/dist/
 portal_app/public/frontend/
 portal_app/frontend/assets/
 .vscode/
+.pipeline/

@@ -1,0 +1,62 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:type_name",
+ "creation": "2026-10-28 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 0,
+ "engine": "InnoDB",
+ "field_order": ["type_name", "enabled"],
+ "fields": [
+  {
+   "description": "Shown in the submission folder name, e.g. 01_2026-10-28_Concept Submittal. Cannot contain / \\ : * ? \" < > |",
+   "fieldname": "type_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Type name",
+   "length": 60,
+   "reqd": 1,
+   "set_only_once": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "description": "Disabled types are no longer offered in Submit to client.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Submission Type",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "read": 1,
+   "role": "Department Admin",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Projects User"
+  }
+ ],
+ "sort_field": "type_name",
+ "sort_order": "ASC",
+ "track_changes": 1
+}

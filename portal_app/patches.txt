@@ -10,3 +10,4 @@ portal_app.patches.remove_client_project_docshares
 portal_app.patches.setup_portal_role_model
 portal_app.patches.create_client_incoming_outgoing_folders
 portal_app.patches.rename_phase_fc_to_ifc
+portal_app.patches.seed_portal_submission_types

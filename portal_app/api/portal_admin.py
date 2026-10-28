@@ -45,6 +45,9 @@ def get_portal_admin_capabilities():
 	if frappe.session.user == "Guest":
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 
+	# Imported here: submissions imports files, keep this module's import graph flat.
+	from portal_app.api import submissions
+
 	can_manage_teams = helper.can_manage_teams()
 	return {
 		"can_create_users": _can_create_users(),
@@ -56,6 +59,7 @@ def get_portal_admin_capabilities():
 		"can_assign_team_roles": can_manage_teams,
 		"can_assign_team_manager": can_manage_teams,
 		"can_reset_passwords": helper.has_portal_staff_project_access(),
+		"can_manage_submission_types": submissions._can_manage_submission_types(),
 		"portal_role": helper.get_portal_role(),
 	}
 
