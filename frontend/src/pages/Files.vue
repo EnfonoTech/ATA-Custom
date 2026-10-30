@@ -1351,7 +1351,7 @@ async function createShareLinkForFolder(folderPath) {
 	if (!project.value || !folderPath) return;
 	if (!canShareFolder.value) {
 		shareError.value =
-			"You need manage access on this project to create share links (you must be on its team, or be its Team Lead, a Department Admin or a Super Admin).";
+			"You need manage access on this project to create share links (you must be on its team, or be its Team Manager, Department Coordinator, a Department Admin or a Super Admin).";
 		shareInfo.value = "";
 		await nextTick();
 		document.getElementById("portal-share-result")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1780,7 +1780,7 @@ async function deleteProjectFile(f) {
 				<ul class="mt-2 list-inside list-disc space-y-1.5 text-xs leading-relaxed text-emerald-900/90">
 					<li>
 						You can delete any file <strong>you</strong> uploaded — look for Delete at the end of its row.
-						Anyone with manage access to the project (its team, a Team Lead, a Department Admin or a Super Admin) can delete anything on it.
+						Anyone with manage access to the project (its team, a Team Manager, a Department Coordinator, a Department Admin or a Super Admin) can delete anything on it.
 					</li>
 					<li>
 						New files are <strong>private</strong> by default, which means only people on this project can

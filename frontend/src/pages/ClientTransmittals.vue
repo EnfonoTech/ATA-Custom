@@ -6,16 +6,32 @@
 // Access is the server's: list_client_projects / list_client_transmittals are scoped by
 // get_allowed_project_names, downloads go through download_project_file, uploads through
 // upload_project_file into the client Outgoing folder.
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import { call, uploadFile } from "@/api";
 import { FeatherIcon } from "frappe-ui";
 import { useClientLang } from "@/i18n/clientPortal";
+import { LOGOS } from "@/config/roles";
 
 const { lang, dir, t, setLang, formatDate } = useClientLang();
 
 const PROJECT_KEY = "portal_client_project";
 
 const branding = ref({});
+
+// Bundled ATA logo (ata-logo-horizontal*.png, R6) on the --portal-surface header: the white file in dark mode
+// (<html> without data-mode="light"), black in light. A company_logo overrides it.
+const isLightMode = ref(document.documentElement.getAttribute("data-mode") === "light");
+let modeObserver = null;
+onMounted(() => {
+	modeObserver = new MutationObserver(() => {
+		isLightMode.value = document.documentElement.getAttribute("data-mode") === "light";
+	});
+	modeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-mode"] });
+});
+onBeforeUnmount(() => modeObserver?.disconnect());
+const headerLogo = computed(
+	() => branding.value.company_logo || (isLightMode.value ? LOGOS.horizontal : LOGOS.horizontalWhite)
+);
 const projects = ref([]);
 const projectsLoading = ref(true);
 const project = ref("");
@@ -192,10 +208,9 @@ onMounted(async () => {
 			<div class="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-3">
 				<div class="flex min-w-0 items-center gap-3">
 					<img
-						v-if="branding.company_logo"
-						:src="branding.company_logo"
-						alt=""
-						class="h-9 w-auto shrink-0 object-contain"
+						:src="headerLogo"
+						alt="Abdulmohsin Altheyab &amp; Partners — Architects"
+						class="h-9 w-auto max-w-[180px] shrink-0 object-contain"
 					/>
 					<div class="min-w-0">
 						<p class="truncate text-sm font-bold" style="color:var(--portal-text)">{{ branding.company_name || "ATA" }}</p>

@@ -1,5 +1,6 @@
 [pre_model_sync]
 portal_app.patches.rename_portal_customer_role
+portal_app.patches.rename_team_lead_role
 
 [post_model_sync]
 portal_app.patches.add_project_portal_fields
@@ -11,3 +12,5 @@ portal_app.patches.setup_portal_role_model
 portal_app.patches.create_client_incoming_outgoing_folders
 portal_app.patches.rename_phase_fc_to_ifc
 portal_app.patches.seed_portal_submission_types
+portal_app.patches.mark_portal_teams
+portal_app.patches.migrate_project_server_links

@@ -2,36 +2,60 @@ from __future__ import annotations
 
 import frappe
 from frappe import _
+from frappe.utils import cint, cstr
 
-# The portal's five roles and the Frappe role behind each one:
-#   Super Admin       System Manager (the label the portal has always used for it)
-#   Department Admin  "Department Admin"  + Department.portal_department_admins rows (scope)
-#   Team Lead         "Team Lead"         + Department.portal_team_lead            (scope)
-#   Team Member       "Projects User"
-#   Client Customer   "Client Customer"   (was "Portal Customer") + Portal User Customer rows
-# The two marker roles are kept in sync with the Department data by
+# The portal's six-level hierarchy (Batch C) and the Frappe data behind each level:
+#   Super Admin             System Manager (the label the portal has always used for it)
+#   Department Admin        "Department Admin"       + Department.portal_department_admins rows
+#   Department Coordinator  "Department Coordinator" + Department.portal_department_coordinators rows
+#   Team Manager            "Team Manager"           + Department.portal_team_lead (was "Team Lead")
+#   Project Lead            Project.portal_project_manager (per project; was "Lead Architect")
+#   Project Architect       "Projects User" (was "Team Member")
+#   Client Customer         "Client Customer" (was "Portal Customer") + Portal User Customer rows
+# Departments sit above teams in ERPNext's own Department tree: Department.portal_unit is
+# "Department" or "Team" (blank + a Portal Office = a legacy team). A department marked
+# portal_pending is recorded only: every reader below ignores it and its teams.
+# The marker roles are kept in sync with the Department data by
 # sync_department_role_markers (a Department doc_event), so a change made anywhere,
 # portal or Desk, ends up the same.
 SUPER_ADMIN_ROLE = "System Manager"
 DEPT_ADMIN_ROLE = "Department Admin"
-TEAM_LEAD_ROLE = "Team Lead"
+DEPT_COORDINATOR_ROLE = "Department Coordinator"
+TEAM_MANAGER_ROLE = "Team Manager"
+TEAM_LEAD_ROLE = TEAM_MANAGER_ROLE  # old name, kept for callers and tests
+LEGACY_TEAM_LEAD_ROLE = "Team Lead"
 TEAM_MEMBER_ROLE = "Projects User"
 LEGACY_PROJECTS_MANAGER_ROLE = "Projects Manager"
 PORTAL_ROLES = frozenset(
-	{SUPER_ADMIN_ROLE, LEGACY_PROJECTS_MANAGER_ROLE, TEAM_MEMBER_ROLE, DEPT_ADMIN_ROLE, TEAM_LEAD_ROLE}
+	{
+		SUPER_ADMIN_ROLE,
+		LEGACY_PROJECTS_MANAGER_ROLE,
+		TEAM_MEMBER_ROLE,
+		DEPT_ADMIN_ROLE,
+		DEPT_COORDINATOR_ROLE,
+		TEAM_MANAGER_ROLE,
+	}
 )
 PORTAL_CUSTOMER_ROLE = "Client Customer"
 LEGACY_PORTAL_CUSTOMER_ROLE = "Portal Customer"
 PORTAL_HOME = "/portal-app"
 DEPARTMENT_ADMIN_DOCTYPE = "Portal Department Admin"
+DEPARTMENT_COORDINATOR_DOCTYPE = "Portal Department Coordinator"
+PROJECT_LINK_DOCTYPE = "Portal Project Link"
+LINK_TYPES = ("T Server", "Autodesk Server", "ERP")
 
+# Role keys are stable (frontend, tests, open tabs); only the labels changed.
 ROLE_LABELS = {
 	"super_admin": "Super Admin",
 	"department_admin": "Department Admin",
-	"team_lead": "Team Lead",
-	"team_member": "Team Member",
+	"department_coordinator": "Department Coordinator",
+	"team_lead": "Team Manager",
+	"project_lead": "Project Lead",
+	"team_member": "Project Architect",
 	"client_customer": "Client Customer",
 }
+# New names accepted on input for the two renamed keys.
+ROLE_KEY_ALIASES = {"team_manager": "team_lead", "project_architect": "team_member"}
 
 
 def get_website_user_home_page(user):
@@ -84,9 +108,10 @@ def ensure_portal_customer_role() -> None:
 
 
 def ensure_portal_roles() -> None:
-	"""Create the Department Admin and Team Lead marker roles (Desk users, internal)."""
+	"""Create the Department Admin, Department Coordinator and Team Manager marker roles
+	(Desk users, internal). Never the old "Team Lead": patches.rename_team_lead_role renames it."""
 	created = False
-	for role in (DEPT_ADMIN_ROLE, TEAM_LEAD_ROLE):
+	for role in (DEPT_ADMIN_ROLE, DEPT_COORDINATOR_ROLE, TEAM_MANAGER_ROLE):
 		if frappe.db.exists("Role", role):
 			continue
 		frappe.get_doc(
@@ -144,10 +169,21 @@ def is_dept_admin(user=None) -> bool:
 
 
 def is_team_lead(user=None) -> bool:
+	"""Team Manager marker role (the old Team Lead)."""
 	user = user or frappe.session.user
 	if not user or user == "Guest":
 		return False
-	return TEAM_LEAD_ROLE in frappe.get_roles(user)
+	return TEAM_MANAGER_ROLE in frappe.get_roles(user)
+
+
+is_team_manager = is_team_lead
+
+
+def is_dept_coordinator(user=None) -> bool:
+	user = user or frappe.session.user
+	if not user or user == "Guest":
+		return False
+	return DEPT_COORDINATOR_ROLE in frappe.get_roles(user)
 
 
 def has_portal_staff_project_access(user=None) -> bool:
@@ -165,8 +201,9 @@ def has_portal_staff_project_access(user=None) -> bool:
 
 
 def get_portal_role(user=None) -> str | None:
-	"""The portal role key of a login: super_admin, department_admin, team_lead,
-	team_member or client_customer (None if the login has no portal role at all)."""
+	"""The highest portal role key of a login: super_admin, department_admin,
+	department_coordinator, client_customer, team_lead (Team Manager), project_lead or
+	team_member (None if the login has no portal role at all)."""
 	user = user or frappe.session.user
 	if not user or user == "Guest":
 		return None
@@ -175,10 +212,16 @@ def get_portal_role(user=None) -> str | None:
 	roles = set(frappe.get_roles(user))
 	if DEPT_ADMIN_ROLE in roles:
 		return "department_admin"
+	if DEPT_COORDINATOR_ROLE in roles:
+		return "department_coordinator"
 	if PORTAL_CUSTOMER_ROLE in roles:
 		return "client_customer"
-	if TEAM_LEAD_ROLE in roles:
+	if TEAM_MANAGER_ROLE in roles:
 		return "team_lead"
+	if frappe.get_meta("Project").has_field("portal_project_manager") and frappe.db.exists(
+		"Project", {"portal_project_manager": user}
+	):
+		return "project_lead"
 	if roles & {TEAM_MEMBER_ROLE, LEGACY_PROJECTS_MANAGER_ROLE} or frappe.db.exists(
 		"Project User", {"user": user, "parenttype": "Project"}
 	):
@@ -273,14 +316,17 @@ def user_can_use_portal(user=None) -> bool:
 def get_allowed_project_names(user=None) -> list[str]:
 	"""Every project this login may SEE.
 
-	  Super Admin       the whole portfolio.
-	  Department Admin  their departments' projects (portal_team, or anyone in the
-	                    department on the team or as Lead Architect), plus the projects
-	                    that belong to no department yet, which somebody has to triage,
-	                    plus their own.
-	  Team Lead         the same for the teams they lead, plus their own.
-	  Team Member       only the projects they are on the team of or lead.
-	  Client Customer   only the projects of their customers.
+	  Super Admin             the whole portfolio.
+	  Department Admin        the projects of their department's teams (portal_team, or a
+	                          team person on the team or as Project Lead), plus their own.
+	                          A legacy team-level admin row also sees the projects that
+	                          belong to no team yet (somebody has to triage them).
+	  Department Coordinator  the same for the departments they coordinate, plus the
+	                          unassigned projects (they allocate projects to teams).
+	  Team Manager            the same for the teams they manage, plus their own.
+	  Project Lead / Architect  only the projects they lead or are on the team of.
+	  Client Customer         only the projects of their customers.
+	A pending designation counts as if it did not exist.
 	"""
 	user = user or frappe.session.user
 	if not user_can_use_portal(user):
@@ -300,15 +346,15 @@ def get_allowed_project_names(user=None) -> list[str]:
 		return frappe.get_all("Project", filters={"customer": ["in", custs]}, pluck="name")
 
 	names = set(own_project_names(user))
-	if is_admin or TEAM_LEAD_ROLE in roles:
+	if roles & {DEPT_ADMIN_ROLE, DEPT_COORDINATOR_ROLE, TEAM_MANAGER_ROLE}:
 		names |= get_scope_project_names(user)
-	if is_admin:
+	if sees_unassigned_projects(user):
 		names |= set(get_unassigned_project_names())
 	return sorted(names)
 
 
 def own_project_names(user=None) -> list[str]:
-	"""Projects this login is on the team of, or is the Lead Architect of."""
+	"""Projects this login is on the team of, or is the Project Lead of."""
 	user = user or frappe.session.user
 	if not user or user == "Guest":
 		return []
@@ -318,75 +364,261 @@ def own_project_names(user=None) -> list[str]:
 	return sorted(names)
 
 
-def admin_department_names(user=None) -> list[str]:
-	"""Departments this login is a Department Admin of (Department.portal_department_admins)."""
+# ---------------------------------------------------------------------------------------
+# Unit model: Department units above teams (ERPNext Department tree + portal_unit)
+# ---------------------------------------------------------------------------------------
+def _has_unit_field() -> bool:
+	return frappe.get_meta("Department").has_field("portal_unit")
+
+
+def pending_unit_names() -> set:
+	"""Units that are not active yet: every Department with portal_pending set, and
+	everything under it (a team under a pending department is pending)."""
+	if not frappe.get_meta("Department").has_field("portal_pending"):
+		return set()
+	out = set()
+	for name in frappe.get_all("Department", filters={"portal_pending": 1}, pluck="name"):
+		out.add(name)
+		out |= set(frappe.db.get_descendants("Department", name))
+	return out
+
+
+def portal_team_names(include_pending=False) -> list:
+	"""The departments the portal calls teams: portal_unit "Team", or (legacy) a blank
+	portal_unit with a Portal Office. Wherever they sit in the tree. Pending teams are left
+	out unless asked."""
+	meta = frappe.get_meta("Department")
+	if not meta.has_field("portal_office"):
+		return []
+	if not meta.has_field("portal_unit"):
+		# Not migrated yet: the old rule (direct children of "All Departments" with an office).
+		return frappe.get_all(
+			"Department", filters={"parent_department": "All Departments", "portal_office": ["!=", ""]}, pluck="name"
+		)
+	d = frappe.qb.DocType("Department")
+	blank_unit = d.portal_unit.isnull() | (d.portal_unit == "")
+	has_office = d.portal_office.isnotnull() & (d.portal_office != "")
+	names = (
+		frappe.qb.from_(d).select(d.name).where((d.portal_unit == "Team") | (blank_unit & has_office)).run(pluck=True)
+	)
+	if include_pending:
+		return list(names)
+	pending = pending_unit_names()
+	return [n for n in names if n not in pending]
+
+
+def portal_department_names() -> list[str]:
+	"""The teams (same meaning as before Batch C; every caller keeps working)."""
+	return portal_team_names()
+
+
+def portal_unit_department_names(include_pending=False) -> list:
+	"""The Department units (portal_unit "Department"), the level above the teams."""
+	if not _has_unit_field():
+		return []
+	names = frappe.get_all("Department", filters={"portal_unit": "Department"}, pluck="name")
+	if include_pending:
+		return names
+	pending = pending_unit_names()
+	return [n for n in names if n not in pending]
+
+
+def teams_of_unit(name, include_pending=False) -> list:
+	"""The teams a unit stands for: a team is itself, a Department unit is the teams under
+	it, anything else none."""
+	if not name:
+		return []
+	teams = portal_team_names(include_pending=include_pending)
+	if name in teams:
+		return [name]
+	if not _has_unit_field() or frappe.db.get_value("Department", name, "portal_unit") != "Department":
+		return []
+	under = set(frappe.db.get_descendants("Department", name))
+	return [t for t in teams if t in under]
+
+
+def team_department(team):
+	"""The Department unit a team belongs to: the nearest ancestor with portal_unit
+	"Department" (at most five levels up), or None."""
+	if not team or not _has_unit_field():
+		return None
+	current = team
+	for _hop in range(5):
+		parent = frappe.db.get_value("Department", current, "parent_department")
+		if not parent:
+			return None
+		if frappe.db.get_value("Department", parent, "portal_unit") == "Department":
+			return parent
+		current = parent
+	return None
+
+
+# ---------------------------------------------------------------------------------------
+# Designations (who holds what, where)
+# ---------------------------------------------------------------------------------------
+def admin_department_names(user=None, include_pending=False) -> list[str]:
+	"""Units this login is a Department Admin of (Department.portal_department_admins):
+	department-level rows and legacy team-level rows. Pending units are left out."""
 	user = user or frappe.session.user
 	if not user or user == "Guest" or not frappe.db.table_exists(DEPARTMENT_ADMIN_DOCTYPE):
 		return []
-	return frappe.get_all(
+	names = frappe.get_all(
 		DEPARTMENT_ADMIN_DOCTYPE, filters={"user": user, "parenttype": "Department"}, pluck="parent"
 	)
+	names = list(dict.fromkeys(names))
+	if include_pending:
+		return names
+	pending = pending_unit_names()
+	return [n for n in names if n not in pending]
+
+
+def coordinator_department_names(user=None, include_pending=False) -> list[str]:
+	"""Units this login is a Department Coordinator of. Pending units are left out."""
+	user = user or frappe.session.user
+	if not user or user == "Guest" or not frappe.db.table_exists(DEPARTMENT_COORDINATOR_DOCTYPE):
+		return []
+	names = frappe.get_all(
+		DEPARTMENT_COORDINATOR_DOCTYPE, filters={"user": user, "parenttype": "Department"}, pluck="parent"
+	)
+	names = list(dict.fromkeys(names))
+	if include_pending:
+		return names
+	pending = pending_unit_names()
+	return [n for n in names if n not in pending]
 
 
 def scope_department_names(user=None) -> list[str]:
-	"""The departments an admin or lead looks after: the ones they administer plus the
-	ones they lead. Plain team members have none."""
+	"""The TEAMS an admin, coordinator or Team Manager looks after (name kept so callers
+	keep working): the teams of the units they administer or coordinate, plus the teams
+	they manage. Plain Project Architects have none."""
 	user = user or frappe.session.user
 	roles = set(frappe.get_roles(user))
 	out = set()
 	if DEPT_ADMIN_ROLE in roles:
-		out |= set(admin_department_names(user))
-	if TEAM_LEAD_ROLE in roles:
+		for unit in admin_department_names(user):
+			out |= set(teams_of_unit(unit))
+	if DEPT_COORDINATOR_ROLE in roles:
+		for unit in coordinator_department_names(user):
+			out |= set(teams_of_unit(unit))
+	if TEAM_MANAGER_ROLE in roles:
 		out |= set(led_department_names(user))
 	return sorted(out)
 
 
-def department_member_users(dept_names) -> set[str]:
-	"""Everyone in these departments: the assigned members, the lead and the admins."""
-	dept_names = list(dept_names or [])
-	if not dept_names:
+def management_unit_names(user=None) -> list[str]:
+	"""The units (departments and legacy teams) this login administers or coordinates: the
+	scope of the Org Chart, the Teams page and "people in my department"."""
+	user = user or frappe.session.user
+	roles = set(frappe.get_roles(user))
+	out = []
+	if DEPT_ADMIN_ROLE in roles:
+		out += admin_department_names(user)
+	if DEPT_COORDINATOR_ROLE in roles:
+		out += coordinator_department_names(user)
+	return list(dict.fromkeys(out))
+
+
+def sees_unassigned_projects(user=None) -> bool:
+	"""Who sees the projects that belong to no team: a Super Admin; a Department
+	Coordinator of an active department with at least one team (they allocate projects);
+	a Department Admin only through a legacy team-level row. A department-level
+	Department Admin does not."""
+	user = user or frappe.session.user
+	if not user or user == "Guest":
+		return False
+	if is_super_admin(user):
+		return True
+	roles = set(frappe.get_roles(user))
+	if DEPT_COORDINATOR_ROLE in roles and any(teams_of_unit(u) for u in coordinator_department_names(user)):
+		return True
+	if DEPT_ADMIN_ROLE in roles:
+		teams = set(portal_team_names())
+		if any(u in teams for u in admin_department_names(user)):
+			return True
+	return False
+
+
+def _team_people_users(teams) -> set[str]:
+	"""Everyone on these TEAMS: the assigned members (open ToDo), the Team Manager and the
+	team's own admin rows. Never department-level admins or coordinators."""
+	teams = list(teams or [])
+	if not teams:
 		return set()
 	users = set(
 		frappe.get_all(
 			"ToDo",
 			filters={
 				"reference_type": "Department",
-				"reference_name": ["in", dept_names],
+				"reference_name": ["in", teams],
 				"status": ["not in", ("Cancelled", "Closed")],
 			},
 			pluck="allocated_to",
 		)
 	)
 	if frappe.get_meta("Department").has_field("portal_team_lead"):
-		users |= set(frappe.get_all("Department", filters={"name": ["in", dept_names]}, pluck="portal_team_lead"))
+		users |= set(frappe.get_all("Department", filters={"name": ["in", teams]}, pluck="portal_team_lead"))
 	if frappe.db.table_exists(DEPARTMENT_ADMIN_DOCTYPE):
 		users |= set(
 			frappe.get_all(
 				DEPARTMENT_ADMIN_DOCTYPE,
-				filters={"parent": ["in", dept_names], "parenttype": "Department"},
+				filters={"parent": ["in", teams], "parenttype": "Department"},
 				pluck="user",
 			)
 		)
 	return {u for u in users if u}
 
 
-def portal_department_names() -> list[str]:
-	"""The departments the portal calls teams: direct children of "All Departments" that
-	carry an office tag."""
-	if not frappe.get_meta("Department").has_field("portal_office"):
-		return []
-	return frappe.get_all(
-		"Department", filters={"parent_department": "All Departments", "portal_office": ["!=", ""]}, pluck="name"
+def department_member_users(dept_names) -> set[str]:
+	"""Everyone in these units: each unit is expanded to its teams (teams_of_unit), and
+	the open assignments, Team Managers, admin rows and coordinator rows of the units and
+	their teams all count. Used for "people in my department" (role changes, password
+	reset, Org Chart)."""
+	units = list(dept_names or [])
+	if not units:
+		return set()
+	everything = set(units)
+	for unit in units:
+		everything |= set(teams_of_unit(unit))
+	everything = list(everything)
+	users = _team_people_users(everything)
+	if frappe.db.table_exists(DEPARTMENT_COORDINATOR_DOCTYPE):
+		users |= set(
+			frappe.get_all(
+				DEPARTMENT_COORDINATOR_DOCTYPE,
+				filters={"parent": ["in", everything], "parenttype": "Department"},
+				pluck="user",
+			)
+		)
+	return {u for u in users if u}
+
+
+def unit_assigned_users(unit) -> set[str]:
+	"""People ASSIGNED to a unit or one of its teams (open ToDo, Team Managers), without
+	the admin / coordinator rows: "is this person already in the department?"."""
+	units = [unit, *teams_of_unit(unit, include_pending=True)]
+	users = set(
+		frappe.get_all(
+			"ToDo",
+			filters={
+				"reference_type": "Department",
+				"reference_name": ["in", units],
+				"status": ["not in", ("Cancelled", "Closed")],
+			},
+			pluck="allocated_to",
+		)
 	)
+	if frappe.get_meta("Department").has_field("portal_team_lead"):
+		users |= set(frappe.get_all("Department", filters={"name": ["in", units]}, pluck="portal_team_lead"))
+	return {u for u in users if u}
 
 
 def _projects_tied_to_departments(depts) -> set[str]:
-	"""Projects that belong to one of these departments: the project's portal_team is one of
-	them, or somebody from the department is on its team or is its Lead Architect."""
+	"""Projects that belong to one of these teams: the project's portal_team is one of
+	them, or somebody from the team is on its team or is its Project Lead."""
 	depts = list(depts or [])
 	if not depts:
 		return set()
-	people = department_member_users(depts)
+	people = _team_people_users(depts)
 	meta = frappe.get_meta("Project")
 	out = set()
 	if meta.has_field("portal_team"):
@@ -408,19 +640,18 @@ def _projects_tied_to_departments(depts) -> set[str]:
 
 
 def get_scope_project_names(user=None) -> set[str]:
-	"""Projects connected to the departments this admin / lead looks after: the project
-	belongs to the department (portal_team), or somebody from the department is on its
-	team or is its Lead Architect."""
+	"""Projects connected to the teams this admin / coordinator / Team Manager looks
+	after: the project belongs to the team (portal_team), or somebody from the team is on
+	its team or is its Project Lead."""
 	return _projects_tied_to_departments(scope_department_names(user))
 
 
 def get_unassigned_project_names() -> list[str]:
-	"""Projects that belong to no department at all: no portal_team, and nobody from any
-	department is on the team or is the Lead Architect. Department Admins see them so
-	somebody can put them under a department (Project page, Portal Team); plain members and
-	Team Leads never do. This is also what keeps a manager who administers every department
-	(the conversion of the old Projects Manager role) seeing the whole portfolio."""
-	tied = _projects_tied_to_departments(portal_department_names())
+	"""Projects that belong to no team at all: no portal_team, and nobody from any active
+	team is on the team or is the Project Lead. Super Admins, Department Coordinators and
+	legacy team-level Department Admins see them so somebody can put them under a team
+	(Project page, Portal Team); nobody else does."""
+	tied = _projects_tied_to_departments(portal_team_names())
 	return [name for name in frappe.get_all("Project", pluck="name") if name not in tied]
 
 
@@ -505,9 +736,9 @@ def can_manage_project(project_name: str, user=None) -> bool:
 	"""Management-level action (edit, delete, team sync, sharing, folder rules, etc.).
 
 	  * Super Admin: any project.
-	  * Department Admin: any project they can see (their departments' projects).
-	  * Team Lead: the projects of the teams they lead, and the ones they are on.
-	  * Team Member: the projects they are on the team of, or lead.
+	  * Department Admin / Department Coordinator: any project they can see.
+	  * Team Manager: the projects of the teams they manage, and the ones they are on.
+	  * Project Lead / Architect: the projects they are on the team of, or lead.
 	Client contacts manage nothing.
 	"""
 	user = user or frappe.session.user
@@ -521,7 +752,7 @@ def can_manage_project(project_name: str, user=None) -> bool:
 		return False
 	if project_name not in get_allowed_project_names(user):
 		return False
-	if is_dept_admin(user):
+	if is_dept_admin(user) or is_dept_coordinator(user):
 		return True
 	if project_name in own_project_names(user):
 		return True
@@ -536,6 +767,8 @@ def get_manageable_project_names(user=None, allowed=None) -> list[str]:
 		return allowed
 	if is_customer_only(user):
 		return []
+	if is_dept_coordinator(user):
+		return allowed
 	mine = set(own_project_names(user))
 	if is_team_lead(user):
 		mine |= get_scope_project_names(user)
@@ -544,6 +777,29 @@ def get_manageable_project_names(user=None, allowed=None) -> list[str]:
 
 def assert_manage_project(project_name: str) -> None:
 	if not can_manage_project(project_name):
+		frappe.throw(
+			_("You can only change projects you are on the team of."),
+			frappe.PermissionError,
+		)
+
+
+def can_manage_project_records(project_name: str, user=None) -> bool:
+	"""can_manage_project() without the Department Coordinator grant: Contracts (list,
+	upload, delete, the contracts zip) and deleting the project. A Coordinator gets
+	explicit rights only (spec Q7), so on a project that is not their own (an unassigned
+	one, say) they keep the visibility but not these."""
+	user = user or frappe.session.user
+	if not can_manage_project(project_name, user):
+		return False
+	if has_portal_staff_project_access(user) or not is_dept_coordinator(user):
+		return True
+	if project_name in own_project_names(user):
+		return True
+	return is_team_lead(user) and project_name in get_scope_project_names(user)
+
+
+def assert_manage_project_records(project_name: str) -> None:
+	if not can_manage_project_records(project_name):
 		frappe.throw(
 			_("You can only change projects you are on the team of."),
 			frappe.PermissionError,
@@ -564,20 +820,29 @@ def assert_manage_teams() -> None:
 		)
 
 
-def led_department_names(user=None) -> list[str]:
-	"""Departments this user is the designated portal_team_lead of."""
+def led_department_names(user=None, include_pending=False) -> list[str]:
+	"""Teams this user is the Team Manager of (Department.portal_team_lead). Pending teams
+	are left out."""
 	user = user or frappe.session.user
 	if not frappe.get_meta("Department").has_field("portal_team_lead"):
 		return []
-	return frappe.get_all("Department", filters={"portal_team_lead": user}, pluck="name")
+	names = frappe.get_all("Department", filters={"portal_team_lead": user}, pluck="name")
+	if include_pending:
+		return names
+	pending = pending_unit_names()
+	return [n for n in names if n not in pending]
+
+
+managed_team_names = led_department_names
 
 
 def can_view_org_chart(user=None) -> bool:
-	"""The organisation chart: admins to run it, Team Leads to assign people to projects."""
+	"""The organisation chart: admins to run it, Department Coordinators and Team Managers
+	to assign people to projects."""
 	user = user or frappe.session.user
 	if not user or user == "Guest" or is_customer_only(user):
 		return False
-	return has_portal_staff_project_access(user) or is_team_lead(user)
+	return has_portal_staff_project_access(user) or is_dept_coordinator(user) or is_team_lead(user)
 
 
 def assert_org_chart_access() -> None:
@@ -586,15 +851,18 @@ def assert_org_chart_access() -> None:
 
 
 def can_manage_team(team_name: str, user=None) -> bool:
-	"""Changing one team's people and roles (add, remove, lead, admins): the Super Admin,
-	or the Department Admin of that department. A Team Lead assigns people to projects
-	but does not change the team itself."""
+	"""Changing one team's people and roles (add, remove, manager, admins): the Super
+	Admin, or a Department Admin of that team or of its department. A Department
+	Coordinator or Team Manager assigns people to projects but does not change the team."""
 	user = user or frappe.session.user
 	if is_super_admin(user):
 		return True
 	if not is_dept_admin(user):
 		return False
-	return team_name in admin_department_names(user)
+	units = set(admin_department_names(user))
+	if not units:
+		return False
+	return team_name in units or team_department(team_name) in units
 
 
 def assert_manage_team(team_name: str) -> None:
@@ -606,26 +874,26 @@ def assert_manage_team(team_name: str) -> None:
 
 
 def can_add_project_members(project_name: str, user=None) -> bool:
-	"""Put people on a project's team: Super Admin and Department Admin for any project
-	they can see; a Team Lead for the projects of their teams; the project's own Lead
-	Architect for that one project."""
+	"""Put people on a project's team: Super Admin, Department Admin and Department
+	Coordinator for any project they can see; a Team Manager for the projects of their
+	teams; the project's own Project Lead for that one project."""
 	user = user or frappe.session.user
 	if not user or user == "Guest" or is_customer_only(user):
 		return False
 	if project_name not in get_allowed_project_names(user):
 		return False
-	if is_super_admin(user) or is_dept_admin(user) or is_team_lead(user):
+	if is_super_admin(user) or is_dept_admin(user) or is_dept_coordinator(user) or is_team_lead(user):
 		return True
 	return frappe.db.get_value("Project", project_name, "portal_project_manager") == user
 
 
 def can_remove_project_members(project_name: str, user=None) -> bool:
-	"""Taking people OFF a project's team is for the Super Admin and the Department
-	Admin only (a Team Lead and a Lead Architect can add, not remove)."""
+	"""Taking people OFF a project's team is for the Super Admin, the Department Admin and
+	the Department Coordinator only (a Team Manager and a Project Lead can add, not remove)."""
 	user = user or frappe.session.user
 	if not user or user == "Guest" or is_customer_only(user):
 		return False
-	if not (is_super_admin(user) or is_dept_admin(user)):
+	if not (is_super_admin(user) or is_dept_admin(user) or is_dept_coordinator(user)):
 		return False
 	return project_name in get_allowed_project_names(user)
 
@@ -638,7 +906,9 @@ def can_manage_project_team(project_name: str, user=None) -> bool:
 def assert_manage_project_team(project_name: str) -> None:
 	if not can_manage_project_team(project_name):
 		frappe.throw(
-			_("Only a Super Admin, a Department Admin, a Team Lead or this project's Lead Architect can change its team."),
+			_(
+				"Only a Super Admin, a Department Admin, a Department Coordinator, a Team Manager or this project's Project Lead can change its team."
+			),
 			frappe.PermissionError,
 		)
 
@@ -774,8 +1044,9 @@ def can_reset_password_for(target: str, caller: str | None = None) -> bool:
 	"""May `caller` reset `target`'s password from the portal?
 
 	  * Super Admin: any enabled login except the built-in accounts, clients included.
-	  * Department Admin: the Team Leads and Team Members of the departments they
-	    administer. Never a Super Admin, another Department Admin or a client.
+	  * Department Admin: the people of the units they administer (their teams' Team
+	    Managers and Project Architects, Department Coordinators). Never a Super Admin,
+	    another Department Admin or a client.
 	  * Nobody else. Your own password is changed from Profile.
 	"""
 	caller = caller or frappe.session.user
@@ -794,16 +1065,19 @@ def can_reset_password_for(target: str, caller: str | None = None) -> bool:
 
 
 def sync_portal_role_markers(user: str) -> None:
-	"""Make a login's Department Admin / Team Lead roles match the Department data.
+	"""Make a login's Department Admin / Department Coordinator / Team Manager roles match
+	the Department data (pending units grant nothing).
 
-	The roles are markers; the Department rows decide the scope. Anyone who administers
-	or leads a department also needs the base Team Member role, or the portal would not
-	let them in at all."""
+	The roles are markers; the Department rows decide the scope. Anyone who administers,
+	coordinates or manages a unit also needs the base Projects User role, or the portal
+	would not let them in at all. A stray legacy "Team Lead" row (the rename patch did not
+	run) is dropped. System Manager is never touched."""
 	if not user or user in ("Administrator", "Guest") or not frappe.db.exists("User", user):
 		return
 	wants = {
 		DEPT_ADMIN_ROLE: bool(admin_department_names(user)),
-		TEAM_LEAD_ROLE: bool(led_department_names(user)),
+		DEPT_COORDINATOR_ROLE: bool(coordinator_department_names(user)),
+		TEAM_MANAGER_ROLE: bool(led_department_names(user)),
 	}
 	ensure_portal_roles()
 	doc = frappe.get_doc("User", user)
@@ -818,6 +1092,11 @@ def sync_portal_role_markers(user: str) -> None:
 				if row.role == role:
 					doc.remove(row)
 			changed = True
+	if LEGACY_TEAM_LEAD_ROLE in have:
+		for row in list(doc.roles):
+			if row.role == LEGACY_TEAM_LEAD_ROLE:
+				doc.remove(row)
+		changed = True
 	if any(wants.values()) and TEAM_MEMBER_ROLE not in have and PORTAL_CUSTOMER_ROLE not in have:
 		doc.append("roles", {"role": TEAM_MEMBER_ROLE})
 		changed = True
@@ -826,21 +1105,224 @@ def sync_portal_role_markers(user: str) -> None:
 		doc.save()
 
 
-def sync_department_role_markers(doc, method=None):
-	"""doc_events Department.on_update: whoever is (or just stopped being) this
-	department's Team Lead or Department Admin gets (or loses) the matching role, no
-	matter whether the change was made in the portal or in Desk."""
+def _unit_people(doc) -> set:
+	"""Everyone named on a Department doc: Team Manager, admin rows, coordinator rows."""
+	if not doc:
+		return set()
 	users = set()
 	if doc.get("portal_team_lead"):
 		users.add(doc.portal_team_lead)
 	users |= {r.user for r in (doc.get("portal_department_admins") or []) if r.user}
+	users |= {r.user for r in (doc.get("portal_department_coordinators") or []) if r.user}
+	return users
+
+
+def sync_department_role_markers(doc, method=None):
+	"""doc_events Department.on_update: whoever is (or just stopped being) this unit's
+	Team Manager, Department Admin or Department Coordinator gets (or loses) the matching
+	role, no matter whether the change was made in the portal or in Desk. When the unit is
+	activated / made pending or moved in the tree, everyone named on the units under it is
+	synced too, so activating a department grants the roles in one save."""
+	users = _unit_people(doc)
 	before = doc.get_doc_before_save()
-	if before:
-		if before.get("portal_team_lead"):
-			users.add(before.portal_team_lead)
-		users |= {r.user for r in (before.get("portal_department_admins") or []) if r.user}
+	users |= _unit_people(before)
+	moved = before is not None and (
+		cint(before.get("portal_pending")) != cint(doc.get("portal_pending"))
+		or (before.get("parent_department") or None) != (doc.get("parent_department") or None)
+	)
+	if moved:
+		under = frappe.db.get_descendants("Department", doc.name)
+		if under:
+			if frappe.get_meta("Department").has_field("portal_team_lead"):
+				users |= set(frappe.get_all("Department", filters={"name": ["in", under]}, pluck="portal_team_lead"))
+			for child in (DEPARTMENT_ADMIN_DOCTYPE, DEPARTMENT_COORDINATOR_DOCTYPE):
+				if frappe.db.table_exists(child):
+					users |= set(
+						frappe.get_all(
+							child, filters={"parent": ["in", under], "parenttype": "Department"}, pluck="user"
+						)
+					)
 	for user in users:
-		sync_portal_role_markers(user)
+		if user:
+			sync_portal_role_markers(user)
+
+
+# ---------------------------------------------------------------------------------------
+# Designations of one person (Profile, Org Chart, role changes)
+# ---------------------------------------------------------------------------------------
+def _designation(role, unit=None, unit_label=None, pending=False, **extra) -> dict:
+	return {
+		"role": role,
+		"label": ROLE_LABELS.get(role, role),
+		"unit": unit,
+		"unit_label": unit_label,
+		"pending": bool(pending),
+		**extra,
+	}
+
+
+def get_portal_designations(user=None) -> list[dict]:
+	"""Every designation a login holds, highest first: super_admin; each Department Admin
+	row; each Department Coordinator row; each team they manage; project_lead (with the
+	number of projects they lead); team_member. Rows on pending units are included with
+	`pending: True` (recorded only, they grant nothing)."""
+	user = user or frappe.session.user
+	if not user or user == "Guest":
+		return []
+	if user == "Administrator":
+		return [_designation("super_admin")]
+	out = []
+	if is_super_admin(user):
+		out.append(_designation("super_admin"))
+	pending = pending_unit_names()
+	admin_units = admin_department_names(user, include_pending=True)
+	coord_units = coordinator_department_names(user, include_pending=True)
+	led = led_department_names(user, include_pending=True)
+	labels = {}
+	every = list({*admin_units, *coord_units, *led})
+	if every:
+		labels = dict(frappe.get_all("Department", filters={"name": ["in", every]}, fields=["name", "department_name"], as_list=True))
+	for role, units in (("department_admin", admin_units), ("department_coordinator", coord_units), ("team_lead", led)):
+		for unit in units:
+			out.append(_designation(role, unit, labels.get(unit) or unit, unit in pending))
+	if frappe.get_meta("Project").has_field("portal_project_manager"):
+		count = frappe.db.count("Project", {"portal_project_manager": user})
+		if count:
+			out.append(_designation("project_lead", count=count))
+	if is_customer_only(user):
+		out.append(_designation("client_customer"))
+	elif TEAM_MEMBER_ROLE in frappe.get_roles(user) or frappe.db.exists(
+		"Project User", {"user": user, "parenttype": "Project"}
+	):
+		out.append(_designation("team_member"))
+	return out
+
+
+# Roles that can be SET from the role changer (portal_admin.change_user_role).
+# project_lead is per project; client_customer is a different kind of login.
+SETTABLE_ROLE_KEYS = ("super_admin", "department_admin", "department_coordinator", "team_lead", "team_member")
+
+
+def normalize_role_key(role) -> str:
+	role = cstr(role).strip()
+	return ROLE_KEY_ALIASES.get(role, role)
+
+
+def role_change_scope(caller=None) -> dict:
+	"""What a caller may do in the role changer, computed once: Super Admin (everything),
+	Department Admin (units U and their people), or nothing."""
+	caller = caller or frappe.session.user
+	if is_super_admin(caller):
+		return {"kind": "super_admin"}
+	if not is_dept_admin(caller) or is_customer_only(caller):
+		return {"kind": None}
+	units = admin_department_names(caller)
+	if not units:
+		return {"kind": None}
+	dept_units = set(portal_unit_department_names())
+	teams = set()
+	for unit in units:
+		teams |= set(teams_of_unit(unit))
+	return {
+		"kind": "department_admin",
+		"units": units,
+		"departments": [u for u in units if u in dept_units],
+		"teams": sorted(teams),
+		"people": department_member_users(units),
+		"admins": set(frappe.get_all(DEPARTMENT_ADMIN_DOCTYPE, filters={"parenttype": "Department"}, pluck="user"))
+		if frappe.db.table_exists(DEPARTMENT_ADMIN_DOCTYPE)
+		else set(),
+	}
+
+
+def assignable_roles_for(caller, target, scope=None) -> dict:
+	"""{role key: [units]} that `caller` may give `target` (an empty dict: none at all).
+
+	  Super Admin       any enabled staff login (incl. themselves): every settable role,
+	                    any unit, pending ones included.
+	  Department Admin  people of their own units (incl. themselves), never a Super Admin
+	                    or another Department Admin: Department Coordinator of one of their
+	                    departments (not themselves), Team Manager of one of their teams,
+	                    Project Architect.
+	  anyone else       nothing.
+	"""
+	caller = caller or frappe.session.user
+	target = cstr(target).strip()
+	if not target or target in ("Administrator", "Guest") or not frappe.db.exists("User", target):
+		return {}
+	if not frappe.db.get_value("User", target, "enabled") or is_customer_only(target):
+		return {}
+	scope = scope or role_change_scope(caller)
+	if scope["kind"] == "super_admin":
+		departments = portal_unit_department_names(include_pending=True)
+		return {
+			"super_admin": [],
+			"department_admin": departments,
+			"department_coordinator": departments,
+			"team_lead": portal_team_names(include_pending=True),
+			"team_member": [],
+		}
+	if scope["kind"] != "department_admin":
+		return {}
+	if target != caller:
+		if target not in scope["people"] or is_super_admin(target) or target in scope["admins"]:
+			return {}
+	roles = {
+		"department_coordinator": list(scope["departments"]),
+		"team_lead": list(scope["teams"]),
+		"team_member": [],
+	}
+	if target == caller:
+		# Self-change goes downwards only (spec 7): a Coordinator sees unassigned projects
+		# (sees_unassigned_projects), which a Department Admin must not grant themselves.
+		roles.pop("department_coordinator")
+	return roles
+
+
+# ---------------------------------------------------------------------------------------
+# Project links (R3)
+# ---------------------------------------------------------------------------------------
+def can_manage_project_links(project_name: str, user=None) -> bool:
+	"""Who manages a project's T Server / Autodesk Server / ERP links: a Super Admin; or,
+	for a project they can see whose team belongs to department D, an active Department
+	Coordinator or Department Admin of D, or a legacy admin row on the team itself. A
+	project with no team: Super Admin only."""
+	user = user or frappe.session.user
+	if not user or user == "Guest":
+		return False
+	if is_super_admin(user):
+		return True
+	if is_customer_only(user) or not (is_dept_admin(user) or is_dept_coordinator(user)):
+		return False
+	if not frappe.get_meta("Project").has_field("portal_team"):
+		return False
+	team = frappe.db.get_value("Project", project_name, "portal_team")
+	if not team or project_name not in get_allowed_project_names(user):
+		return False
+	admin_units = set(admin_department_names(user)) if is_dept_admin(user) else set()
+	coord_units = set(coordinator_department_names(user)) if is_dept_coordinator(user) else set()
+	if team in admin_units:
+		return True
+	dept = team_department(team)
+	return bool(dept) and (dept in admin_units or dept in coord_units)
+
+
+project_link_managers_can = can_manage_project_links
+
+
+def can_open_project_link(link_row, user=None) -> bool:
+	"""May `user` open (receive the path / URL of) this Portal Project Link row: a link
+	manager, or someone on its allowed list who can still see the project. Never a client."""
+	user = user or frappe.session.user
+	if not user or user == "Guest" or not link_row:
+		return False
+	if is_customer_only(user):
+		return False
+	project = link_row.get("project")
+	if can_manage_project_links(project, user):
+		return True
+	allowed = {r.get("user") if isinstance(r, dict) else r.user for r in (link_row.get("allowed_users") or [])}
+	return user in allowed and project in get_allowed_project_names(user)
 
 
 def project_has_permission(doc, ptype=None, user=None, debug=False):
@@ -880,7 +1362,7 @@ def project_has_permission(doc, ptype=None, user=None, debug=False):
 		return None
 	roles = set(frappe.get_roles(user))
 	if not (
-		roles & {TEAM_MEMBER_ROLE, DEPT_ADMIN_ROLE, TEAM_LEAD_ROLE, LEGACY_PROJECTS_MANAGER_ROLE}
+		roles & {TEAM_MEMBER_ROLE, DEPT_ADMIN_ROLE, DEPT_COORDINATOR_ROLE, TEAM_MANAGER_ROLE, LEGACY_PROJECTS_MANAGER_ROLE}
 		or PORTAL_CUSTOMER_ROLE in roles
 	):
 		return None

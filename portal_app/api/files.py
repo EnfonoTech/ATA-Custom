@@ -1041,7 +1041,7 @@ def download_files_zip(project, file_names=None, folder_path=None):
 				continue
 			if not _customer_may_read_file(project, n, row.get("folder")):
 				continue
-			if cstr(row.get("folder")).startswith("Home/Contracts/") and not helper.can_manage_project(project):
+			if cstr(row.get("folder")).startswith("Home/Contracts/") and not helper.can_manage_project_records(project):
 				continue
 			names.append(n)
 	elif folder_path:
@@ -3090,7 +3090,7 @@ def download_project_file(file_name):
 		# but are manager-only — list_project_files already excludes them, and this
 		# endpoint must reject a direct call by docname the same way, or a team
 		# member who learns/guesses the docname could still pull the bytes here.
-		helper.assert_manage_project(f.attached_to_name)
+		helper.assert_manage_project_records(f.attached_to_name)
 	else:
 		helper.assert_project_access(f.attached_to_name)
 		# list_project_files shows a client contact only 06-CLIENT SUBMITTAL; a direct

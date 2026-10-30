@@ -124,16 +124,15 @@
 						}"
 						:alt="brandName || 'Logo'"
 					/>
-					<div v-else class="brand-mark" aria-hidden="true">
-						<!-- Geometric lettermark inspired by AMA logo -->
-						<svg viewBox="0 0 52 44" fill="currentColor" class="h-9 w-auto">
-							<path d="M1,42 L9,2  L16,2  L8,42Z"/>
-							<path d="M17,42 L23,13 L29,13 L23,42Z"/>
-							<path d="M27,42 L33,13 L39,13 L33,42Z"/>
-							<path d="M37,42 L44,2  L51,2  L44,42Z"/>
-						</svg>
-					</div>
-					<div class="brand-text">
+					<!-- The bundled ATA logo (black on the light panel); a company_logo set in
+					     Portal Project Settings overrides it. -->
+					<img
+						v-else
+						:src="LOGOS.horizontal"
+						class="ata-logo-login"
+						alt="Abdulmohsin Altheyab &amp; Partners — Architects"
+					/>
+					<div v-if="brandLogo" class="brand-text">
 						<p class="brand-name-ar" v-if="!brandName">عبد المحسن الذياب وشركاه</p>
 						<p class="brand-name">{{ brandName || 'ABDULMOHSIN ALTHEYAB &amp; PARTNERS' }}</p>
 						<p class="brand-sub">{{ brandTagline || 'ARCHITECTS | معماريون' }}</p>
@@ -156,12 +155,11 @@
 
 					<!-- Mobile logo (shown only on small screens) -->
 					<div class="mobile-logo">
-						<svg viewBox="0 0 52 44" fill="currentColor" class="h-10 w-auto text-gray-900">
-							<path d="M1,42 L9,2  L16,2  L8,42Z"/>
-							<path d="M17,42 L23,13 L29,13 L23,42Z"/>
-							<path d="M27,42 L33,13 L39,13 L33,42Z"/>
-							<path d="M37,42 L44,2  L51,2  L44,42Z"/>
-						</svg>
+						<img
+							:src="brandLogo || LOGOS.stacked"
+							class="ata-logo-mobile"
+							alt="Abdulmohsin Altheyab &amp; Partners — Architects"
+						/>
 					</div>
 
 					<!-- Card header -->
@@ -288,6 +286,7 @@
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { call, ensureCsrfReady } from "@/api";
+import { LOGOS } from "@/config/roles";
 
 const router = useRouter();
 
@@ -559,6 +558,21 @@ const getFrappeError = (data) => {
 	box-shadow:
 		0 2px 8px rgba(120,80,20,0.06),
 		0 16px 48px -12px rgba(120,80,20,0.14);
+}
+
+/* Bundled ATA logo (R6) */
+.ata-logo-login {
+	width: 100%;
+	max-width: 340px;
+	height: auto;
+	object-fit: contain;
+}
+.ata-logo-mobile {
+	max-height: 72px;
+	max-width: 160px;
+	width: auto;
+	height: auto;
+	object-fit: contain;
 }
 
 /* Mobile logo */

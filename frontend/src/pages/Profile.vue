@@ -3,6 +3,7 @@ import { ref, onMounted, inject, computed } from "vue";
 import { useRouter } from "vue-router";
 import { Button, TextInput, FeatherIcon } from "frappe-ui";
 import { call } from "@/api";
+import { ROLE_LABELS } from "@/config/roles";
 
 const router = useRouter();
 const portalCapabilities = inject("portalCapabilities", ref({}));
@@ -37,7 +38,8 @@ const error = ref("");
 const PORTAL_ROLES = [
 	"System Manager",
 	"Department Admin",
-	"Team Lead",
+	"Department Coordinator",
+	"Team Manager",
 	"Projects User",
 	"Client Customer",
 	"Administrator",
@@ -244,8 +246,21 @@ function extractErr(e) {
 						<p class="portal-section-title mb-2">Portal role</p>
 						<div class="flex flex-wrap items-center gap-1.5">
 							<span class="portal-pill portal-pill-accent">{{ profile.portal_role_label }}</span>
-							<span v-for="t in profile.admin_team_names || []" :key="'a:' + t" class="portal-pill portal-pill-muted">Department Admin · {{ t }}</span>
-							<span v-for="t in profile.led_team_names || []" :key="'l:' + t" class="portal-pill portal-pill-muted">Team Lead · {{ t }}</span>
+							<!-- Every designation (get_portal_designations): role, where, and whether it is active yet -->
+							<template v-if="profile.designations">
+								<span
+									v-for="d in profile.designations.filter((x) => x.role !== profile.portal_role || x.unit)"
+									:key="d.role + ':' + (d.unit || '')"
+									class="portal-pill portal-pill-muted"
+									:class="d.pending ? 'opacity-60' : ''"
+								>
+									{{ d.label }}<template v-if="d.unit_label"> · {{ d.unit_label }}</template><template v-if="d.count"> · {{ d.count }} project{{ d.count === 1 ? "" : "s" }}</template><template v-if="d.pending"> · not active yet</template>
+								</span>
+							</template>
+							<template v-else>
+								<span v-for="t in profile.admin_team_names || []" :key="'a:' + t" class="portal-pill portal-pill-muted">{{ ROLE_LABELS.department_admin }} · {{ t }}</span>
+								<span v-for="t in profile.led_team_names || []" :key="'l:' + t" class="portal-pill portal-pill-muted">{{ ROLE_LABELS.team_lead }} · {{ t }}</span>
+							</template>
 						</div>
 					</div>
 

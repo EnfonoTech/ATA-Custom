@@ -34,7 +34,7 @@ fixtures = [
 add_to_apps_screen = [
 	{
 		"name": "portal_app",
-		"logo": "/assets/portal_app/ama-logo.png",
+		"logo": "/assets/portal_app/images/ata-logo-stacked-800.png",
 		"title": "Project Portal",
 		"route": "/portal-app",
 	}
@@ -173,9 +173,11 @@ doc_events = {
 			"portal_app.api.projects.refuse_client_project_users",
 			# The office is the team's office (Department.portal_office).
 			"portal_app.api.projects.sync_office_from_team",
-		]
+		],
+		# A Portal Project Link would otherwise block deleting the project (LinkExistsError).
+		"on_trash": "portal_app.api.links.delete_project_links",
 	},
-	# Keeps the Department Admin / Team Lead roles in step with the department's data.
+	# Keeps the Department Admin / Department Coordinator / Team Manager roles in step with the department's data.
 	"Department": {"on_update": "portal_app.api.helper.sync_department_role_markers"},
 	"ToDo": {
 		"validate": "portal_app.api.projects.refuse_client_project_todo",

@@ -4,6 +4,7 @@ import { call } from "@/api";
 import { useRouter } from "vue-router";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
 import FileUploadPanel from "@/component/FileUploadPanel.vue";
+import { LINK_TYPES, LINK_LABELS } from "@/config/roles";
 
 const props = defineProps({
 	name: { type: String, required: true },
@@ -22,9 +23,10 @@ const canShareFolder = computed(
 );
 const canLinkCustomer = computed(() => canManage.value && !!portalCapabilities.value?.can_manage_customers);
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
-// What this person may do to the project's team: a Team Lead / Department Admin / Super Admin
-// (or the project's Lead Architect) can add people; only a Super Admin or Department Admin can
-// take them off. The server decides, project_dashboard returns the answer.
+// What this person may do to the project's team: a Team Manager / Department Coordinator /
+// Department Admin / Super Admin (or the project's Project Lead) can add people; only a
+// Super Admin, Department Admin or Department Coordinator can take them off. The server
+// decides, project_dashboard returns the answer.
 const teamRights = computed(() => payload.value?.team_rights || { can_add: false, can_remove: false });
 const canAddMembers = computed(() => !!teamRights.value.can_add);
 const canRemoveMembers = computed(() => !!teamRights.value.can_remove);
@@ -635,6 +637,136 @@ async function submitInviteCustomerUser() {
 	}
 }
 
+// ── Project links (T Server / Autodesk Server / ERP) ─────────────────────────
+// project_dashboard sends portal_links; the path / URL is only there when can_open.
+// A locked link is a disabled button: nothing to open, nothing in the page to leak.
+const LOCKED_HINT = "Ask your Department Coordinator for access";
+const LINK_ICONS = { "T Server": "hard-drive", "Autodesk Server": "box", ERP: "server" };
+const projectLinks = computed(() => {
+	const by = Object.fromEntries((payload.value?.portal_links || []).map((e) => [e.link_type, e]));
+	return LINK_TYPES.map((t) => by[t] || { link_type: t, has_path: 0, has_url: 0, can_open: 0 });
+});
+const showLinksCard = computed(() => !isCustomerPortalUser.value && !!payload.value?.portal_links);
+const canManageLinks = computed(() => !!payload.value?.can_manage_links);
+const linkMsg = ref("");
+function linkState(e) {
+	if (!e || (!e.has_path && !e.has_url)) return "unset";
+	return e.can_open ? "open" : "locked";
+}
+async function copyText(text) {
+	try {
+		await navigator.clipboard.writeText(text);
+	} catch {
+		const ta = document.createElement("textarea");
+		ta.value = text;
+		ta.setAttribute("readonly", "");
+		ta.style.position = "fixed";
+		ta.style.opacity = "0";
+		document.body.appendChild(ta);
+		ta.select();
+		try { document.execCommand("copy"); } finally { document.body.removeChild(ta); }
+	}
+}
+async function copyLinkPath(e) {
+	if (linkState(e) !== "open" || !e.copy_path) return;
+	await copyText(e.copy_path);
+	linkMsg.value = `${LINK_LABELS[e.link_type] || e.link_type} path copied.`;
+	setTimeout(() => (linkMsg.value = ""), 3000);
+}
+
+// "Manage links" (the project's Department Coordinator / Department Admin / Super Admin)
+const showLinks = ref(false);
+const linksBusy = ref(false);
+const linksErr = ref("");
+const linksForm = ref({}); // link_type -> { copy_path, open_url, allowed_users: [{ user, full_name }] }
+let linksOriginal = {};
+const linkUserQ = ref({});
+const linkUserHits = ref({});
+let linkUserTimer;
+
+function linkSnapshot(f) {
+	return JSON.stringify([f.copy_path || "", f.open_url || "", (f.allowed_users || []).map((u) => u.user)]);
+}
+async function openManageLinks() {
+	linksErr.value = "";
+	try {
+		const res = await call({ method: "portal_app.api.links.get_project_links", args: { project: props.name } });
+		const form = {};
+		for (const e of res?.links || []) {
+			form[e.link_type] = {
+				copy_path: e.copy_path || "",
+				open_url: e.open_url || "",
+				allowed_users: (e.allowed_users || []).map((u) => ({ user: u.user, full_name: u.full_name })),
+			};
+		}
+		linksForm.value = form;
+		linksOriginal = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, linkSnapshot(v)]));
+		linkUserQ.value = {};
+		linkUserHits.value = {};
+		showLinks.value = true;
+	} catch (e) {
+		linkMsg.value = apiErr(e);
+	}
+}
+function searchLinkUsers(type) {
+	clearTimeout(linkUserTimer);
+	const q = (linkUserQ.value[type] || "").trim();
+	if (q.length < 2) {
+		linkUserHits.value = { ...linkUserHits.value, [type]: [] };
+		return;
+	}
+	linkUserTimer = setTimeout(async () => {
+		try {
+			const hits = await call({
+				method: "portal_app.api.projects.search_portal_users",
+				args: { txt: q, staff_only: 1 },
+			});
+			linkUserHits.value = { ...linkUserHits.value, [type]: hits || [] };
+		} catch {
+			linkUserHits.value = { ...linkUserHits.value, [type]: [] };
+		}
+	}, 250);
+}
+function addLinkUser(type, u) {
+	const f = linksForm.value[type];
+	if (!f.allowed_users.some((x) => x.user === u.name)) f.allowed_users.push({ user: u.name, full_name: u.full_name || u.name });
+	linkUserQ.value = { ...linkUserQ.value, [type]: "" };
+	linkUserHits.value = { ...linkUserHits.value, [type]: [] };
+}
+function removeLinkUser(type, user) {
+	const f = linksForm.value[type];
+	f.allowed_users = f.allowed_users.filter((x) => x.user !== user);
+}
+async function saveLinks() {
+	linksBusy.value = true;
+	linksErr.value = "";
+	try {
+		let latest = null;
+		for (const type of LINK_TYPES) {
+			const f = linksForm.value[type];
+			if (!f || linkSnapshot(f) === linksOriginal[type]) continue;
+			latest = await call({
+				method: "portal_app.api.links.save_project_link",
+				type: "POST",
+				args: {
+					project: props.name,
+					link_type: type,
+					copy_path: f.copy_path || "",
+					open_url: (f.open_url || "").trim(),
+					allowed_users: JSON.stringify(f.allowed_users.map((u) => u.user)),
+				},
+			});
+			linksOriginal[type] = linkSnapshot(f);
+		}
+		if (latest?.links && payload.value) payload.value = { ...payload.value, portal_links: latest.links };
+		showLinks.value = false;
+	} catch (e) {
+		linksErr.value = apiErr(e);
+	} finally {
+		linksBusy.value = false;
+	}
+}
+
 function apiErr(e) {
 	const body = e?.responseBody;
 	if (body?._server_messages) {
@@ -960,6 +1092,85 @@ async function submitNewCustomer() {
 					</div>
 				</div>
 
+				<!-- Project links (T Server / Autodesk Server / ERP) -->
+				<div v-if="showLinksCard" class="portal-card-strong p-5">
+					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
+							<FeatherIcon name="link" class="h-4 w-4 text-[color:var(--portal-accent)]" />
+							Project links
+						</h2>
+						<button v-if="canManageLinks" type="button" class="portal-btn" @click="openManageLinks">
+							<FeatherIcon name="settings" class="h-4 w-4" />
+							Manage links
+						</button>
+					</div>
+					<div class="space-y-2">
+						<div
+							v-for="e in projectLinks"
+							:key="e.link_type"
+							class="flex flex-wrap items-center gap-3 rounded-xl border border-[color:var(--portal-border)] px-3 py-2.5"
+						>
+							<FeatherIcon :name="LINK_ICONS[e.link_type] || 'link'" class="h-4 w-4 shrink-0 text-[color:var(--portal-muted)]" />
+							<div class="min-w-0 flex-1">
+								<p class="text-sm font-semibold text-[color:var(--portal-text)]">{{ LINK_LABELS[e.link_type] || e.link_type }}</p>
+								<p v-if="linkState(e) === 'open' && e.copy_path" class="truncate font-mono text-xs text-[color:var(--portal-muted)]" :title="e.copy_path">{{ e.copy_path }}</p>
+								<p v-else-if="linkState(e) === 'locked'" class="text-xs text-[color:var(--portal-subtle)]">{{ LOCKED_HINT }}</p>
+								<p v-else-if="linkState(e) === 'unset'" class="text-xs text-[color:var(--portal-subtle)]">Not set</p>
+							</div>
+							<template v-if="linkState(e) === 'open'">
+								<button v-if="e.copy_path" type="button" class="portal-btn" @click="copyLinkPath(e)">
+									<FeatherIcon name="copy" class="h-4 w-4" />
+									Copy
+								</button>
+								<a
+									v-if="e.open_url"
+									:href="e.open_url"
+									target="_blank"
+									rel="noopener noreferrer"
+									class="portal-btn"
+								>
+									<FeatherIcon name="external-link" class="h-4 w-4" />
+									Open
+								</a>
+							</template>
+							<template v-else-if="linkState(e) === 'locked'">
+								<button
+									v-if="e.has_path"
+									type="button"
+									class="portal-btn cursor-not-allowed opacity-50"
+									disabled
+									aria-disabled="true"
+									:title="LOCKED_HINT"
+								>
+									<FeatherIcon name="lock" class="h-4 w-4" />
+									Copy
+								</button>
+								<button
+									v-if="e.has_url"
+									type="button"
+									class="portal-btn cursor-not-allowed opacity-50"
+									disabled
+									aria-disabled="true"
+									:title="LOCKED_HINT"
+								>
+									<FeatherIcon name="lock" class="h-4 w-4" />
+									Open
+								</button>
+							</template>
+							<button
+								v-if="e.link_type === 'ERP'"
+								type="button"
+								class="portal-btn"
+								@click="router.push({ path: '/files', query: { project: project.name } })"
+							>
+								<FeatherIcon name="folder" class="h-4 w-4" />
+								Project files
+							</button>
+						</div>
+					</div>
+					<p v-if="linkMsg" class="mt-2 text-sm text-[color:var(--portal-muted)]">{{ linkMsg }}</p>
+				</div>
+
 				<div class="portal-card-strong p-5">
 					<div class="mb-3 flex flex-wrap items-center justify-between gap-2">
 						<h2 class="flex items-center gap-2 font-semibold text-[color:var(--portal-text)]">
@@ -1052,7 +1263,7 @@ async function submitNewCustomer() {
 							</Button>
 						</div>
 					</div>
-					<p v-else class="text-sm text-gray-500">You can view the customer link; only a Super Admin, a Department Admin or the Lead Architect can change it.</p>
+					<p v-else class="text-sm text-gray-500">You can view the customer link; only a Super Admin, a Department Admin or the Project Lead can change it.</p>
 				</div>
 
 				<div
@@ -1163,7 +1374,7 @@ async function submitNewCustomer() {
 						</h2>
 					</div>
 					<p class="mb-3 text-sm text-gray-600">
-						Groups this project under a department on the Gantt Chart page. A Super Admin can set any department; a Department Admin can only use a department they administer; the project's Lead Architect can set it on their own project.
+						Groups this project under a team on the Gantt Chart page. A Super Admin can set any team; a Department Admin or Department Coordinator can only use a team of their own department; the project's Project Lead can set it on their own project.
 					</p>
 					<div v-if="canManage" class="space-y-3">
 						<p class="text-sm" style="color:var(--portal-text);">
@@ -1214,7 +1425,7 @@ async function submitNewCustomer() {
 						<p v-if="deptMsg" class="text-sm text-green-700">{{ deptMsg }}</p>
 						<p v-if="deptErr" class="text-sm text-red-600">{{ deptErr }}</p>
 					</div>
-					<p v-else class="text-sm text-gray-500">You can view the team; only a Super Admin, a Department Admin or the Lead Architect can change it.</p>
+					<p v-else class="text-sm text-gray-500">You can view the team; only a Super Admin, a Department Admin, a Department Coordinator or the Project Lead can change it.</p>
 				</div>
 
 				<div v-if="!isCustomerPortalUser" class="portal-card-strong p-5">
@@ -1230,7 +1441,7 @@ async function submitNewCustomer() {
 						</button>
 					</div>
 					<p v-if="!canAddMembers" class="mb-3 text-xs text-[color:var(--portal-muted)]">
-						View only. A Team Lead, Department Admin or Super Admin adds people to a project.
+						View only. A Team Manager, Department Coordinator, Department Admin or Super Admin adds people to a project.
 					</p>
 					<p v-else-if="!canRemoveMembers" class="mb-3 text-xs text-[color:var(--portal-muted)]">
 						You can add people to this project. Only a Super Admin or a Department Admin can remove them.
@@ -1295,7 +1506,7 @@ async function submitNewCustomer() {
 								<span
 									v-if="project.portal_project_manager && project.portal_project_manager === row.user"
 									class="portal-pill portal-pill-muted ml-1.5"
-								>Lead Architect</span>
+								>Project Lead</span>
 								<span class="block truncate text-xs text-gray-500">{{ row.user }}</span>
 							</span>
 							<button
@@ -1418,6 +1629,87 @@ async function submitNewCustomer() {
 				</div>
 			</template>
 		</div>
+
+		<Teleport to="body">
+			<div
+				v-if="showLinks"
+				class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+				role="dialog"
+				aria-modal="true"
+			>
+				<div class="absolute inset-0 bg-black/40 backdrop-blur-sm" @click="showLinks = false"></div>
+				<div class="relative z-10 flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl">
+					<div class="border-b border-gray-100 px-6 py-4">
+						<h3 class="text-lg font-semibold text-gray-900">Manage project links</h3>
+						<p class="mt-0.5 text-sm text-gray-600">
+							Only the people you allow (and the department's coordinators and admins) can open a link.
+							A link with no path, no URL and nobody allowed is removed.
+						</p>
+					</div>
+					<div class="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-4">
+						<div v-for="type in LINK_TYPES" :key="type" class="space-y-2">
+							<p class="text-sm font-semibold text-gray-900">{{ LINK_LABELS[type] || type }}</p>
+							<template v-if="linksForm[type]">
+								<input
+									v-model="linksForm[type].copy_path"
+									type="text"
+									class="w-full rounded-xl border border-gray-200 px-3 py-2 font-mono text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+									:placeholder="type === 'T Server' ? 'Mapped-drive path, e.g. T:\\My Drive\\Project' : 'Path (optional)'"
+								/>
+								<input
+									v-model="linksForm[type].open_url"
+									type="url"
+									class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+									:placeholder="type === 'T Server' ? 'Google Drive link (https://…)' : 'Link (https://…)'"
+								/>
+								<div class="flex flex-wrap gap-1.5">
+									<span
+										v-for="u in linksForm[type].allowed_users"
+										:key="type + ':' + u.user"
+										class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+									>
+										{{ u.full_name || u.user }}
+										<button type="button" class="text-gray-400 hover:text-red-600" :title="'Remove ' + (u.full_name || u.user)" @click="removeLinkUser(type, u.user)">
+											<FeatherIcon name="x" class="h-3 w-3" />
+										</button>
+									</span>
+									<span v-if="!linksForm[type].allowed_users.length" class="text-xs text-gray-500">Nobody else allowed yet.</span>
+								</div>
+								<div class="relative">
+									<input
+										v-model="linkUserQ[type]"
+										type="text"
+										class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"
+										placeholder="Allow someone: type a name"
+										@input="searchLinkUsers(type)"
+									/>
+									<div v-if="(linkUserHits[type] || []).length" class="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+										<button
+											v-for="u in linkUserHits[type]"
+											:key="type + '::' + u.name"
+											type="button"
+											class="block w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+											@click="addLinkUser(type, u)"
+										>
+											{{ u.full_name || u.name }} <span class="text-xs text-gray-500">{{ u.name }}</span>
+										</button>
+									</div>
+								</div>
+							</template>
+						</div>
+						<p v-if="linksErr" class="text-sm text-red-600">{{ linksErr }}</p>
+					</div>
+					<div class="flex items-center justify-end gap-2 border-t border-gray-100 px-6 py-4">
+						<button type="button" class="rounded-xl px-4 py-2 text-sm text-gray-700 hover:bg-gray-100" @click="showLinks = false">
+							Cancel
+						</button>
+						<Button variant="solid" class="rounded-xl bg-black text-white" :loading="linksBusy" @click="saveLinks">
+							Save links
+						</Button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
 
 		<Teleport to="body">
 			<div

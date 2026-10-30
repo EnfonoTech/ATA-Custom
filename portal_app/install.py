@@ -18,13 +18,34 @@ def ensure_department_portal_custom_fields():
 					"description": "Office location tag used by the portal Teams page (e.g. RIYADH, LISBON, MANILA)",
 				},
 				{
+					# Batch C: Department units sit above the teams in the Department tree.
+					# Blank = legacy: a blank row with a Portal Office still counts as a team.
+					"fieldname": "portal_unit",
+					"label": "Portal Unit",
+					"fieldtype": "Select",
+					"options": "\nDepartment\nTeam",
+					"insert_after": "portal_office",
+					"description": "Department = a portal department (its teams sit under it in the tree); "
+					"Team = a portal team. Blank with a Portal Office is a team (legacy).",
+				},
+				{
+					"fieldname": "portal_pending",
+					"label": "Portal: not active yet (roles recorded only)",
+					"fieldtype": "Check",
+					"default": "0",
+					"insert_after": "portal_unit",
+					"description": "On a Department unit: its admins, coordinators and Team Managers are "
+					"recorded but grant nothing until a Super Admin activates it. A team under a "
+					"pending department is pending too.",
+				},
+				{
 					"fieldname": "portal_team_lead",
-					"label": "Portal Team Lead",
+					"label": "Portal Team Manager",
 					"fieldtype": "Link",
 					"options": "User",
-					"insert_after": "portal_office",
-					"description": "The Team Lead of this team. A Team Lead assigns people from the Org "
-					"Chart to the projects of the team. Set it from the portal Org Chart.",
+					"insert_after": "portal_pending",
+					"description": "The Team Manager of this team (was Team Lead). A Team Manager assigns "
+					"people from the Org Chart to the projects of the team. Set it from the portal Org Chart.",
 				},
 				{
 					"fieldname": "portal_department_admins",
@@ -34,6 +55,15 @@ def ensure_department_portal_custom_fields():
 					"insert_after": "portal_team_lead",
 					"description": "Department Admins of this department. They manage its people and see its "
 					"projects. Set them from the portal Org Chart.",
+				},
+				{
+					"fieldname": "portal_department_coordinators",
+					"label": "Portal Department Coordinators",
+					"fieldtype": "Table",
+					"options": "Portal Department Coordinator",
+					"insert_after": "portal_department_admins",
+					"description": "Department Coordinators of this department. They allocate its projects to "
+					"its teams and manage the project links. Set them from the portal Org Chart.",
 				},
 			]
 		},
@@ -58,11 +88,11 @@ def ensure_project_portal_custom_fields():
 				},
 				{
 					"fieldname": "portal_project_manager",
-					"label": "Portal Project Manager",
+					"label": "Project Lead",
 					"fieldtype": "Link",
 					"options": "User",
 					"insert_after": "portal_project_code",
-					"description": "Manager with full project control in the portal",
+					"description": "The Project Lead of this project (was Lead Architect)",
 				},
 				{
 					"fieldname": "portal_kanban_stage",
@@ -133,21 +163,29 @@ def ensure_project_portal_custom_fields():
 					# fields claiming the same insert_after makes the resulting field
 					# order non-deterministic (same reason noted on portal_team below).
 					"insert_after": "portal_milestones",
-					"description": "Link to this project's folder on Google Drive",
+					# Batch C: moved to Portal Project Link (per-user access). The column is kept
+					# so the migration can read it; nothing writes it any more.
+					"hidden": 1,
+					"read_only": 1,
+					"description": "Deprecated — moved to Portal Project Link (Batch C). Always empty.",
 				},
 				{
 					"fieldname": "portal_server_a",
 					"label": "A-Server (Autodesk)",
 					"fieldtype": "Data",
 					"insert_after": "portal_server_t",
-					"description": "Link to this project on the Autodesk (BIM) server",
+					"hidden": 1,
+					"read_only": 1,
+					"description": "Deprecated — moved to Portal Project Link (Batch C). Always empty.",
 				},
 				{
 					"fieldname": "portal_server_c",
 					"label": "ERP Server — Client link",
 					"fieldtype": "Data",
 					"insert_after": "portal_server_a",
-					"description": "Client-side server link shown in the ERP Server badge, alongside this project's own uploaded files",
+					"hidden": 1,
+					"read_only": 1,
+					"description": "Deprecated — moved to Portal Project Link (Batch C). Always empty.",
 				},
 				{
 					"fieldname": "portal_team",

@@ -4,6 +4,7 @@ import { call } from "@/api";
 import { useRouter, useRoute } from "vue-router";
 import { Button, TextInput, FeatherIcon } from "frappe-ui";
 import { useToast } from "@/composables/useToast";
+import { LINK_LABELS, LINK_SHORT } from "@/config/roles";
 
 const router = useRouter();
 const route = useRoute();
@@ -23,7 +24,59 @@ const refreshPortalCapabilities = inject("refreshPortalCapabilities", async () =
 const canCreate = computed(() => !!portalCapabilities.value?.can_create_project);
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
 
-// ── ERP Server popup (Client link + Project Files) ───────────────────────────
+// ── Project links (T Server / Autodesk Server / ERP), from p.portal_links ────
+// The server only sends a path / URL to someone who may open it (can_open). A link
+// that is set but locked shows grey with a lock and does nothing: there is nothing to
+// open in the browser anyway. Managed on the project page ("Manage links").
+const LINK_COLORS = { "T Server": "#185FA5", "Autodesk Server": "#276749", ERP: "#9B2335" };
+const LOCKED_HINT = "Ask your Department Coordinator for access";
+function linkEntry(p, type) {
+	return (p.portal_links || []).find((e) => e.link_type === type) || null;
+}
+function linkState(e) {
+	if (!e || (!e.has_path && !e.has_url)) return "unset";
+	return e.can_open ? "open" : "locked";
+}
+function linkTitle(e, type) {
+	const label = LINK_LABELS[type] || type;
+	const state = linkState(e);
+	if (state === "unset") return label + " — not set";
+	if (state === "locked") return label + " — " + LOCKED_HINT;
+	return e.open_url ? "Open " + label : "Copy " + label + " path";
+}
+function linkStyle(e, type) {
+	if (linkState(e) === "open") return { background: LINK_COLORS[type] + "22", color: LINK_COLORS[type], cursor: "pointer" };
+	return { background: "rgba(128,128,128,0.1)", color: "var(--portal-subtle)", cursor: "default" };
+}
+async function copyText(text) {
+	try {
+		await navigator.clipboard.writeText(text);
+	} catch {
+		const ta = document.createElement("textarea");
+		ta.value = text;
+		ta.setAttribute("readonly", "");
+		ta.style.position = "fixed";
+		ta.style.opacity = "0";
+		document.body.appendChild(ta);
+		ta.select();
+		try { document.execCommand("copy"); } finally { document.body.removeChild(ta); }
+	}
+}
+async function useLink(p, type) {
+	const e = linkEntry(p, type);
+	if (linkState(e) !== "open") return;
+	if (e.open_url) {
+		window.open(e.open_url, "_blank", "noopener,noreferrer");
+	} else if (e.copy_path) {
+		await copyText(e.copy_path);
+		toaster.success("Path copied.", { title: LINK_LABELS[type] || type });
+	}
+}
+const canManageLinks = computed(
+	() => !!(portalCapabilities.value?.is_manager || portalCapabilities.value?.is_department_coordinator)
+);
+
+// ── ERP popup (ERP link + Project Files) ─────────────────────────────────────
 // Teleported centered modal (same pattern as "New project") — never clipped.
 const erpDropdownProject = ref(null);
 function toggleErpDropdown(p) {
@@ -124,9 +177,6 @@ async function openEdit(p, e) {
 		expected_end_date:      p.expected_end_date || "",
 		percent_complete:       p.percent_complete || 0,
 		notes:                  p.notes || "",
-		portal_server_t:        p.portal_server_t || "",
-		portal_server_a:        p.portal_server_a || "",
-		portal_server_c:        p.portal_server_c || "",
 	};
 	// The list does not carry Remarks (notes), so fetch the project itself; without
 	// this the modal opened with Remarks blank and saving wiped them.
@@ -155,7 +205,7 @@ async function submitEdit() {
 	if (!editForm.value.project_name?.trim()) { editError.value = "Project name required."; return; }
 	saving.value = true; editError.value = "";
 	try {
-		// Send only changed fields. Sending everything re-submitted Lead Architect on
+		// Send only changed fields. Sending everything re-submitted Project Lead on
 		// every save, which the server refuses for anyone but a Super Admin.
 		const changed = {};
 		for (const [k, v] of Object.entries(editForm.value)) {
@@ -635,8 +685,8 @@ function printProjects() {
 							<th class="px-4 py-3">Assignee</th>
 							<th class="px-4 py-3">Phase</th>
 							<th class="px-4 py-3">Status</th>
-							<th v-if="isManager" class="px-4 py-3">Lead Architect</th>
-							<th class="px-4 py-3">Servers</th>
+							<th v-if="isManager" class="px-4 py-3">Project Lead</th>
+							<th class="px-4 py-3">Links</th>
 							<th class="px-4 py-3">Upcoming Milestone</th>
 							<th class="px-4 py-3">Progress</th>
 							<th class="px-4 py-3 text-right">Actions</th>
@@ -665,32 +715,38 @@ function printProjects() {
 							<td class="px-4 py-3">
 								<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 							</td>
-							<!-- Lead Architect -->
+							<!-- Project Lead -->
 							<td v-if="isManager" class="px-4 py-3 text-xs" style="color:var(--portal-text);">{{ p.portal_project_manager || "—" }}</td>
-							<!-- Servers (T = Google Drive, A = Autodesk, ERP = Client link + this project's uploaded files) -->
+							<!-- Links (T Server, Autodesk Server: open / copy; ERP: link + this project's files) -->
 							<td class="px-4 py-3">
-								<div class="flex items-center gap-1">
-									<a
-										v-for="s in [['t', p.portal_server_t, '#185FA5'], ['a', p.portal_server_a, '#276749']]"
-										:key="s[0]"
-										:href="s[1] || undefined"
-										:target="s[1] ? '_blank' : undefined"
-										rel="noopener noreferrer"
-										:title="s[1] ? (s[0].toUpperCase() + '-Server') : (s[0].toUpperCase() + '-Server not set')"
-										class="flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold uppercase transition"
-										:style="s[1] ? { background: s[2] + '22', color: s[2], cursor: 'pointer' } : { background: 'rgba(128,128,128,0.1)', color: 'var(--portal-subtle)', cursor: 'default' }"
-										@click.stop="!s[1] && $event.preventDefault()"
-									>{{ s[0] }}</a>
+								<div v-if="p.portal_links" class="flex items-center gap-1">
+									<button
+										v-for="type in ['T Server', 'Autodesk Server']"
+										:key="type"
+										type="button"
+										class="flex h-6 min-w-[1.5rem] items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-bold uppercase transition"
+										:style="linkStyle(linkEntry(p, type), type)"
+										:title="linkTitle(linkEntry(p, type), type)"
+										:aria-disabled="linkState(linkEntry(p, type)) !== 'open' ? 'true' : 'false'"
+										@click.stop="useLink(p, type)"
+									>
+										<FeatherIcon v-if="linkState(linkEntry(p, type)) === 'locked'" name="lock" class="h-2.5 w-2.5" />
+										{{ LINK_SHORT[type] }}
+									</button>
 
-									<!-- ERP Server — two portions: the client's own server link, and this project's uploaded data (Files hub) -->
+									<!-- ERP — two portions: the ERP link, and this project's uploaded data (Files hub) -->
 									<button
 										type="button"
-										class="flex h-6 w-6 items-center justify-center rounded-md text-[10px] font-bold uppercase transition"
-										style="background:#9B233522;color:#9B2335;cursor:pointer;"
-										title="ERP Server — client link & project files"
+										class="flex h-6 min-w-[1.5rem] items-center justify-center gap-0.5 rounded-md px-1 text-[10px] font-bold uppercase transition"
+										:style="linkState(linkEntry(p, 'ERP')) === 'open' ? linkStyle(linkEntry(p, 'ERP'), 'ERP') : { background: '#9B233522', color: '#9B2335', cursor: 'pointer' }"
+										:title="'ERP — ' + linkTitle(linkEntry(p, 'ERP'), 'ERP') + ' · project files'"
 										@click.stop="toggleErpDropdown(p)"
-									>erp</button>
+									>
+										<FeatherIcon v-if="linkState(linkEntry(p, 'ERP')) === 'locked'" name="lock" class="h-2.5 w-2.5" />
+										erp
+									</button>
 								</div>
+								<span v-else class="text-xs" style="color:var(--portal-subtle);">—</span>
 							</td>
 							<!-- Upcoming Milestone -->
 							<td class="px-4 py-3 text-xs" style="color:var(--portal-muted);">{{ p.portal_upcoming_milestone || "—" }}</td>
@@ -770,7 +826,7 @@ function printProjects() {
 					</div>
 					<div class="space-y-2 text-sm text-[color:var(--portal-muted)]">
 						<p v-if="isManager" class="flex items-center justify-between gap-2">
-							<span class="flex items-center gap-1.5"><FeatherIcon name="user" class="h-3.5 w-3.5" />Lead Architecture</span>
+							<span class="flex items-center gap-1.5"><FeatherIcon name="user" class="h-3.5 w-3.5" />Project Lead</span>
 							<span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span>
 						</p>
 						<p class="flex items-center justify-between gap-2">
@@ -834,7 +890,7 @@ function printProjects() {
 								<span class="portal-pill" :class="statusPillClass(p.status)">{{ p.status }}</span>
 							</div>
 							<div class="space-y-1 text-xs text-[color:var(--portal-muted)]">
-								<p v-if="isManager" class="flex justify-between gap-2"><span>Lead Architecture</span><span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span></p>
+								<p v-if="isManager" class="flex justify-between gap-2"><span>Project Lead</span><span class="truncate font-medium text-[color:var(--portal-text)]">{{ p.portal_project_manager || "—" }}</span></p>
 								<p class="flex justify-between gap-2"><span>Stage</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.portal_kanban_stage || "—" }}</span></p>
 								<p class="flex justify-between gap-2"><span>Timeline</span><span class="font-medium text-[color:var(--portal-text)]">{{ p.expected_start_date || "—" }} → {{ p.expected_end_date || "—" }}</span></p>
 								<p v-if="isManager" class="flex justify-between gap-2"><span>Est. cost</span><span class="font-semibold text-[color:var(--portal-text)]">{{ fmtMoney(p.estimated_costing) }}</span></p>
@@ -921,7 +977,7 @@ function printProjects() {
 								</select>
 							</div>
 							<div>
-								<label class="portal-section-title mb-1 block">Lead Architect</label>
+								<label class="portal-section-title mb-1 block">Project Lead</label>
 								<select v-model="newForm.portal_project_manager" class="portal-input">
 									<option value="">— Select —</option>
 									<option v-for="u in portalUsers" :key="u.name" :value="u.name">{{ u.full_name || u.name }}</option>
@@ -1085,7 +1141,7 @@ function printProjects() {
 							</div>
 						</div>
 
-						<!-- Status + Lead Architect -->
+						<!-- Status + Project Lead -->
 						<div class="grid grid-cols-2 gap-3">
 							<div>
 								<label class="block text-xs font-semibold text-gray-600 mb-1.5">Status</label>
@@ -1098,7 +1154,7 @@ function printProjects() {
 								</select>
 							</div>
 							<div>
-								<label class="block text-xs font-semibold text-gray-600 mb-1.5">Lead Architect</label>
+								<label class="block text-xs font-semibold text-gray-600 mb-1.5">Project Lead</label>
 								<select v-model="editForm.portal_project_manager" class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400">
 									<option value="">— Select —</option>
 									<option v-for="u in portalUsers" :key="u.name" :value="u.name">{{ u.full_name || u.name }}</option>
@@ -1135,15 +1191,15 @@ function printProjects() {
 							<input v-model="editForm.estimated_costing" type="number" min="0" step="1" placeholder="e.g. 500000" class="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
 						</div>
 
-						<!-- Servers -->
-						<div>
-							<label class="block text-xs font-semibold text-gray-600 mb-1.5">Servers (links)</label>
-							<div class="space-y-2">
-								<input v-model="editForm.portal_server_t" type="url" placeholder="T-Server — Google Drive link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
-								<input v-model="editForm.portal_server_a" type="url" placeholder="A-Server — Autodesk link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
-								<input v-model="editForm.portal_server_c" type="url" placeholder="ERP Server — Client server link" class="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-400"/>
-							</div>
-						</div>
+						<!-- Project links moved to the project page (per-user access) -->
+						<p v-if="canManageLinks" class="text-xs text-gray-500">
+							T Server, Autodesk Server and ERP links are set on the project page:
+							<a
+								href="#"
+								class="font-semibold text-amber-700 underline"
+								@click.prevent="closeEdit(); router.push('/projects/' + encodeURIComponent(editForm.name))"
+							>Manage links</a>
+						</p>
 
 						<!-- Remarks -->
 						<div>
@@ -1185,25 +1241,25 @@ function printProjects() {
 				<div class="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" @click="closeErpDropdown"></div>
 				<div class="relative z-10 w-full max-w-xs rounded-2xl shadow-2xl overflow-hidden portal-anim-in" style="background:var(--portal-surface);border:1px solid var(--portal-border);">
 					<div class="flex items-center justify-between px-5 py-4 border-b" style="border-color:var(--portal-border);">
-						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">ERP Server</h2>
+						<h2 class="text-sm font-semibold" style="color:var(--portal-text);">ERP</h2>
 						<button class="h-7 w-7 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeErpDropdown">
 							<FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
 						</button>
 					</div>
 					<div class="p-2">
-						<a
-							:href="erpDropdownProject.portal_server_c || undefined"
-							:target="erpDropdownProject.portal_server_c ? '_blank' : undefined"
-							rel="noopener noreferrer"
-							class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition"
-							:style="erpDropdownProject.portal_server_c ? 'color:var(--portal-text);cursor:pointer;' : 'color:var(--portal-subtle);cursor:default;'"
-							@click="!erpDropdownProject.portal_server_c && $event.preventDefault()"
+						<button
+							type="button"
+							class="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm transition"
+							:style="linkState(linkEntry(erpDropdownProject, 'ERP')) === 'open' ? 'color:var(--portal-text);cursor:pointer;' : 'color:var(--portal-subtle);cursor:default;'"
+							:title="linkTitle(linkEntry(erpDropdownProject, 'ERP'), 'ERP')"
+							:aria-disabled="linkState(linkEntry(erpDropdownProject, 'ERP')) !== 'open' ? 'true' : 'false'"
+							@click="useLink(erpDropdownProject, 'ERP')"
 							@mouseenter="$event.currentTarget.style.background='var(--portal-surface-alt)'"
 							@mouseleave="$event.currentTarget.style.background=''"
 						>
-							<FeatherIcon name="link" class="h-4 w-4 shrink-0" />
-							Client Server{{ erpDropdownProject.portal_server_c ? "" : " (not set)" }}
-						</a>
+							<FeatherIcon :name="linkState(linkEntry(erpDropdownProject, 'ERP')) === 'locked' ? 'lock' : 'link'" class="h-4 w-4 shrink-0" />
+							ERP link{{ linkState(linkEntry(erpDropdownProject, 'ERP')) === 'unset' ? " (not set)" : linkState(linkEntry(erpDropdownProject, 'ERP')) === 'locked' ? " (ask your Department Coordinator)" : "" }}
+						</button>
 						<a
 							href="#"
 							class="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition"

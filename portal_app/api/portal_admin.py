@@ -35,8 +35,16 @@ def _can_run_seed_via_portal() -> bool:
 	return bool(helper.get_portal_settings_dict().get("allow_portal_demo_seed"))
 
 
-# The five portal roles a login can be created with (see helper.ROLE_LABELS).
-ROLE_KEYS = ("super_admin", "department_admin", "team_lead", "team_member", "client_customer")
+# The portal roles a login can be created with (see helper.ROLE_LABELS). project_lead
+# is set per project, never at creation.
+ROLE_KEYS = (
+	"super_admin",
+	"department_admin",
+	"department_coordinator",
+	"team_lead",
+	"team_member",
+	"client_customer",
+)
 SUPER_ADMIN_ROLE = helper.SUPER_ADMIN_ROLE
 
 
@@ -59,6 +67,8 @@ def get_portal_admin_capabilities():
 		"can_assign_team_roles": can_manage_teams,
 		"can_assign_team_manager": can_manage_teams,
 		"can_reset_passwords": helper.has_portal_staff_project_access(),
+		# Change an existing user's role (change_user_role): Super Admin, Department Admin.
+		"can_change_roles": bool(helper.role_change_scope().get("kind")),
 		"can_manage_submission_types": submissions._can_manage_submission_types(),
 		"portal_role": helper.get_portal_role(),
 	}
@@ -68,9 +78,12 @@ def get_portal_admin_capabilities():
 def list_teams_for_picker():
 	"""Minimal {name, department_name} list for the team pickers (create user, roles)."""
 	helper.assert_manage_teams()
+	team_names = helper.portal_team_names()
+	if not team_names:
+		return []
 	return frappe.get_all(
 		"Department",
-		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
+		filters={"name": ["in", team_names]},
 		fields=["name", "department_name"],
 		order_by="department_name asc",
 	)
@@ -113,13 +126,14 @@ def create_portal_user(
 	is_super_admin=0,
 	team_lead_of=None,
 ):
-	"""Create a login with one of the five portal roles.
+	"""Create a login with one of the portal roles.
 
-	  super_admin       the whole portal (Frappe System Manager)
-	  department_admin  looks after one or more departments (`teams_json`)
-	  team_lead         leads `team`
-	  team_member       a team member, optionally on `team`
-	  client_customer   an external client contact of `portal_linked_customer`
+	  super_admin             the whole portal (Frappe System Manager)
+	  department_admin        looks after one or more departments (`teams_json`)
+	  department_coordinator  coordinates one or more departments (`teams_json`)
+	  team_lead               Team Manager of `team` (team_manager accepted too)
+	  team_member             a Project Architect, optionally on `team` (project_architect too)
+	  client_customer         an external client contact of `portal_linked_customer`
 	"""
 	if not _can_create_users():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
@@ -143,7 +157,7 @@ def create_portal_user(
 	if frappe.db.exists("User", email):
 		frappe.throw(_("User already exists"))
 
-	role_key = cstr(role).strip() or _legacy_role_key(roles_json, is_super_admin, team_lead_of)
+	role_key = helper.normalize_role_key(role) or _legacy_role_key(roles_json, is_super_admin, team_lead_of)
 	if role_key not in ROLE_KEYS:
 		frappe.throw(_("Pick a role for this person."))
 
@@ -168,8 +182,20 @@ def create_portal_user(
 			frappe.throw(_("Only a Super Admin can create a Department Admin."), frappe.PermissionError)
 		if not teams:
 			frappe.throw(_("Pick the department(s) this Department Admin will look after."))
+	if role_key == "department_coordinator":
+		if not teams:
+			frappe.throw(_("Pick the department(s) this Department Coordinator will coordinate."))
+		mine = set(helper.admin_department_names()) if helper.is_dept_admin() else set()
+		for t in teams:
+			if frappe.db.get_value("Department", t, "portal_unit") != "Department":
+				frappe.throw(_("{0} is not a portal department.").format(t))
+			if not helper.is_super_admin() and t not in mine:
+				frappe.throw(
+					_("Only a Super Admin or this department's Department Admin can create its Coordinator."),
+					frappe.PermissionError,
+				)
 	if role_key == "team_lead" and not team:
-		frappe.throw(_("Pick the team this Team Lead will lead."))
+		frappe.throw(_("Pick the team this Team Manager will manage."))
 
 	is_client = role_key == "client_customer"
 	if is_client:
@@ -243,6 +269,9 @@ def create_portal_user(
 		if role_key == "department_admin":
 			for t in teams:
 				teams_api.set_member_role(t, doc.name, "department_admin")
+		elif role_key == "department_coordinator":
+			for t in teams:
+				_add_designation(doc.name, "department_coordinator", t)
 		elif role_key == "team_lead":
 			teams_api.set_member_role(team, doc.name, "team_lead")
 		elif team:
@@ -295,6 +324,307 @@ def set_super_admin(user, enabled=1):
 	doc.flags.ignore_permissions = True
 	doc.save()
 	return {"ok": True, "user": user, "is_super_admin": enabled}
+
+
+# ---------------------------------------------------------------------------------------
+# R4: change an existing user's role
+# ---------------------------------------------------------------------------------------
+_UNIT_ROLES = ("department_admin", "department_coordinator", "team_lead")
+_ROW_FIELD = {
+	"department_admin": "portal_department_admins",
+	"department_coordinator": "portal_department_coordinators",
+}
+
+
+def _role_change_scope() -> dict:
+	"""The caller's authority in the role changer, or PermissionError."""
+	helper.assert_portal_user()
+	scope = helper.role_change_scope()
+	if not scope.get("kind"):
+		frappe.throw(_("You cannot change people's roles."), frappe.PermissionError)
+	return scope
+
+
+def _clean_role(role) -> str:
+	role = helper.normalize_role_key(role)
+	if role == "project_lead":
+		frappe.throw(_("Project Lead is set on each project (Project page → Project Lead)."))
+	if role not in helper.SETTABLE_ROLE_KEYS:
+		frappe.throw(_("Unknown role: {0}").format(role))
+	return role
+
+
+def _clean_unit(role, unit, caller_is_super):
+	"""The unit a role applies to: a Department unit for department_admin /
+	department_coordinator, a team for team_lead, none otherwise. Pending units are for
+	Super Admins only."""
+	if role not in _UNIT_ROLES:
+		return None
+	unit = cstr(unit).strip()
+	if not unit:
+		frappe.throw(_("Pick the department or team for this role."))
+	if not frappe.db.exists("Department", unit):
+		frappe.throw(_("Department or team not found: {0}").format(unit))
+	if role == "team_lead":
+		if unit not in helper.portal_team_names(include_pending=True):
+			frappe.throw(_("{0} is not a portal team.").format(unit))
+	elif frappe.db.get_value("Department", unit, "portal_unit") != "Department":
+		frappe.throw(_("{0} is not a portal department.").format(unit))
+	if not caller_is_super and unit in helper.pending_unit_names():
+		frappe.throw(
+			_("Only a Super Admin can assign people to a department that is not active yet."),
+			frappe.PermissionError,
+		)
+	return unit
+
+
+def _assert_may_assign(caller, user, role, unit, scope) -> None:
+	allowed = helper.assignable_roles_for(caller, user, scope)
+	if not allowed or role not in allowed or (unit and unit not in allowed[role]):
+		frappe.throw(_("You cannot give {0} this role.").format(user), frappe.PermissionError)
+
+
+def _assert_not_last_super_admin(user) -> None:
+	if not [u for u in _super_admin_names() if u != user]:
+		frappe.throw(_("This is the last Super Admin. Make someone else a Super Admin first."))
+
+
+def _save_user_roles(user, add=(), remove=()) -> None:
+	doc = frappe.get_doc("User", user)
+	have = {r.role for r in doc.roles}
+	changed = False
+	for role in remove:
+		for row in list(doc.roles):
+			if row.role == role:
+				doc.remove(row)
+				changed = True
+	for role in add:
+		if role not in have:
+			doc.append("roles", {"role": role})
+			changed = True
+	if changed:
+		doc.flags.ignore_permissions = True
+		doc.save()
+
+
+def _unit_rows(user) -> dict:
+	"""{unit: {"admin", "coordinator", "lead"}}: the Department rows naming this user,
+	pending units included."""
+	out: dict[str, set] = {}
+	for key, units in (
+		("admin", helper.admin_department_names(user, include_pending=True)),
+		("coordinator", helper.coordinator_department_names(user, include_pending=True)),
+		("lead", helper.led_department_names(user, include_pending=True)),
+	):
+		for unit in units:
+			out.setdefault(unit, set()).add(key)
+	return out
+
+
+def _drop_from_unit(unit, user, kinds) -> None:
+	"""Remove this user's admin / coordinator rows and Team Manager field on one unit.
+	Saved through the document, so the Department hook syncs the marker roles. Team
+	membership (ToDo) is never touched."""
+	doc = frappe.get_doc("Department", unit)
+	changed = False
+	if "lead" in kinds and doc.get("portal_team_lead") == user:
+		doc.portal_team_lead = None
+		changed = True
+	for kind, field in (("admin", "portal_department_admins"), ("coordinator", "portal_department_coordinators")):
+		if kind not in kinds:
+			continue
+		for row in list(doc.get(field) or []):
+			if row.user == user:
+				doc.remove(row)
+				changed = True
+	if changed:
+		doc.save(ignore_permissions=True)
+
+
+def _remove_designations(caller, user, scope) -> None:
+	"""keep_other_roles=0: take away every unit designation the caller controls. A Super
+	Admin controls all of them (pending ones included); a Department Admin the
+	coordinator / Team Manager designations inside their own units, and their own
+	Department Admin rows when they change themselves."""
+	rows = _unit_rows(user)
+	if scope["kind"] == "super_admin":
+		for unit, kinds in rows.items():
+			_drop_from_unit(unit, user, kinds)
+		return
+	units = set(scope["units"])
+	teams = set(scope["teams"])
+	for unit, kinds in rows.items():
+		mine = set()
+		if "coordinator" in kinds and unit in units:
+			mine.add("coordinator")
+		if "lead" in kinds and (unit in teams or unit in units):
+			mine.add("lead")
+		if "admin" in kinds and unit in units and user == caller:
+			mine.add("admin")
+		if mine:
+			_drop_from_unit(unit, user, mine)
+
+
+def _add_designation(user, role, unit=None) -> None:
+	"""Give one designation. Team Manager: the person joins the team (ToDo) if needed and
+	replaces the previous manager, who stays a member. Department Admin / Coordinator: a
+	row on the department, and the person is assigned to it if they are not in it yet."""
+	from portal_app.api import teams as teams_api
+
+	if role == "super_admin":
+		_save_user_roles(user, add=(helper.SUPER_ADMIN_ROLE, helper.TEAM_MEMBER_ROLE))
+		return
+	if role == "team_member":
+		if not helper.user_is_customer_portal_user(user):
+			_save_user_roles(user, add=(helper.TEAM_MEMBER_ROLE,))
+		return
+	if role == "team_lead":
+		if user not in teams_api._assigned_by_department([unit]).get(unit, []):
+			teams_api._assign_users_to_team(unit, [user])
+		doc = frappe.get_doc("Department", unit)
+		if doc.get("portal_team_lead") != user:
+			doc.portal_team_lead = user
+			doc.save(ignore_permissions=True)
+		return
+	field = _ROW_FIELD[role]
+	if user not in helper.unit_assigned_users(unit):
+		teams_api._assign_users_to_team(unit, [user])
+	doc = frappe.get_doc("Department", unit)
+	if user not in {r.user for r in doc.get(field) or []}:
+		doc.append(field, {"user": user})
+		doc.save(ignore_permissions=True)
+
+
+@frappe.whitelist(methods=["POST"])
+def change_user_role(user, role, unit=None, keep_other_roles=0):
+	"""Change an existing user's role from the portal (Org Chart, Admin page).
+
+	  * Super Admin: any enabled staff login (themselves included), any role, any unit.
+	  * Department Admin: the people of their own units (themselves included, never a
+	    Super Admin or another Department Admin): Department Coordinator of one of their
+	    departments, Team Manager of one of their teams, or Project Architect.
+	By default ("change") the designations the caller controls are removed first;
+	keep_other_roles=1 ("also make") only adds. The last Super Admin cannot be demoted.
+	Project teams, Project Leads, shares and team membership are never touched."""
+	from portal_app.api import teams as teams_api
+
+	scope = _role_change_scope()
+	caller = frappe.session.user
+	user = cstr(user).strip()
+	teams_api._assert_org_person(user)
+	role = _clean_role(role)
+	is_super = scope["kind"] == "super_admin"
+	unit = _clean_unit(role, unit, is_super)
+	_assert_may_assign(caller, user, role, unit, scope)
+
+	keep = cint(keep_other_roles)
+	drop_super_admin = (
+		not keep and is_super and role != "super_admin" and helper.SUPER_ADMIN_ROLE in frappe.get_roles(user)
+	)
+	if drop_super_admin:
+		_assert_not_last_super_admin(user)
+	if not keep:
+		_remove_designations(caller, user, scope)
+		if drop_super_admin:
+			_save_user_roles(user, remove=(helper.SUPER_ADMIN_ROLE,))
+	_add_designation(user, role, unit)
+	return {"ok": True, "user": user, "designations": helper.get_portal_designations(user)}
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_user_designation(user, role, unit=None):
+	"""Take one designation away (same authority as change_user_role). The last Super
+	Admin cannot be removed."""
+	from portal_app.api import teams as teams_api
+
+	scope = _role_change_scope()
+	caller = frappe.session.user
+	user = cstr(user).strip()
+	teams_api._assert_org_person(user)
+	role = _clean_role(role)
+	if role == "team_member":
+		frappe.throw(_("Project Architect is the base role. Change the role instead."))
+	unit = _clean_unit(role, unit, scope["kind"] == "super_admin")
+	# A Department Admin may not make themselves Coordinator, but may still step down.
+	self_step_down = (
+		scope["kind"] == "department_admin"
+		and user == caller
+		and role == "department_coordinator"
+		and unit in scope["departments"]
+	)
+	if not self_step_down:
+		_assert_may_assign(caller, user, role, unit, scope)
+	if role == "super_admin":
+		if helper.SUPER_ADMIN_ROLE in frappe.get_roles(user):
+			_assert_not_last_super_admin(user)
+			_save_user_roles(user, remove=(helper.SUPER_ADMIN_ROLE,))
+	else:
+		kind = {"department_admin": "admin", "department_coordinator": "coordinator", "team_lead": "lead"}[role]
+		_drop_from_unit(unit, user, {kind})
+	return {"ok": True, "user": user, "designations": helper.get_portal_designations(user)}
+
+
+def _unit_labels(names) -> dict:
+	names = list({n for n in names if n})
+	if not names:
+		return {}
+	return dict(
+		frappe.get_all("Department", filters={"name": ["in", names]}, fields=["name", "department_name"], as_list=True)
+	)
+
+
+@frappe.whitelist()
+def get_user_designations(user=None):
+	"""A user's designations and what the caller may set for them (the Change role
+	dialog). Your own are always readable. Read-only."""
+	helper.assert_portal_user()
+	caller = frappe.session.user
+	user = cstr(user).strip() or caller
+	scope = helper.role_change_scope(caller)
+	assignable = helper.assignable_roles_for(caller, user, scope) if scope.get("kind") else {}
+	if user != caller and not assignable:
+		frappe.throw(_("You cannot change this person's role."), frappe.PermissionError)
+	units = {u for unit_list in assignable.values() for u in unit_list}
+	return {
+		"user": user,
+		"full_name": frappe.db.get_value("User", user, "full_name") or user,
+		"designations": helper.get_portal_designations(user),
+		"assignable": assignable,
+		"unit_labels": _unit_labels(units),
+		"pending_units": sorted(helper.pending_unit_names() & units),
+	}
+
+
+@frappe.whitelist()
+def search_role_changeable_users(txt=""):
+	"""Logins whose role the caller may change (the Admin page's Change role tool)."""
+	scope = _role_change_scope()
+	caller = frappe.session.user
+	safe = cstr(txt).replace("%", "").replace("_", "").strip()[:100]
+	kwargs = dict(
+		filters=[["enabled", "=", 1], ["name", "not in", ["Guest", "Administrator"]]],
+		fields=["name", "full_name", "user_type"],
+		order_by="full_name asc",
+		limit_page_length=60,
+	)
+	if safe:
+		kwargs["or_filters"] = [
+			["name", "like", "%" + safe + "%"],
+			["full_name", "like", "%" + safe + "%"],
+		]
+	out = []
+	for r in frappe.get_all("User", **kwargs):
+		if helper.assignable_roles_for(caller, r.name, scope):
+			out.append(
+				{
+					"name": r.name,
+					"full_name": r.full_name or r.name,
+					"role_label": helper.ROLE_LABELS.get(helper.get_portal_role(r.name), ""),
+				}
+			)
+		if len(out) >= 20:
+			break
+	return out
 
 
 def _super_admin_names() -> list:
