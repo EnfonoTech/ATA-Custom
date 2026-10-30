@@ -62,10 +62,15 @@ def get_gantt_data(office=None, team=None):
 	for p in projects:
 		p["milestones"] = milestones_by_project.get(p["name"], [])
 
-	departments = frappe.get_all(
-		"Department",
-		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
-		fields=["name", "department_name", "portal_office"],
+	team_names = helper.portal_team_names()
+	departments = (
+		frappe.get_all(
+			"Department",
+			filters={"name": ["in", team_names]},
+			fields=["name", "department_name", "portal_office"],
+		)
+		if team_names
+		else []
 	)
 	if office and office != "ALL":
 		departments = [d for d in departments if d.portal_office == office]

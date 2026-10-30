@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { call, uploadFile } from "@/api";
 import { Button, TextInput, Password, FeatherIcon } from "frappe-ui";
+import { ROLE_LABELS } from "@/config/roles";
 
 const caps = ref({
 	can_create_users: false,
@@ -12,6 +13,7 @@ const caps = ref({
 	can_assign_team_roles: false,
 	can_reset_passwords: false,
 	can_manage_submission_types: false,
+	can_change_roles: false,
 });
 const loadingCaps = ref(true);
 
@@ -19,20 +21,29 @@ const email = ref("");
 const fullName = ref("");
 const password = ref("");
 
-// The five portal roles. Super Admin and Department Admin can only be handed out by a Super Admin.
+// The portal roles a login can be created with. Super Admin and Department Admin can only be
+// handed out by a Super Admin; a Department Coordinator by a Super Admin or the department's
+// own Department Admin. Project Lead is set on each project, never here.
 const ROLE_CHOICES = [
-	{ key: "super_admin", label: "Super Admin", needsSuper: true, hint: "Sees and changes everything in the portal and the whole ERP. Only a Super Admin can create one." },
-	{ key: "department_admin", label: "Department Admin", needsSuper: true, hint: "Looks after one or more departments: manages their people and projects, assigns and removes team members." },
-	{ key: "team_lead", label: "Team Lead", hint: "Leads a team and assigns its people to projects from the Org Chart." },
-	{ key: "team_member", label: "Team Member", hint: "Sees and works on the projects they are on, and nothing else." },
-	{ key: "client_customer", label: "Client Customer", hint: "An external client contact: sees only the projects of their customer and the client folder." },
+	{ key: "super_admin", label: ROLE_LABELS.super_admin, needsSuper: true, hint: "Sees and changes everything in the portal and the whole ERP. Only a Super Admin can create one." },
+	{ key: "department_admin", label: ROLE_LABELS.department_admin, needsSuper: true, hint: "Looks after one or more departments: manages their people and projects, assigns and removes team members." },
+	{ key: "department_coordinator", label: ROLE_LABELS.department_coordinator, needsRoleChanger: true, hint: "Allocates a department's projects to its teams, sets Project Leads and project links. Manages no people and sees no money." },
+	{ key: "team_lead", label: ROLE_LABELS.team_lead, hint: "Manages a team and assigns its people to projects from the Org Chart." },
+	{ key: "team_member", label: ROLE_LABELS.team_member, hint: "Sees and works on the projects they are on, and nothing else." },
+	{ key: "client_customer", label: ROLE_LABELS.client_customer, hint: "An external client contact: sees only the projects of their customer and the client folder." },
 ];
-const roleChoices = computed(() => ROLE_CHOICES.filter((r) => !r.needsSuper || caps.value.can_grant_super_admin));
+const roleChoices = computed(() =>
+	ROLE_CHOICES.filter(
+		(r) => (!r.needsSuper || caps.value.can_grant_super_admin) && (!r.needsRoleChanger || caps.value.can_change_roles),
+	),
+);
 const role = ref("team_member");
 const roleHint = computed(() => ROLE_CHOICES.find((r) => r.key === role.value)?.hint || "");
-const teamPick = ref(""); // Team Lead (required) / Team Member (optional)
+const teamPick = ref(""); // Team Manager (required) / Project Architect (optional)
 const deptAdminTeams = ref([]); // Department Admin: one or more departments
 const teamOptions = ref([]);
+const coordDepts = ref([]); // Department Coordinator: one or more portal departments
+const departmentOptions = ref([]); // portal departments the caller may use (Org Chart departments block)
 const portalLinkedCustomer = ref("");
 const portalLinkedCustomerLabel = ref("");
 const customerQ = ref("");
@@ -57,6 +68,24 @@ watch(role, (now, before) => {
 		clearLinkedCustomer();
 		sendWelcome.value = sendWelcomeBeforeClient;
 	}
+});
+
+function toggleCoordDept(name) {
+	coordDepts.value = coordDepts.value.includes(name)
+		? coordDepts.value.filter((x) => x !== name)
+		: [...coordDepts.value, name];
+}
+
+async function loadDepartmentOptions() {
+	try {
+		const chart = await call({ method: "portal_app.api.teams.get_org_chart" });
+		departmentOptions.value = (chart?.departments || []).filter((d) => d.name && d.can_edit);
+	} catch {
+		departmentOptions.value = [];
+	}
+}
+watch(role, (now) => {
+	if (now === "department_coordinator" && !departmentOptions.value.length) loadDepartmentOptions();
 });
 
 function toggleDeptAdminTeam(name) {
@@ -197,6 +226,7 @@ const canShow = computed(
 		caps.value.can_run_demo_seed ||
 		caps.value.can_edit_folder_template ||
 		caps.value.can_reset_passwords ||
+		caps.value.can_change_roles ||
 		caps.value.can_manage_submission_types,
 );
 
@@ -378,7 +408,11 @@ async function createUser() {
 		return;
 	}
 	if (role.value === "team_lead" && !teamPick.value) {
-		userErr.value = "Pick the team this Team Lead will lead.";
+		userErr.value = "Pick the team this Team Manager will manage.";
+		return;
+	}
+	if (role.value === "department_coordinator" && !coordDepts.value.length) {
+		userErr.value = "Pick at least one department for this Department Coordinator.";
 		return;
 	}
 	if (role.value === "department_admin" && !deptAdminTeams.value.length) {
@@ -406,7 +440,12 @@ async function createUser() {
 				send_welcome_email: sendWelcome.value ? 1 : 0,
 				portal_linked_customer: role.value === "client_customer" ? portalLinkedCustomer.value : undefined,
 				team: role.value === "team_lead" || role.value === "team_member" ? teamPick.value || undefined : undefined,
-				teams_json: role.value === "department_admin" ? JSON.stringify(deptAdminTeams.value) : undefined,
+				teams_json:
+					role.value === "department_admin"
+						? JSON.stringify(deptAdminTeams.value)
+						: role.value === "department_coordinator"
+							? JSON.stringify(coordDepts.value)
+							: undefined,
 			},
 		});
 		const who = res?.email || email.value.trim();
@@ -423,10 +462,116 @@ async function createUser() {
 		sendWelcome.value = false;
 		teamPick.value = "";
 		deptAdminTeams.value = [];
+		coordDepts.value = [];
 	} catch (e) {
 		userErr.value = apiErr(e);
 	} finally {
 		userBusy.value = false;
+	}
+}
+
+// ── Change a user's role (R4) ────────────────────────────────────────────────
+// Same rules as the Org Chart's Change role dialog: the server says who may be changed
+// (search_role_changeable_users) and to what (get_user_designations.assignable).
+const RC_ORDER = ["super_admin", "department_admin", "department_coordinator", "team_lead", "team_member"];
+const RC_UNIT_ROLES = ["department_admin", "department_coordinator", "team_lead"];
+const rcQ = ref("");
+const rcHits = ref([]);
+const rcData = ref(null);
+const rcRole = ref("");
+const rcUnit = ref("");
+const rcKeep = ref(false);
+const rcBusy = ref(false);
+const rcMsg = ref("");
+const rcErr = ref("");
+let rcTimer;
+const rcRoles = computed(() => RC_ORDER.filter((k) => rcData.value?.assignable && k in rcData.value.assignable));
+const rcNeedsUnit = computed(() => RC_UNIT_ROLES.includes(rcRole.value));
+const rcUnits = computed(() =>
+	(rcData.value?.assignable?.[rcRole.value] || []).map((u) => ({
+		value: u,
+		label: rcData.value?.unit_labels?.[u] || u,
+		pending: (rcData.value?.pending_units || []).includes(u),
+	})),
+);
+watch(rcRole, () => {
+	rcUnit.value = rcUnits.value.length === 1 ? rcUnits.value[0].value : "";
+});
+async function runRoleSearch() {
+	try {
+		rcHits.value =
+			(await call({ method: "portal_app.api.portal_admin.search_role_changeable_users", args: { txt: rcQ.value.trim() } })) || [];
+	} catch (e) {
+		rcHits.value = [];
+		rcErr.value = apiErr(e);
+	}
+}
+watch(rcQ, () => {
+	clearTimeout(rcTimer);
+	rcTimer = setTimeout(runRoleSearch, 250);
+});
+async function pickRoleTarget(u) {
+	rcQ.value = "";
+	rcHits.value = [];
+	rcRole.value = "";
+	rcUnit.value = "";
+	rcKeep.value = false;
+	rcMsg.value = "";
+	rcErr.value = "";
+	try {
+		rcData.value = await call({ method: "portal_app.api.portal_admin.get_user_designations", args: { user: u.name } });
+	} catch (e) {
+		rcData.value = null;
+		rcErr.value = apiErr(e);
+	}
+}
+function rcCanRemove(d) {
+	const a = rcData.value?.assignable || {};
+	if (!["super_admin", ...RC_UNIT_ROLES].includes(d.role) || !(d.role in a)) return false;
+	return d.role === "super_admin" || (a[d.role] || []).includes(d.unit);
+}
+async function submitRoleChange() {
+	if (!rcData.value || !rcRole.value || (rcNeedsUnit.value && !rcUnit.value)) return;
+	rcBusy.value = true;
+	rcMsg.value = "";
+	rcErr.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.portal_admin.change_user_role",
+			type: "POST",
+			args: {
+				user: rcData.value.user,
+				role: rcRole.value,
+				unit: rcNeedsUnit.value ? rcUnit.value : undefined,
+				keep_other_roles: rcKeep.value ? 1 : 0,
+			},
+		});
+		rcData.value = { ...rcData.value, designations: res?.designations || [] };
+		rcMsg.value = `${rcData.value.full_name || rcData.value.user} is now ${ROLE_LABELS[rcRole.value] || rcRole.value}.`;
+	} catch (e) {
+		rcErr.value = apiErr(e);
+	} finally {
+		rcBusy.value = false;
+	}
+}
+async function removeRoleDesignation(d) {
+	if (!rcData.value) return;
+	if (!confirm(`Remove ${d.label}${d.unit_label ? " of " + d.unit_label : ""} from ${rcData.value.full_name || rcData.value.user}?`)) return;
+	rcBusy.value = true;
+	rcMsg.value = "";
+	rcErr.value = "";
+	try {
+		const res = await call({
+			method: "portal_app.api.portal_admin.remove_user_designation",
+			type: "POST",
+			args: { user: rcData.value.user, role: d.role, unit: d.unit || undefined },
+		});
+		rcData.value = { ...rcData.value, designations: res?.designations || [] };
+		rcMsg.value = `${d.label} removed.`;
+	} catch (e) {
+		rcErr.value = apiErr(e);
+	} finally {
+		rcBusy.value = false;
 	}
 }
 
@@ -769,7 +914,7 @@ const totalCreated = computed(() =>
 					</div>
 					<div v-if="role === 'team_lead' || role === 'team_member'">
 						<label class="portal-section-title mb-1 block">
-							{{ role === "team_lead" ? "Team they lead" : "Team (optional)" }}
+							{{ role === "team_lead" ? "Team they manage" : "Team (optional)" }}
 						</label>
 						<select v-model="teamPick" class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
 							<option value="">{{ role === "team_lead" ? "Select a team…" : "— No team yet —" }}</option>
@@ -790,6 +935,20 @@ const totalCreated = computed(() =>
 							<span v-if="!teamOptions.length" class="text-xs text-[color:var(--portal-muted)]">No departments yet. Create a team in the Org Chart first.</span>
 						</div>
 					</div>
+					<div v-if="role === 'department_coordinator'">
+						<label class="portal-section-title mb-1 block">Departments they coordinate</label>
+						<div class="flex flex-wrap gap-2">
+							<label
+								v-for="d in departmentOptions"
+								:key="d.name"
+								class="flex cursor-pointer items-center gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-1.5 text-sm"
+							>
+								<input type="checkbox" :checked="coordDepts.includes(d.name)" @change="toggleCoordDept(d.name)" />
+								{{ d.label }}<span v-if="d.pending" class="text-xs text-[color:var(--portal-muted)]"> (not active yet)</span>
+							</label>
+							<span v-if="!departmentOptions.length" class="text-xs text-[color:var(--portal-muted)]">No departments you can use.</span>
+						</div>
+					</div>
 					<p v-if="role === 'super_admin'" class="text-xs text-amber-700">
 						Super Admin gives full access to the entire system (HR, Accounts, Stock — everything), not just the project portal.
 					</p>
@@ -808,6 +967,95 @@ const totalCreated = computed(() =>
 					>
 						Create user
 					</Button>
+				</div>
+
+				<!-- Change a user's role -->
+				<div v-if="caps.can_change_roles" class="portal-card-strong space-y-4 p-5">
+					<div class="flex items-center gap-2">
+						<div
+							class="flex h-9 w-9 items-center justify-center rounded-xl text-white"
+							style="background: linear-gradient(135deg, #0f766e 0%, #185fa5 100%);"
+						>
+							<FeatherIcon name="award" class="h-4 w-4" />
+						</div>
+						<div>
+							<h2 class="text-base font-semibold text-[color:var(--portal-text)]">Change a user's role</h2>
+							<p class="text-xs text-[color:var(--portal-muted)]">
+								Project teams and Project Leads stay as they are. Project Lead is set on each project.
+								You can also do it from a person in the Org Chart.
+							</p>
+						</div>
+					</div>
+					<div v-if="!rcData" class="space-y-2" @focusin="runRoleSearch">
+						<TextInput v-model="rcQ" class="w-full rounded-xl" placeholder="Search a person by name or email…" autocomplete="off" />
+						<div
+							v-if="rcHits.length"
+							class="max-h-48 overflow-auto rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] text-sm"
+						>
+							<button
+								v-for="u in rcHits"
+								:key="u.name"
+								type="button"
+								class="flex w-full items-center justify-between gap-2 border-b border-[color:var(--portal-border)] px-3 py-2 text-left last:border-0 hover:bg-white"
+								@click="pickRoleTarget(u)"
+							>
+								<span class="min-w-0">
+									<span class="font-medium text-[color:var(--portal-text)]">{{ u.full_name }}</span>
+									<span class="mt-0.5 block truncate text-xs text-[color:var(--portal-muted)]">{{ u.name }}</span>
+								</span>
+								<span v-if="u.role_label" class="portal-pill portal-pill-muted shrink-0">{{ u.role_label }}</span>
+							</button>
+						</div>
+					</div>
+					<div v-else class="space-y-3">
+						<div class="flex items-center justify-between gap-2 rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
+							<span class="min-w-0">
+								<span class="font-medium text-[color:var(--portal-text)]">{{ rcData.full_name }}</span>
+								<span class="ml-2 text-xs text-[color:var(--portal-muted)]">{{ rcData.user }}</span>
+							</span>
+							<button type="button" class="text-xs font-medium text-red-700 hover:underline" @click="rcData = null">Change</button>
+						</div>
+						<div class="flex flex-wrap gap-1.5">
+							<span
+								v-for="d in rcData.designations || []"
+								:key="d.role + '::' + (d.unit || '')"
+								class="portal-pill portal-pill-muted inline-flex items-center gap-1"
+								:class="d.pending ? 'opacity-60' : ''"
+							>
+								{{ d.label }}<template v-if="d.unit_label"> · {{ d.unit_label }}</template><template v-if="d.pending"> · not active yet</template>
+								<button v-if="rcCanRemove(d)" type="button" :title="'Remove ' + d.label" :disabled="rcBusy" @click="removeRoleDesignation(d)">
+									<FeatherIcon name="x" class="h-3 w-3" />
+								</button>
+							</span>
+						</div>
+						<select v-model="rcRole" class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm">
+							<option value="">New role…</option>
+							<option v-for="k in rcRoles" :key="k" :value="k">{{ ROLE_LABELS[k] || k }}</option>
+						</select>
+						<select
+							v-if="rcNeedsUnit"
+							v-model="rcUnit"
+							class="w-full rounded-xl border border-[color:var(--portal-border)] bg-[color:var(--portal-bg)] px-3 py-2 text-sm"
+						>
+							<option value="">{{ rcRole === "team_lead" ? "Team…" : "Department…" }}</option>
+							<option v-for="u in rcUnits" :key="u.value" :value="u.value">{{ u.label }}{{ u.pending ? " (not active yet)" : "" }}</option>
+						</select>
+						<label class="flex items-center gap-2 text-sm text-[color:var(--portal-text)]">
+							<input v-model="rcKeep" type="checkbox" class="rounded border-gray-300" />
+							Keep their other roles
+						</label>
+						<Button
+							variant="solid"
+							class="rounded-xl bg-black text-white"
+							:loading="rcBusy"
+							:disabled="!rcRole || (rcNeedsUnit && !rcUnit)"
+							@click="submitRoleChange"
+						>
+							{{ rcKeep ? "Add role" : "Change role" }}
+						</Button>
+					</div>
+					<p v-if="rcMsg" class="text-sm text-green-700">{{ rcMsg }}</p>
+					<p v-if="rcErr" class="text-sm text-red-600">{{ rcErr }}</p>
 				</div>
 
 				<!-- Reset a password -->

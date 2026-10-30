@@ -1,0 +1,76 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "hash",
+ "creation": "2026-10-30 00:00:00.000000",
+ "description": "A project's T Server, Autodesk Server or ERP link. Managed from the portal project page; the path and URL are only sent to people who may open them.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["project", "link_type", "copy_path", "open_url", "allowed_users"],
+ "fields": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "link_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Link Type",
+   "options": "T Server\nAutodesk Server\nERP",
+   "reqd": 1
+  },
+  {
+   "description": "Mapped-drive path (e.g. T:\\My Drive\\...). Shown with a Copy button.",
+   "fieldname": "copy_path",
+   "fieldtype": "Small Text",
+   "label": "Copy Path"
+  },
+  {
+   "description": "Google Drive / Autodesk / ERP URL (http:// or https://). Shown with an Open button.",
+   "fieldname": "open_url",
+   "fieldtype": "Small Text",
+   "label": "Open URL"
+  },
+  {
+   "description": "Who may open this link besides the project's link managers (Department Coordinator, Department Admin, Super Admin).",
+   "fieldname": "allowed_users",
+   "fieldtype": "Table",
+   "label": "Allowed Users",
+   "options": "Portal Project Link User"
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-10-30 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Project Portal",
+ "name": "Portal Project Link",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 0,
+   "export": 0,
+   "print": 0,
+   "read": 1,
+   "report": 0,
+   "role": "System Manager",
+   "share": 0,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

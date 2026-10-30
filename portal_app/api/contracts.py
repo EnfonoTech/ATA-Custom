@@ -43,7 +43,7 @@ def ensure_project_contracts_folder(project: str) -> str:
 
 @frappe.whitelist()
 def list_contract_files(project):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_records(project)
 	folder = ensure_project_contracts_folder(project)
 	return frappe.get_all(
 		"File",
@@ -55,7 +55,7 @@ def list_contract_files(project):
 
 @frappe.whitelist()
 def upload_contract_file(project):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_records(project)
 
 	upload = frappe.request.files.get("file")
 	if not upload:
@@ -86,7 +86,7 @@ def upload_contract_file(project):
 
 @frappe.whitelist()
 def delete_contract_file(project, file_name):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_records(project)
 	folder = ensure_project_contracts_folder(project)
 	doc = frappe.get_doc("File", file_name)
 	if doc.folder != folder or doc.is_folder:

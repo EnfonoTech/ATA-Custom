@@ -67,6 +67,8 @@ async function loadTeams() {
         id:          dept.name,
         name:        dept.department_name,
         office:      dept.office || "OTHER",
+        // Batch C: the department the team sits under (null for a legacy team)
+        parentUnit:  dept.parent_unit_label || "",
         memberCount: dept.member_count,
         canEdit:     !!dept.can_edit,
         memberList:     (dept.members || []).map(m => ({
@@ -362,7 +364,9 @@ async function removeMember(m) {
             </div>
             <div class="min-w-0">
               <div class="font-semibold text-sm truncate" style="color:var(--portal-text);">{{ team.name }}</div>
-              <div class="text-xs truncate" style="color:var(--portal-muted);">{{ team.memberCount }} members</div>
+              <div class="text-xs truncate" style="color:var(--portal-muted);">
+                <template v-if="team.parentUnit">{{ team.parentUnit }} · </template>{{ team.memberCount }} members
+              </div>
             </div>
           </div>
 
@@ -429,6 +433,7 @@ async function removeMember(m) {
                 <span class="text-xs font-semibold px-2 py-0.5 rounded-full" :style="officeBadgeStyle(selectedTeam.office)">
                   {{ selectedTeam.office }}
                 </span>
+                <span v-if="selectedTeam.parentUnit" class="text-xs" style="color:var(--portal-muted);">{{ selectedTeam.parentUnit }} ·</span>
                 <span class="text-xs" style="color:var(--portal-muted);">{{ selectedTeam.memberCount }} members</span>
               </div>
             </div>

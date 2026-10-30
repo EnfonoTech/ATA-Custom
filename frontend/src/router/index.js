@@ -174,7 +174,7 @@ router.beforeEach(async (to) => {
 		}
 	}
 
-	// The organisation chart: admins run it, Team Leads assign people to projects from it.
+	// The organisation chart: admins run it, Department Coordinators and Team Managers assign people to projects from it.
 	if (to.meta.requiresOrgChart && isAuthenticated) {
 		try {
 			const caps = await call({ method: "portal_app.api.projects.get_capabilities" });

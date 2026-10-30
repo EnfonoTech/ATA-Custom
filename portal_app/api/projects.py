@@ -45,13 +45,33 @@ def _project_fields():
 		"portal_project_server",
 		"portal_upcoming_milestone",
 		"portal_milestone_date",
-		"portal_server_t",
-		"portal_server_a",
-		"portal_server_c",
 	):
 		if meta.has_field(fn):
 			base.append(fn)
 	return base
+
+
+# Batch C: the old server-link fields moved to Portal Project Link (api/links.py), which
+# only sends a path / URL to someone who may open it. The columns still exist on the
+# Project (a not-yet-migrated site may still hold values), so they are removed from every
+# project payload.
+_LEGACY_LINK_FIELDS = ("portal_server_t", "portal_server_a", "portal_server_c")
+
+
+def _strip_legacy_links(project_dict: dict) -> None:
+	for key in _LEGACY_LINK_FIELDS:
+		project_dict.pop(key, None)
+
+
+def _attach_portal_links(projects: list) -> None:
+	"""portal_links on each project row (links.links_for_projects: two queries in all).
+	A client contact gets no key at all."""
+	from portal_app.api import links
+
+	by_project = links.links_for_projects([p["name"] for p in projects])
+	for p in projects:
+		if p["name"] in by_project:
+			p["portal_links"] = by_project[p["name"]]
 
 
 def _strip_internal_people(project_dict: dict) -> None:
@@ -104,6 +124,22 @@ def sync_office_from_team(doc, method=None):
 	doc.portal_office = frappe.db.get_value("Department", team, "portal_office") if team else None
 
 
+def _lead_assignable_project_names(user=None) -> set:
+	"""Projects a Department Coordinator (any project they can see) or a Team Manager (a
+	project of their teams) may name the Project Lead of (_assert_may_set_project_manager).
+	They are shown portal_project_manager on those, so they can see and clear it; it is a
+	login id, the money stays behind can_view_project_value."""
+	user = user or frappe.session.user
+	if helper.is_customer_only(user):
+		return set()
+	names = set()
+	if helper.is_dept_coordinator(user):
+		names |= set(helper.get_allowed_project_names(user))
+	if helper.is_team_manager(user):
+		names |= helper.get_scope_project_names(user)
+	return names
+
+
 def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
 	"""Re-sending the current Lead Architect is not a change; neither is a blank from a
 	caller who is never shown the field (list_projects strips it for non-staff).
@@ -113,78 +149,117 @@ def _drop_unchanged_project_manager(project: str, payload: dict) -> None:
 		return
 	new = cstr(payload.get("portal_project_manager")).strip() or None
 	current = frappe.db.get_value("Project", project, "portal_project_manager") or None
-	if new == current or (new is None and not helper.has_portal_staff_project_access()):
+	if new == current or (
+		new is None
+		and not helper.has_portal_staff_project_access()
+		and project not in _lead_assignable_project_names()
+	):
 		payload.pop("portal_project_manager")
 
 
 def _assert_may_set_project_manager(project: str, payload: dict) -> None:
-	"""Who may name (or clear) a project's Lead Architect.
+	"""Who may name (or clear) a project's Project Lead (portal_project_manager).
 
 	portal_project_manager is not a label: helper.can_view_project_value() shows a
 	project's money to the person it names. A Super Admin is unrestricted. A Department
 	Admin may name anyone else or clear it, but may not take the role over from somebody
-	else (that would be a way to unlock the project's money). Everyone else can only claim
-	an unassigned project for themselves.
+	else (that would be a way to unlock the project's money). A Department Coordinator
+	(any project they can see) and a Team Manager (a project of their teams) may name or
+	replace anyone who can see the project, or clear it, with the same rule about
+	themselves. Everyone else can only claim an unassigned project for themselves.
 	"""
 	if payload.get("portal_project_manager") is None:
 		return
 	new_pm = cstr(payload.get("portal_project_manager")).strip()
 	if new_pm and helper.is_customer_only(new_pm):
-		frappe.throw(_("A client contact cannot be the Lead Architect."), frappe.PermissionError)
+		frappe.throw(_("A client contact cannot be the Project Lead."), frappe.PermissionError)
 	if helper.is_super_admin():
 		return
+	user = frappe.session.user
 	current = frappe.db.get_value("Project", project, "portal_project_manager")
 	if helper.is_dept_admin():
-		if new_pm == frappe.session.user and current not in (None, "", frappe.session.user):
+		if new_pm == user and current not in (None, "", user):
 			frappe.throw(
-				_("Ask a Super Admin to make you the Lead Architect of a project somebody else leads."),
+				_("Ask a Super Admin to make you the Project Lead of a project somebody else leads."),
 				frappe.PermissionError,
 			)
 		return
-	if current not in (None, "", frappe.session.user):
+	if project in _lead_assignable_project_names(user):
+		if new_pm == user and current not in (None, "", user):
+			frappe.throw(
+				_("Ask a Super Admin to make you the Project Lead of a project somebody else leads."),
+				frappe.PermissionError,
+			)
+		if new_pm and project not in helper.get_allowed_project_names(new_pm):
+			frappe.throw(
+				_("{0} cannot see this project, so cannot be its Project Lead.").format(new_pm),
+				frappe.PermissionError,
+			)
+		return
+	if current not in (None, "", user):
 		frappe.throw(
-			_("Only a Super Admin or a Department Admin can reassign the Lead Architect."),
+			_("Only a Super Admin, a Department Admin, a Department Coordinator or a Team Manager can reassign the Project Lead."),
 			frappe.PermissionError,
 		)
 
 
+def _team_scope(units) -> set:
+	"""The teams of these units (helper.teams_of_unit for each)."""
+	out = set()
+	for unit in units or []:
+		out |= set(helper.teams_of_unit(unit))
+	return out
+
+
 def _assert_may_set_team(project: str, payload: dict) -> None:
-	"""Which department a project belongs to (portal_team). A Super Admin is unrestricted;
-	a Department Admin may only put it under a department they administer (or clear it),
-	so they cannot push a project into somebody else's scope; the project's own Lead
-	Architect keeps the right they always had."""
+	"""Which team a project belongs to (portal_team). A Super Admin is unrestricted; a
+	Department Admin may only put it under a team of a unit they administer (or clear it),
+	so they cannot push a project into somebody else's scope; a Department Coordinator the
+	same with their departments' teams, and may only take it from a team of theirs (or
+	from no team); the project's own Project Lead keeps the right they always had. A Team
+	Manager does not re-allocate projects."""
 	if payload.get("portal_team") is None:
 		return
 	team = cstr(payload.get("portal_team")).strip()
 	if helper.is_super_admin():
 		return
-	if helper.is_dept_admin():
-		if not team or team in helper.admin_department_names():
+	is_admin = helper.is_dept_admin()
+	is_coordinator = helper.is_dept_coordinator()
+	if is_admin and (not team or team in _team_scope(helper.admin_department_names())):
+		return
+	if is_coordinator:
+		mine = _team_scope(helper.coordinator_department_names())
+		current = frappe.db.get_value("Project", project, "portal_team")
+		if (not current or current in mine) and (not team or team in mine):
 			return
+	if is_admin or is_coordinator:
 		frappe.throw(
-			_("A Department Admin can only put a project under a department they administer."),
+			_("You can only put a project under one of your own department's teams."),
 			frappe.PermissionError,
 		)
 	manager = frappe.db.get_value("Project", project, "portal_project_manager")
 	if manager != frappe.session.user:
 		frappe.throw(
-			_("Only a Super Admin, a Department Admin, or the project's own Lead Architect can set its team."),
+			_("Only a Super Admin, a Department Admin, a Department Coordinator, or the project's own Project Lead can set its team."),
 			frappe.PermissionError,
 		)
 
 
 def _assert_may_set_team_on_create(team: str) -> None:
-	"""A new project has no Lead Architect yet, so only the department rule of
-	_assert_may_set_team applies: a Super Admin may pick any team, a Department Admin
-	one they administer. The team also decides who can see the project."""
+	"""A new project has no Project Lead yet, so only the department rule of
+	_assert_may_set_team applies: a Super Admin may pick any team, a Department Admin or
+	Department Coordinator one of their units' teams. The team also decides who can see
+	the project."""
 	if not frappe.db.exists("Department", team):
 		frappe.throw(_("Unknown team: {0}").format(team))
 	if helper.is_super_admin():
 		return
-	if helper.is_dept_admin() and team in helper.admin_department_names():
+	if helper.is_dept_admin() and team in _team_scope(helper.admin_department_names()):
+		return
+	if helper.is_dept_coordinator() and team in _team_scope(helper.coordinator_department_names()):
 		return
 	frappe.throw(
-		_("Only a Super Admin, or a Department Admin of that team, can create a project under it."),
+		_("Only a Super Admin, or a Department Admin or Department Coordinator of that team, can create a project under it."),
 		frappe.PermissionError,
 	)
 
@@ -244,14 +319,19 @@ def list_projects(sort_by="modified", sort_order="desc", status=None, customer=N
 		limit_page_length=500,
 	)
 	if not helper.has_portal_staff_project_access():
+		lead_assignable = _lead_assignable_project_names()
 		for p in projects:
 			p.pop("estimated_costing", None)
-			p.pop("portal_project_manager", None)
+			if p["name"] not in lead_assignable:
+				p.pop("portal_project_manager", None)
 	else:
 		value_visible = set(helper.get_value_visible_project_names())
 		for p in projects:
 			if p["name"] not in value_visible:
 				p.pop("estimated_costing", None)
+	for p in projects:
+		_strip_legacy_links(p)
+	_attach_portal_links(projects)
 	return {"projects": projects}
 
 
@@ -267,12 +347,20 @@ def get_project(name):
 			if df.fieldtype == "Currency":
 				out.pop(df.fieldname, None)
 		out.pop("per_gross_margin", None)
-	if not helper.has_portal_staff_project_access():
+	if not helper.has_portal_staff_project_access() and name not in _lead_assignable_project_names():
 		out.pop("portal_project_manager", None)
+	_strip_legacy_links(out)
 	if helper.is_customer_only():
 		# Team roster (login emails) and audit users are internal.
 		_strip_internal_people(out)
-	return {"project": out}
+		return {"project": out}
+	from portal_app.api import links
+
+	return {
+		"project": out,
+		"portal_links": links.links_for_projects([name]).get(name, []),
+		"can_manage_links": 1 if helper.can_manage_project_links(name) else 0,
+	}
 
 
 @frappe.whitelist()
@@ -381,8 +469,9 @@ def project_dashboard(name):
 				project_data.pop(df.fieldname, None)
 		# Not a Currency field, but a derived percentage of cost — still reveals margin.
 		project_data.pop("per_gross_margin", None)
-	if not helper.has_portal_staff_project_access():
+	if not helper.has_portal_staff_project_access() and name not in _lead_assignable_project_names():
 		project_data.pop("portal_project_manager", None)
+	_strip_legacy_links(project_data)
 	if helper.is_customer_only():
 		_strip_internal_people(project_data)
 
@@ -391,7 +480,7 @@ def project_dashboard(name):
 	if helper.is_customer_only():
 		tasks = []
 
-	return {
+	out = {
 		"project": project_data,
 		"tasks": tasks,
 		"kanban_stage": stage,
@@ -402,6 +491,12 @@ def project_dashboard(name):
 			"can_remove": helper.can_remove_project_members(name),
 		},
 	}
+	if not helper.is_customer_only():
+		from portal_app.api import links
+
+		out["portal_links"] = links.links_for_projects([name]).get(name, [])
+		out["can_manage_links"] = 1 if helper.can_manage_project_links(name) else 0
+	return out
 
 
 @frappe.whitelist()
@@ -429,6 +524,9 @@ def kanban_board():
 		for p in projects:
 			if p["name"] not in value_visible:
 				p.pop("estimated_costing", None)
+	for p in projects:
+		_strip_legacy_links(p)
+	_attach_portal_links(projects)
 
 	buckets = {}
 	for p in projects:
@@ -491,9 +589,6 @@ def update_project(project, **kwargs):
 		"portal_team",
 		"portal_kanban_stage",
 		"portal_phase",
-		"portal_server_t",
-		"portal_server_a",
-		"portal_server_c",
 		"portal_upcoming_milestone",
 		"portal_milestone_date",
 	):
@@ -613,11 +708,17 @@ def get_portal_users():
 	caller already tolerates an empty list, so non-staff get [] instead of an error.
 	"""
 	helper.assert_portal_user()
+	filters = {"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]}
 	if not helper.has_portal_staff_project_access():
-		return []
+		# A Department Coordinator or Team Manager sets the Project Lead too, so they
+		# need the picker; they get internal staff only, never client logins.
+		# update_project still decides who may be set on which project.
+		if not (helper.coordinator_department_names() or helper.led_department_names()):
+			return []
+		filters["user_type"] = "System User"
 	users = frappe.get_all(
 		"User",
-		filters={"enabled": 1, "name": ["not in", ["Guest", "Administrator"]]},
+		filters=filters,
 		fields=["name", "full_name"],
 		order_by="full_name asc",
 		limit_page_length=200,
@@ -906,20 +1007,33 @@ def get_capabilities():
 		if not effective_customer_portal
 		else False,
 		# A Super Admin manages every team, a Department Admin the departments they
-		# administer (see teams.get_org_chart for the per-team flags). A Team Lead does not
+		# administer (see teams.get_org_chart for the per-team flags). A Team Manager does not
 		# manage the team itself: they assign people to projects from the Org Chart.
 		"can_manage_teams": helper.can_manage_teams() and not effective_customer_portal,
 		# Super Admin / Department Admin only: management-level views (Dashboard, Teams)
-		# and management-level fields (estimated cost, Lead Architect).
+		# and management-level fields (estimated cost, Project Lead).
 		"is_manager": staff_project_access,
 		"portal_user": frappe.session.user,
-		# The five portal roles: super_admin, department_admin, team_lead, team_member,
+		# The portal role keys: super_admin, department_admin, department_coordinator,
+		# team_lead (Team Manager), project_lead, team_member (Project Architect),
 		# client_customer (see helper.get_portal_role).
 		"portal_role": portal_role,
 		"portal_role_label": helper.ROLE_LABELS.get(portal_role, ""),
 		"is_super_admin": helper.is_super_admin(),
 		"is_department_admin": helper.is_dept_admin(),
 		"is_team_lead": helper.is_team_lead(),
+		"is_team_manager": helper.is_team_manager(),
+		"is_department_coordinator": helper.is_dept_coordinator(),
+		"coordinator_department_names": helper.coordinator_department_names() if helper.is_dept_coordinator() else [],
+		"portal_role_designations": helper.get_portal_designations(),
+		# Who may name / replace a project's Project Lead (see _assert_may_set_project_manager).
+		"can_assign_project_lead": not effective_customer_portal
+		and (
+			helper.is_super_admin()
+			or helper.is_dept_admin()
+			or helper.is_dept_coordinator()
+			or helper.is_team_manager()
+		),
 		"can_view_org_chart": helper.can_view_org_chart(),
 		# Change someone's role from the Org Chart (the server decides, team by team).
 		"can_edit_org_roles": staff_project_access and not effective_customer_portal,
@@ -1034,12 +1148,12 @@ def _apply_project_team(project: str, new_users: list[str]) -> dict:
 	removed = [u for u in current if u not in new_users]
 	if added and not helper.can_add_project_members(project):
 		frappe.throw(
-			_("You cannot add people to this project's team. Ask a Team Lead, Department Admin or Super Admin."),
+			_("You cannot add people to this project's team. Ask a Team Manager, Department Coordinator, Department Admin or Super Admin."),
 			frappe.PermissionError,
 		)
 	if removed and not helper.can_remove_project_members(project):
 		frappe.throw(
-			_("Only a Super Admin or a Department Admin can remove people from a project team."),
+			_("Only a Super Admin, a Department Admin or a Department Coordinator can remove people from a project team."),
 			frappe.PermissionError,
 		)
 	if not added and not removed:
@@ -1069,7 +1183,7 @@ def add_project_members(project, users):
 	"Assign to project" in the Org Chart and "Add from org chart" on the project page use."""
 	if not helper.can_add_project_members(project):
 		frappe.throw(
-			_("You cannot add people to this project's team. Ask a Team Lead, Department Admin or Super Admin."),
+			_("You cannot add people to this project's team. Ask a Team Manager, Department Coordinator, Department Admin or Super Admin."),
 			frappe.PermissionError,
 		)
 	doc = frappe.get_doc("Project", project)
@@ -1085,7 +1199,7 @@ def remove_project_members(project, users):
 	re-validated, so someone whose login was since disabled can still be taken off."""
 	if not helper.can_remove_project_members(project):
 		frappe.throw(
-			_("Only a Super Admin or a Department Admin can remove people from a project team."),
+			_("Only a Super Admin, a Department Admin or a Department Coordinator can remove people from a project team."),
 			frappe.PermissionError,
 		)
 	if isinstance(users, str):
@@ -1108,8 +1222,8 @@ def get_assignable_projects(for_user=None):
 	allowed = helper.get_allowed_project_names()
 	if not allowed:
 		return []
-	if not (helper.is_super_admin() or helper.is_dept_admin() or helper.is_team_lead()):
-		# A Lead Architect may add people to the projects they lead.
+	if not (helper.is_super_admin() or helper.is_dept_admin() or helper.is_dept_coordinator() or helper.is_team_lead()):
+		# A Project Lead may add people to the projects they lead.
 		allowed = [n for n in allowed if frappe.db.get_value("Project", n, "portal_project_manager") == frappe.session.user]
 		if not allowed:
 			return []
@@ -2226,6 +2340,6 @@ def calendar_events(search=None, type_filter="all", project=None):
 
 @frappe.whitelist()
 def delete_project(project):
-	helper.assert_manage_project(project)
+	helper.assert_manage_project_records(project)
 	frappe.delete_doc("Project", project, ignore_permissions=True)
 	return {"deleted": project}

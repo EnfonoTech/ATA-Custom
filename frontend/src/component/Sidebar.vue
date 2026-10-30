@@ -1,8 +1,9 @@
 <script setup>
-import { ref, inject, computed, onMounted } from "vue";
+import { ref, inject, computed, onMounted, onBeforeUnmount } from "vue";
 import { FeatherIcon } from "frappe-ui";
 import { useRoute, useRouter } from "vue-router";
 import { call } from "@/api";
+import { LOGOS } from "@/config/roles";
 
 const route  = useRoute();
 const router = useRouter();
@@ -14,6 +15,22 @@ const collapsed        = computed(() => !!sidebarCollapsed.value);
 const portalAdmin        = inject("portalAdmin", ref({ can_create_users: false, can_run_demo_seed: false }));
 const portalCapabilities = inject("portalCapabilities", ref({}));
 const portalSettings     = inject("portalSettings", ref({ company_logo: "", company_name: "", company_tagline: "", logo_width: 0, logo_height: 0 }));
+
+// Bundled ATA logo (R6): horizontal when expanded, stacked when collapsed; the white
+// files in dark mode (<html> without data-mode="light", see Header.vue), black in light.
+const isLightMode = ref(document.documentElement.getAttribute("data-mode") === "light");
+let modeObserver = null;
+onMounted(() => {
+	modeObserver = new MutationObserver(() => {
+		isLightMode.value = document.documentElement.getAttribute("data-mode") === "light";
+	});
+	modeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-mode"] });
+});
+onBeforeUnmount(() => modeObserver?.disconnect());
+const ataLogo = computed(() => {
+	if (collapsed.value) return isLightMode.value ? LOGOS.stacked : LOGOS.stackedWhite;
+	return isLightMode.value ? LOGOS.horizontal : LOGOS.horizontalWhite;
+});
 
 
 // ── Team Structure — fetched from backend ─────────────────────────────────
@@ -39,9 +56,10 @@ onMounted(async () => {
 
 const isManager = computed(() => !!portalCapabilities.value?.is_manager);
 // True for a Super Admin or a Department Admin (see helper.can_manage_teams): the Teams
-// page edits teams, which a Team Lead does not do.
+// page edits teams, which a Team Manager does not do.
 const canManageTeams = computed(() => !!portalCapabilities.value?.can_manage_teams);
-// The org chart is also for Team Leads (they assign people from it to projects).
+// The org chart is also for Department Coordinators and Team Managers (they assign
+// people from it to projects).
 const canViewOrgChart = computed(() => !!portalCapabilities.value?.can_view_org_chart);
 
 const groups = computed(() => {
@@ -61,7 +79,8 @@ const groups = computed(() => {
 		{ name: "Contracts", path: "/contracts",  icon: "lock"         },
 	];
 	// Management-level views are for Super Admins and Department Admins. The Org Chart is
-	// the exception: a Team Lead opens it too, to assign their team's people to projects.
+	// the exception: a Department Coordinator / Team Manager opens it too, to assign
+	// their people to projects.
 	const managerOnlyPaths = new Set(["/dashboard", "/org-chart", "/teams", "/contracts"]);
 	// Hidden from client contacts. These are internal working tools, not things a
 	// client is here to do:
@@ -182,23 +201,15 @@ function navigate(item) {
 					} : {}"
 					:title="portalSettings.company_name || 'Portal'"
 				/>
-				<!-- AMA lettermark fallback -->
-				<svg
+				<!-- Bundled ATA logo (ata-logo-*.png); company_logo above overrides it -->
+				<img
 					v-else
-					viewBox="0 0 74 62"
-					fill="currentColor"
-					class="shrink-0 text-[color:var(--portal-text)]"
-					:class="collapsed ? 'h-8 w-auto' : 'h-10 w-auto'"
-					aria-hidden="true"
-				>
-					<polygon points="0,4 11,4 19,58 8,58"/>
-					<polygon points="23,27 30,27 35,58 28,58"/>
-					<polygon points="36,30 41,30 45,58 40,58"/>
-					<polygon points="46,22 54,22 59,58 51,58"/>
-					<circle cx="65" cy="9" r="4.8" fill="none" stroke="currentColor" stroke-width="1"/>
-					<text x="65" y="11.8" font-size="4.6" text-anchor="middle" font-weight="700" font-family="sans-serif">TM</text>
-				</svg>
-				<div v-if="!collapsed" class="min-w-0">
+					:src="ataLogo"
+					class="shrink-0 object-contain"
+					:style="collapsed ? { maxHeight: '36px', maxWidth: '48px', width: 'auto', height: 'auto' } : { maxHeight: '40px', maxWidth: '150px', width: 'auto', height: 'auto' }"
+					alt="Abdulmohsin Altheyab &amp; Partners — Architects"
+				/>
+				<div v-if="!collapsed && portalSettings.company_logo" class="min-w-0">
 					<h2 class="truncate text-xs font-bold leading-tight tracking-wide text-[color:var(--portal-text)]" style="letter-spacing:0.06em;">
 						{{ portalSettings.company_name || "ABDULMOHSIN ALTHEYAB" }}
 					</h2>

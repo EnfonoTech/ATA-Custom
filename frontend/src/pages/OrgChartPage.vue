@@ -2,13 +2,15 @@
 import { ref, computed, onMounted, watch, inject } from "vue";
 import { FeatherIcon } from "frappe-ui";
 import { call } from "@/api";
+import { ROLE_LABELS } from "@/config/roles";
 
 const loading    = ref(true);
 const loadError  = ref("");
-const chart      = ref({ me: {}, super_admins: [], teams: [], unassigned: [] });
+const chart      = ref({ me: {}, super_admins: [], departments: [], teams: [], unassigned: [] });
 const me         = computed(() => chart.value.me || {});
 
 const portalCapabilities = inject("portalCapabilities", ref({}));
+const refreshPortalCapabilities = inject("refreshPortalCapabilities", async () => {});
 
 function apiErr(e) {
   const body = e?.responseBody;
@@ -25,10 +27,12 @@ function apiErr(e) {
 
 // ── Roles ─────────────────────────────────────────────────────────────────────
 const ROLE_STYLE = {
-  super_admin:      { label: "Super Admin",      color: "#7c3aed", bg: "rgba(124,58,237,0.12)", border: "rgba(124,58,237,0.32)" },
-  department_admin: { label: "Department Admin", color: "#b45309", bg: "rgba(180,83,9,0.12)",   border: "rgba(180,83,9,0.32)" },
-  team_lead:        { label: "Team Lead",        color: "#185FA5", bg: "rgba(24,95,165,0.12)",  border: "rgba(24,95,165,0.32)" },
-  team_member:      { label: "Team Member",      color: "#6b7280", bg: "rgba(128,128,128,0.10)", border: "rgba(128,128,128,0.25)" },
+  super_admin:            { label: ROLE_LABELS.super_admin,            color: "#7c3aed", bg: "rgba(124,58,237,0.12)", border: "rgba(124,58,237,0.32)" },
+  department_admin:       { label: ROLE_LABELS.department_admin,       color: "#b45309", bg: "rgba(180,83,9,0.12)",   border: "rgba(180,83,9,0.32)" },
+  department_coordinator: { label: ROLE_LABELS.department_coordinator, color: "#0f766e", bg: "rgba(15,118,110,0.12)", border: "rgba(15,118,110,0.32)" },
+  team_lead:              { label: ROLE_LABELS.team_lead,              color: "#185FA5", bg: "rgba(24,95,165,0.12)",  border: "rgba(24,95,165,0.32)" },
+  project_lead:           { label: ROLE_LABELS.project_lead,           color: "#9B2335", bg: "rgba(155,35,53,0.10)",  border: "rgba(155,35,53,0.28)" },
+  team_member:            { label: ROLE_LABELS.team_member,            color: "#6b7280", bg: "rgba(128,128,128,0.10)", border: "rgba(128,128,128,0.25)" },
 };
 function roleStyle(role) {
   const r = ROLE_STYLE[role] || ROLE_STYLE.team_member;
@@ -118,6 +122,28 @@ const headcount = computed(() => {
 // ── Selected person ───────────────────────────────────────────────────────────
 const SUPER = "__super__";
 const NONE = "__none__";
+const DEPT = "__dept__:"; // + department name: a person on the department itself
+
+// Departments above the teams (get_org_chart.departments). Each keeps its teams, filtered
+// like the flat list; an older server without the block shows one group of every team.
+const visibleDepartments = computed(() => {
+  const shownTeams = new Map(visibleTeams.value.map(t => [t.name, t]));
+  const groups = chart.value.departments?.length
+    ? chart.value.departments
+    : [{ name: "", label: "Teams", pending: false, admins: [], coordinators: [], members: [], teams: chart.value.teams || [], can_edit: false }];
+  return groups
+    .map(d => {
+      const people = [...(d.admins || []), ...(d.coordinators || []), ...(d.members || [])].filter(matches);
+      const teams = (d.teams || []).map(t => shownTeams.get(t.name)).filter(Boolean);
+      return { ...d, people, shownTeams: teams };
+    })
+    .filter(d => {
+      if (officeFilter.value !== "ALL") return d.shownTeams.length > 0;
+      if (search.value.trim()) return d.shownTeams.length > 0 || d.people.length > 0;
+      return true;
+    });
+});
+function deptOf(name) { return (chart.value.departments || []).find(d => d.name === name) || null; }
 
 const selectedTeam = computed(() => (chart.value.teams || []).find(t => t.name === selected.value?.team) || null);
 const selectedPerson = computed(() => {
@@ -130,6 +156,11 @@ const selectedPerson = computed(() => {
   if (sel.team === NONE) {
     const p = (chart.value.unassigned || []).find(x => x.user === sel.user);
     return p ? { ...p, role: p.is_super_admin ? "super_admin" : "team_member", team_role: null, can_change_role: false, can_remove: false } : null;
+  }
+  if (sel.team.startsWith(DEPT)) {
+    const d = deptOf(sel.team.slice(DEPT.length));
+    const p = d && [...(d.admins || []), ...(d.coordinators || []), ...(d.members || [])].find(x => x.user === sel.user);
+    return p ? { ...p, role: p.is_super_admin ? "super_admin" : p.unit_role, team_role: null, can_change_role: false, can_remove: false } : null;
   }
   return (selectedTeam.value?.members || []).find(m => m.user === sel.user) || null;
 });
@@ -155,8 +186,8 @@ watch(selectedPerson, (p) => {
 
 const roleOptions = computed(() => {
   const opts = [
-    { value: "team_member", label: "Team Member" },
-    { value: "team_lead", label: "Team Lead" },
+    { value: "team_member", label: ROLE_LABELS.team_member },
+    { value: "team_lead", label: ROLE_LABELS.team_lead },
   ];
   if (me.value.can_grant_admin) opts.push({ value: "department_admin", label: "Department Admin" });
   return opts;
@@ -200,12 +231,12 @@ async function removeFromTeam() {
 async function removeAsLead() {
   const p = selectedPerson.value, t = selectedTeam.value;
   if (!p || !t) return;
-  if (!window.confirm(`Remove ${p.full_name} as Team Lead of ${t.department_name}? They stay on the team as a Team Member.`)) return;
+  if (!window.confirm(`Remove ${p.full_name} as ${ROLE_LABELS.team_lead} of ${t.department_name}? They stay on the team as a ${ROLE_LABELS.team_member}.`)) return;
   panelBusy.value = true; panelMsg.value = ""; panelErr.value = "";
   try {
     await call({ method: "portal_app.api.teams.remove_team_lead", type: "POST", args: { team: t.name } });
     await loadChart();
-    panelMsg.value = `${p.full_name} is now a Team Member.`;
+    panelMsg.value = `${p.full_name} is now a ${ROLE_LABELS.team_member}.`;
   } catch (e) {
     panelErr.value = apiErr(e);
   } finally {
@@ -433,6 +464,104 @@ async function addMember(user) {
     addingMemberName.value = null;
   }
 }
+// ── Change role (R4) ──────────────────────────────────────────────────────────
+// The server decides who may change whom (portal_admin.change_user_role): this dialog
+// only offers what get_user_designations says is assignable.
+const ROLE_ORDER = ["super_admin", "department_admin", "department_coordinator", "team_lead", "team_member"];
+const UNIT_ROLES = ["department_admin", "department_coordinator", "team_lead"];
+const showRoleDialog = ref(false);
+const roleData       = ref(null);
+const roleLoading    = ref(false);
+const roleBusy       = ref(false);
+const roleErr        = ref("");
+const roleMsg        = ref("");
+const roleKey        = ref("");
+const roleUnit       = ref("");
+const keepOthers     = ref(false);
+const assignableRoleKeys = computed(() => ROLE_ORDER.filter(k => roleData.value?.assignable && k in roleData.value.assignable));
+const roleNeedsUnit  = computed(() => UNIT_ROLES.includes(roleKey.value));
+const unitOptions    = computed(() =>
+  (roleData.value?.assignable?.[roleKey.value] || []).map(u => ({
+    value: u,
+    label: roleData.value?.unit_labels?.[u] || u,
+    pending: (roleData.value?.pending_units || []).includes(u),
+  }))
+);
+watch(roleKey, () => { roleUnit.value = unitOptions.value.length === 1 ? unitOptions.value[0].value : ""; });
+
+async function openRoleDialog() {
+  const p = selectedPerson.value;
+  if (!p) return;
+  roleErr.value = ""; roleMsg.value = ""; roleData.value = null; roleKey.value = ""; roleUnit.value = ""; keepOthers.value = false;
+  showRoleDialog.value = true;
+  roleLoading.value = true;
+  try {
+    roleData.value = await call({ method: "portal_app.api.portal_admin.get_user_designations", args: { user: p.user } });
+  } catch (e) {
+    roleErr.value = apiErr(e);
+  } finally {
+    roleLoading.value = false;
+  }
+}
+function closeRoleDialog() { showRoleDialog.value = false; }
+function canRemoveDesignation(d) {
+  const a = roleData.value?.assignable || {};
+  if (!["super_admin", ...UNIT_ROLES].includes(d.role) || !(d.role in a)) return false;
+  return d.role === "super_admin" || (a[d.role] || []).includes(d.unit);
+}
+async function afterRoleChange(res, message) {
+  if (roleData.value && res?.designations) roleData.value = { ...roleData.value, designations: res.designations };
+  roleMsg.value = message;
+  await loadChart();
+  if (roleData.value?.user === me.value.user) await refreshPortalCapabilities();
+}
+async function submitRoleChange() {
+  const user = roleData.value?.user;
+  if (!user || !roleKey.value || (roleNeedsUnit.value && !roleUnit.value)) return;
+  roleBusy.value = true; roleErr.value = ""; roleMsg.value = "";
+  try {
+    const res = await call({
+      method: "portal_app.api.portal_admin.change_user_role",
+      type: "POST",
+      args: { user, role: roleKey.value, unit: roleNeedsUnit.value ? roleUnit.value : undefined, keep_other_roles: keepOthers.value ? 1 : 0 },
+    });
+    await afterRoleChange(res, `${roleData.value.full_name || user} is now ${ROLE_LABELS[roleKey.value] || roleKey.value}.`);
+  } catch (e) {
+    roleErr.value = apiErr(e);
+  } finally {
+    roleBusy.value = false;
+  }
+}
+async function removeDesignation(d) {
+  const user = roleData.value?.user;
+  if (!user) return;
+  if (!window.confirm(`Remove ${d.label}${d.unit_label ? " of " + d.unit_label : ""} from ${roleData.value.full_name || user}?`)) return;
+  roleBusy.value = true; roleErr.value = ""; roleMsg.value = "";
+  try {
+    const res = await call({
+      method: "portal_app.api.portal_admin.remove_user_designation",
+      type: "POST",
+      args: { user, role: d.role, unit: d.unit || undefined },
+    });
+    await afterRoleChange(res, `${d.label} removed.`);
+  } catch (e) {
+    roleErr.value = apiErr(e);
+  } finally {
+    roleBusy.value = false;
+  }
+}
+
+// ── Pending departments (Super Admin): activate ───────────────────────────────
+async function activateDepartment(dept) {
+  if (!window.confirm(`Activate ${dept.label}? Its Department Admins, Coordinators and Team Managers get their roles now.`)) return;
+  try {
+    await call({ method: "portal_app.api.teams.set_department_pending", type: "POST", args: { department: dept.name, pending: 0 } });
+    await loadChart();
+  } catch (e) {
+    loadError.value = apiErr(e);
+  }
+}
+
 async function addMemberGroup(group) {
   if (!managingTeam.value) return;
   addingMemberName.value = `group:${group.name}`; addMemberError.value = "";
@@ -456,7 +585,7 @@ async function addMemberGroup(group) {
       <div>
         <h1 class="text-xl font-bold mb-1" style="color:var(--portal-text);">Organization Chart</h1>
         <p class="text-sm" style="color:var(--portal-muted);">
-          {{ totalPeople }} people · {{ (chart.teams || []).length }} teams · You are
+          {{ totalPeople }} people · {{ (chart.departments || []).filter(d => d.name).length }} departments · {{ (chart.teams || []).length }} teams · You are
           <strong style="color:var(--portal-text);">{{ me.role_label || "—" }}</strong>
         </p>
       </div>
@@ -468,11 +597,11 @@ async function addMemberGroup(group) {
     <p v-if="me.can_edit_any_team || me.can_grant_admin" class="mb-4 text-xs rounded-xl px-4 py-3"
        style="background:var(--portal-surface);border:1px solid var(--portal-border);color:var(--portal-muted);">
       Click a person to change their role, remove them from the team, assign them to projects or reset their password.
-      <template v-if="!me.can_grant_admin"> You can manage the teams you are a Department Admin of.</template>
+      <template v-if="!me.can_grant_admin"> You can manage the teams of the department you are a Department Admin of.</template>
     </p>
     <p v-else class="mb-4 text-xs rounded-xl px-4 py-3"
        style="background:var(--portal-surface);border:1px solid var(--portal-border);color:var(--portal-muted);">
-      As a Team Lead you can click anyone to assign them to your team's projects.
+      As a {{ me.role === "department_coordinator" ? "Department Coordinator" : "Team Manager" }} you can click anyone to assign them to your projects.
     </p>
 
     <div v-if="loading" class="flex items-center gap-2 text-sm" style="color:var(--portal-muted);">
@@ -527,9 +656,45 @@ async function addMemberGroup(group) {
             </div>
           </div>
 
+          <!-- Departments, each with its people and its teams -->
+          <div
+            v-for="dept in visibleDepartments" :key="'dept::' + dept.name"
+            class="rounded-2xl p-3 space-y-3"
+            :class="dept.pending ? 'opacity-60' : ''"
+            style="background:var(--portal-surface-alt);border:1px solid var(--portal-border);"
+          >
+            <div class="flex flex-wrap items-center gap-2 px-1">
+              <FeatherIcon name="layers" class="h-4 w-4" style="color:var(--portal-accent);" />
+              <span class="text-sm font-bold" style="color:var(--portal-text);">{{ dept.label }}</span>
+              <span v-if="dept.pending" class="text-[9px] font-semibold px-2 py-0.5 rounded-full" style="background:rgba(128,128,128,0.15);color:var(--portal-muted);">Not active yet</span>
+              <span class="text-xs" style="color:var(--portal-muted);">{{ (dept.teams || []).length }} team{{ (dept.teams || []).length === 1 ? "" : "s" }}</span>
+              <button
+                v-if="dept.pending && me.is_super_admin"
+                class="ml-auto portal-btn portal-btn-primary text-xs"
+                @click.stop="activateDepartment(dept)"
+              >Activate</button>
+            </div>
+            <div v-if="dept.people.length" class="space-y-1.5">
+              <div
+                v-for="p in dept.people" :key="dept.name + '::' + p.unit_role + '::' + p.user"
+                class="flex items-center gap-3 rounded-xl p-2.5 cursor-pointer transition"
+                :style="selected && selected.team === DEPT + dept.name && selected.user === p.user
+                  ? 'background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.4);'
+                  : 'background:var(--portal-surface);border:1px solid var(--portal-border);'"
+                @click="selectPerson(DEPT + dept.name, p.user)"
+              >
+                <div class="h-9 w-9 rounded-xl flex items-center justify-center text-white text-xs font-bold flex-shrink-0" :style="{ background: (ROLE_STYLE[p.unit_role] || ROLE_STYLE.team_member).color }">{{ initials(p.full_name) }}</div>
+                <div class="min-w-0 flex-1">
+                  <p class="text-xs font-semibold truncate" style="color:var(--portal-text);">{{ p.full_name }}</p>
+                  <p class="text-[10px] truncate" style="color:var(--portal-muted);">{{ p.user }} · {{ p.project_count }} project{{ p.project_count === 1 ? "" : "s" }}</p>
+                </div>
+                <span v-if="p.is_super_admin" class="text-[9px] font-semibold px-2 py-0.5 rounded-full" :style="roleStyle('super_admin')">{{ roleLabel('super_admin') }}</span>
+                <span class="text-[9px] font-semibold px-2 py-0.5 rounded-full" :style="roleStyle(p.unit_role)">{{ roleLabel(p.unit_role) }}</span>
+              </div>
+            </div>
           <!-- Teams -->
           <div
-            v-for="team in visibleTeams" :key="team.name"
+            v-for="team in dept.shownTeams" :key="team.name"
             class="rounded-2xl p-4"
             style="background:var(--portal-surface);border:1px solid var(--portal-border);"
           >
@@ -576,7 +741,8 @@ async function addMemberGroup(group) {
               <p v-if="!team.shown.length" class="text-xs py-2" style="color:var(--portal-muted);">No people in this team yet.</p>
             </div>
           </div>
-          <p v-if="!visibleTeams.length" class="text-sm text-center py-8" style="color:var(--portal-muted);">No teams or people match.</p>
+          </div>
+          <p v-if="!visibleDepartments.length" class="text-sm text-center py-8" style="color:var(--portal-muted);">No teams or people match.</p>
 
           <!-- Not in a team (admins only) -->
           <div v-if="visibleUnassigned.length" class="rounded-2xl p-4" style="background:var(--portal-surface);border:1px dashed var(--portal-border);">
@@ -633,7 +799,7 @@ async function addMemberGroup(group) {
                     {{ panelBusy ? "Saving…" : "Save" }}
                   </button>
                 </div>
-                <p class="text-[11px] mt-1.5" style="color:var(--portal-muted);">A team has one Team Lead; choosing a new one makes the previous lead a Team Member.</p>
+                <p class="text-[11px] mt-1.5" style="color:var(--portal-muted);">A team has one {{ ROLE_LABELS.team_lead }}; choosing a new one makes the previous one a {{ ROLE_LABELS.team_member }}.</p>
               </div>
               <p v-else-if="selectedTeam && selectedPerson.team_role === 'department_admin'" class="mt-4 text-[11px]" style="color:var(--portal-muted);">
                 Only a Super Admin can change a Department Admin.
@@ -653,6 +819,9 @@ async function addMemberGroup(group) {
 
               <!-- Actions -->
               <div class="mt-5 pt-4 space-y-2" style="border-top:1px solid var(--portal-border);">
+                <button v-if="me.can_change_roles" class="portal-btn portal-btn-ghost w-full flex items-center justify-center gap-2" @click="openRoleDialog">
+                  <FeatherIcon name="award" class="h-4 w-4" /> Change role…
+                </button>
                 <button v-if="me.can_assign_to_projects" class="portal-btn portal-btn-ghost w-full flex items-center justify-center gap-2" @click="openAssign">
                   <FeatherIcon name="briefcase" class="h-4 w-4" /> Assign to project…
                 </button>
@@ -660,7 +829,7 @@ async function addMemberGroup(group) {
                   <FeatherIcon name="key" class="h-4 w-4" /> Reset password…
                 </button>
                 <button v-if="selectedTeam && selectedPerson.team_role === 'team_lead' && selectedPerson.can_remove" class="portal-btn portal-btn-ghost w-full flex items-center justify-center gap-2" :disabled="panelBusy" @click="removeAsLead">
-                  <FeatherIcon name="user-minus" class="h-4 w-4" /> Remove as Team Lead
+                  <FeatherIcon name="user-minus" class="h-4 w-4" /> Remove as {{ ROLE_LABELS.team_lead }}
                 </button>
                 <button v-if="selectedTeam && selectedPerson.can_remove" class="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition hover:bg-red-50" style="color:#dc2626;border:1px solid rgba(220,38,38,0.35);" :disabled="panelBusy" @click="removeFromTeam">
                   <FeatherIcon name="user-x" class="h-4 w-4" /> Remove from team
@@ -696,6 +865,78 @@ async function addMemberGroup(group) {
       </div>
     </template>
   </div>
+
+  <!-- Change role -->
+  <Teleport to="body">
+    <div v-if="showRoleDialog" class="fixed inset-0 z-[60] flex items-center justify-center p-4" style="background:rgba(0,0,0,0.55);" @click.self="closeRoleDialog">
+      <div class="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" style="background:var(--portal-surface);">
+        <div class="flex items-center justify-between px-6 py-5 border-b border-[color:var(--portal-border)]">
+          <div>
+            <h2 class="text-lg font-bold" style="color:var(--portal-text);">Change role</h2>
+            <p class="text-xs mt-0.5" style="color:var(--portal-muted);">{{ roleData?.full_name || selectedPerson?.full_name }} · project teams and Project Leads are not changed.</p>
+          </div>
+          <button class="h-8 w-8 rounded-full flex items-center justify-center transition hover:bg-[color:var(--portal-surface-alt)]" @click="closeRoleDialog">
+            <FeatherIcon name="x" class="h-4 w-4" style="color:var(--portal-muted);"/>
+          </button>
+        </div>
+        <div class="px-6 py-5 space-y-4">
+          <p v-if="roleLoading" class="text-xs text-center py-4" style="color:var(--portal-muted);">Loading…</p>
+          <template v-else-if="roleData">
+            <div>
+              <p class="text-[10px] font-semibold uppercase tracking-wider mb-2" style="color:var(--portal-muted);">Current roles</p>
+              <div class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="d in roleData.designations || []" :key="d.role + '::' + (d.unit || '')"
+                  class="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                  :class="d.pending ? 'opacity-60' : ''"
+                  :style="roleStyle(d.role)"
+                >
+                  {{ d.label }}<template v-if="d.unit_label"> · {{ d.unit_label }}</template><template v-if="d.count"> ({{ d.count }})</template><template v-if="d.pending"> · not active yet</template>
+                  <button v-if="canRemoveDesignation(d)" type="button" class="ml-0.5" :title="'Remove ' + d.label" :disabled="roleBusy" @click="removeDesignation(d)">
+                    <FeatherIcon name="x" class="h-3 w-3" />
+                  </button>
+                </span>
+                <span v-if="!(roleData.designations || []).length" class="text-xs" style="color:var(--portal-muted);">No portal role.</span>
+              </div>
+            </div>
+            <template v-if="assignableRoleKeys.length">
+              <div>
+                <label class="text-xs font-semibold mb-1.5 block" style="color:var(--portal-muted);">New role</label>
+                <select v-model="roleKey" class="portal-input w-full" :disabled="roleBusy">
+                  <option value="">— Select —</option>
+                  <option v-for="k in assignableRoleKeys" :key="k" :value="k">{{ ROLE_LABELS[k] || k }}</option>
+                </select>
+              </div>
+              <div v-if="roleNeedsUnit">
+                <label class="text-xs font-semibold mb-1.5 block" style="color:var(--portal-muted);">{{ roleKey === "team_lead" ? "Team" : "Department" }}</label>
+                <select v-model="roleUnit" class="portal-input w-full" :disabled="roleBusy">
+                  <option value="">— Select —</option>
+                  <option v-for="u in unitOptions" :key="u.value" :value="u.value">{{ u.label }}{{ u.pending ? " (not active yet)" : "" }}</option>
+                </select>
+              </div>
+              <label class="flex items-center gap-2 text-sm cursor-pointer" style="color:var(--portal-text);">
+                <input v-model="keepOthers" type="checkbox" />
+                Keep their other roles
+              </label>
+              <p class="text-[11px]" style="color:var(--portal-muted);">Project Lead is set on each project (Project page → Project Lead).</p>
+            </template>
+            <p v-else class="text-xs" style="color:var(--portal-muted);">You cannot change this person's role.</p>
+          </template>
+          <p v-if="roleMsg" class="text-xs text-green-700">{{ roleMsg }}</p>
+          <p v-if="roleErr" class="text-xs text-red-600">{{ roleErr }}</p>
+        </div>
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-[color:var(--portal-border)]">
+          <button class="portal-btn portal-btn-ghost" @click="closeRoleDialog">Close</button>
+          <button
+            v-if="assignableRoleKeys.length"
+            class="portal-btn portal-btn-primary"
+            :disabled="roleBusy || !roleKey || (roleNeedsUnit && !roleUnit)"
+            @click="submitRoleChange"
+          >{{ roleBusy ? "Saving…" : keepOthers ? "Add role" : "Change role" }}</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 
   <!-- Assign to project -->
   <Teleport to="body">

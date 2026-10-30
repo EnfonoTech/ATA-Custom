@@ -20,11 +20,8 @@ def execute():
 	helper.ensure_portal_customer_role()
 	helper.ensure_portal_roles()
 
-	teams = frappe.get_all(
-		"Department",
-		filters={"parent_department": "All Departments", "portal_office": ["!=", ""]},
-		pluck="name",
-	)
+	# Batch C: the teams as the portal defines them now (they may sit under a department).
+	teams = helper.portal_team_names()
 
 	def _holds(user, role):
 		return bool(frappe.db.exists("Has Role", {"parent": user, "parenttype": "User", "role": role}))
